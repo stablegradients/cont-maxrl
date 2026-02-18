@@ -229,11 +229,46 @@ def try_parse_scalar(text: str) -> float | None:
         return None
 
 
-def outputs_match(actual: Any, expected: Any, float_tol: float = 1e-6) -> bool:
-    """Robust but conservative output matching for APPS-style answers."""
-    if isinstance(expected, (list, tuple)):
-        return any(outputs_match(actual, candidate, float_tol=float_tol) for candidate in expected)
+def _parse_literal_like(value: Any) -> Any | None:
+    if isinstance(value, (list, tuple, dict, int, float, bool)) or value is None:
+        return value
+    if not isinstance(value, str):
+        return None
 
+    stripped = value.strip()
+    if not stripped:
+        return ""
+
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            return parser(stripped)
+        except Exception:
+            continue
+    return None
+
+
+def _canonicalize_literal(value: Any) -> Any:
+    if isinstance(value, tuple):
+        return [_canonicalize_literal(item) for item in value]
+    if isinstance(value, list):
+        return [_canonicalize_literal(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _canonicalize_literal(item) for key, item in value.items()}
+    return value
+
+
+def _looks_like_string_alternatives(expected: Any) -> bool:
+    if not isinstance(expected, (list, tuple)) or len(expected) == 0:
+        return False
+    return all(isinstance(candidate, str) for candidate in expected)
+
+
+def outputs_match(actual: Any, expected: Any, float_tol: float = 1e-6) -> bool:
+    """Robust output matching for APPS-style answers.
+
+    Non-string sequences are compared structurally as literal outputs.
+    Lists/tuples of strings are treated as multiple acceptable outputs.
+    """
     actual_norm = normalize_output(actual)
     expected_norm = normalize_output(expected)
 
@@ -248,10 +283,15 @@ def outputs_match(actual: Any, expected: Any, float_tol: float = 1e-6) -> bool:
     if actual_num is not None and expected_num is not None:
         return abs(actual_num - expected_num) <= float_tol
 
-    # If both are parseable literals (lists/dicts/tuples), compare structure.
-    try:
-        actual_obj = ast.literal_eval(actual_norm)
-        expected_obj = ast.literal_eval(expected_norm)
-        return actual_obj == expected_obj
-    except Exception:
-        return False
+    # If both are parseable literals (lists/dicts/tuples), compare structure first.
+    actual_obj = _parse_literal_like(actual_norm)
+    expected_obj = _parse_literal_like(expected)
+    if actual_obj is not None and expected_obj is not None:
+        if _canonicalize_literal(actual_obj) == _canonicalize_literal(expected_obj):
+            return True
+
+    # APPS sometimes encodes multiple acceptable outputs as a list of strings.
+    if _looks_like_string_alternatives(expected):
+        return any(outputs_match(actual, candidate, float_tol=float_tol) for candidate in expected)
+
+    return False

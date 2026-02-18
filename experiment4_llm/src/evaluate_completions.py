@@ -57,6 +57,7 @@ def _evaluate_completion_row(
         )
     )
 
+    # pass@k uses solved/unsolved per problem, so binary pass means all tests passed.
     binary_pass = int(reward >= (1.0 - config.pass_tolerance))
     return {
         "model": str(row.get("model", "unknown")),

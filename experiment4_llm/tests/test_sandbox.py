@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from experiment4_llm.src.sandbox import SandboxLimits, execute_in_sandbox
+from experiment4_llm.src.sandbox import execute_in_sandbox, outputs_match
 
 
 class SandboxTests(unittest.TestCase):
@@ -61,6 +61,14 @@ def add(a, b):
         self.assertFalse(result.timed_out)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), "7")
+
+    def test_outputs_match_literal_list(self) -> None:
+        self.assertTrue(outputs_match("[1, 2, 3]\n", [1, 2, 3]))
+        self.assertFalse(outputs_match("1\n", [1, 2, 3]))
+
+    def test_outputs_match_string_alternatives(self) -> None:
+        self.assertTrue(outputs_match("accepted\n", ["ok", "accepted"]))
+        self.assertFalse(outputs_match("wrong\n", ["ok", "accepted"]))
 
 
 if __name__ == "__main__":

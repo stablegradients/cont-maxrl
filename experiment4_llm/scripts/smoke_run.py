@@ -154,6 +154,28 @@ def run_eval_smoke(output_dir: Path) -> Path:
     with summary_json.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
 
+    training_rows = []
+    for group_idx, group_size in enumerate(group_sizes):
+        for method_idx, method in enumerate(methods):
+            for step in (50, 100, 150):
+                pass1 = np.clip(0.08 + 0.015 * method_idx + 0.0008 * step + 0.01 * group_idx, 0.0, 1.0)
+                pass10 = np.clip(0.18 + 0.02 * method_idx + 0.0012 * step + 0.015 * group_idx, 0.0, 1.0)
+                training_rows.append(
+                    {
+                        "model": "qwen_1.5b_smoke",
+                        "method": method,
+                        "seed": 42,
+                        "group_size": group_size,
+                        "global_step": step,
+                        "pass_at_k": {"1": float(pass1), "10": float(pass10)},
+                    }
+                )
+
+    training_jsonl = output_dir / "training_metrics_smoke.jsonl"
+    with training_jsonl.open("w", encoding="utf-8") as handle:
+        for row in training_rows:
+            handle.write(json.dumps(row) + "\n")
+
     # Exercise figure script CLI as well.
     fig_script = Path(__file__).resolve().parent / "generate_figures.py"
     subprocess.check_call(
@@ -164,10 +186,14 @@ def run_eval_smoke(output_dir: Path) -> Path:
             str(summary_json),
             "--problem-results-jsonl",
             str(input_jsonl),
+            "--training-metrics-jsonl",
+            str(training_jsonl),
             "--output-dir",
             str(output_dir),
         ]
     )
+    assert (output_dir / "figB_training_curves_qwen_1.5b_smoke_g4.png").exists()
+    assert (output_dir / "figB_training_curves_qwen_1.5b_smoke_g16.png").exists()
 
     return summary_json
 

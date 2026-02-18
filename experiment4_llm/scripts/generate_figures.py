@@ -31,7 +31,7 @@ def load_summary(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
-def load_problem_rows(path: Path) -> list[dict[str, Any]]:
+def load_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -40,6 +40,10 @@ def load_problem_rows(path: Path) -> list[dict[str, Any]]:
                 continue
             rows.append(json.loads(line))
     return rows
+
+
+def load_problem_rows(path: Path) -> list[dict[str, Any]]:
+    return load_jsonl_rows(path)
 
 
 def _normalize_group_size(value: Any) -> int | None:
@@ -305,6 +309,191 @@ def plot_reward_histograms(
         plt.close()
 
 
+def _normalize_pass_metric(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except Exception:
+        return None
+
+    if not np.isfinite(out):
+        return None
+    if out > 1.0 and out <= 100.0:
+        out = out / 100.0
+    return float(np.clip(out, 0.0, 1.0))
+
+
+def _extract_pass_metric_from_mapping(mapping: dict[str, Any], k: int) -> float | None:
+    k_str = str(int(k))
+    direct_keys = (
+        f"pass_at_{k_str}",
+        f"pass@{k_str}",
+        f"pass_{k_str}",
+        f"pass{k_str}",
+    )
+
+    for key in direct_keys:
+        if key in mapping:
+            val = _normalize_pass_metric(mapping[key])
+            if val is not None:
+                return val
+
+    pass_map = mapping.get("pass_at_k")
+    if isinstance(pass_map, dict):
+        if k_str in pass_map:
+            val = _normalize_pass_metric(pass_map[k_str])
+            if val is not None:
+                return val
+        if int(k_str) in pass_map:
+            val = _normalize_pass_metric(pass_map[int(k_str)])
+            if val is not None:
+                return val
+
+    return None
+
+
+def _extract_pass_metric(row: dict[str, Any], k: int) -> float | None:
+    direct = _extract_pass_metric_from_mapping(row, k)
+    if direct is not None:
+        return direct
+
+    for key in ("metrics", "eval", "evaluation", "validation", "val", "test"):
+        nested = row.get(key)
+        if isinstance(nested, dict):
+            val = _extract_pass_metric_from_mapping(nested, k)
+            if val is not None:
+                return val
+    return None
+
+
+def _extract_step(row: dict[str, Any]) -> int | None:
+    for key in ("step", "global_step", "train_step", "iteration", "iter"):
+        if key not in row:
+            continue
+        try:
+            return int(row[key])
+        except Exception:
+            continue
+    return None
+
+
+def plot_training_curves(
+    training_rows: list[dict[str, Any]],
+    output_dir: Path,
+) -> None:
+    grouped: dict[
+        tuple[str, int | None],
+        dict[str, dict[int, dict[str, list[float]]]],
+    ] = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {"pass1": [], "pass10": []})))
+
+    for row in training_rows:
+        step = _extract_step(row)
+        if step is None:
+            continue
+
+        pass1 = _extract_pass_metric(row, 1)
+        pass10 = _extract_pass_metric(row, 10)
+        if pass1 is None and pass10 is None:
+            continue
+
+        model = str(row.get("model", "unknown"))
+        method = normalize_method_key(str(row.get("method", "unknown")))
+        group_size = _normalize_group_size(row.get("group_size"))
+        bucket = grouped[(model, group_size)][method][step]
+        if pass1 is not None:
+            bucket["pass1"].append(pass1)
+        if pass10 is not None:
+            bucket["pass10"].append(pass10)
+
+    for (model, group_size), by_method in grouped.items():
+        fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.8), sharex=False, sharey=False)
+        plotted_any = False
+
+        for method in sorted(by_method.keys(), key=_method_order_key):
+            style = METHOD_STYLES.get(method, {"label": method, "color": None})
+            label = str(style["label"])
+            color = style["color"]
+
+            step_data = by_method[method]
+            steps_sorted = sorted(step_data.keys())
+
+            xs1 = []
+            y1 = []
+            y1_std = []
+            xs10 = []
+            y10 = []
+            y10_std = []
+
+            for step in steps_sorted:
+                vals1 = np.array(step_data[step]["pass1"], dtype=float)
+                if vals1.size > 0:
+                    xs1.append(step)
+                    y1.append(float(vals1.mean()) * 100.0)
+                    y1_std.append(float(vals1.std(ddof=0)) * 100.0)
+
+                vals10 = np.array(step_data[step]["pass10"], dtype=float)
+                if vals10.size > 0:
+                    xs10.append(step)
+                    y10.append(float(vals10.mean()) * 100.0)
+                    y10_std.append(float(vals10.std(ddof=0)) * 100.0)
+
+            if xs1:
+                x = np.array(xs1, dtype=int)
+                y = np.array(y1, dtype=float)
+                y_std = np.array(y1_std, dtype=float)
+                axes[0].plot(x, y, marker="o", linewidth=2, label=label, color=color)
+                axes[0].fill_between(
+                    x,
+                    np.clip(y - y_std, 0.0, 100.0),
+                    np.clip(y + y_std, 0.0, 100.0),
+                    alpha=0.15,
+                    color=color,
+                )
+                plotted_any = True
+
+            if xs10:
+                x = np.array(xs10, dtype=int)
+                y = np.array(y10, dtype=float)
+                y_std = np.array(y10_std, dtype=float)
+                axes[1].plot(x, y, marker="o", linewidth=2, label=label, color=color)
+                axes[1].fill_between(
+                    x,
+                    np.clip(y - y_std, 0.0, 100.0),
+                    np.clip(y + y_std, 0.0, 100.0),
+                    alpha=0.15,
+                    color=color,
+                )
+                plotted_any = True
+
+        if not plotted_any:
+            plt.close(fig)
+            continue
+
+        title_group = f", G={group_size}" if group_size is not None else ""
+        fig.suptitle(f"figB: training curves ({model}{title_group})")
+
+        axes[0].set_xlabel("Step")
+        axes[0].set_ylabel("pass@1 (%)")
+        axes[0].grid(True, alpha=0.25)
+        handles, labels = axes[0].get_legend_handles_labels()
+        if handles:
+            axes[0].legend(handles, labels)
+
+        axes[1].set_xlabel("Step")
+        axes[1].set_ylabel("pass@10 (%)")
+        axes[1].grid(True, alpha=0.25)
+        handles, labels = axes[1].get_legend_handles_labels()
+        if handles:
+            axes[1].legend(handles, labels)
+
+        fig.tight_layout()
+        output_path = (
+            output_dir
+            / f"figB_training_curves_{model.replace('/', '_')}_{_group_size_tag(group_size)}.png"
+        )
+        fig.savefig(output_path, dpi=200)
+        plt.close(fig)
+
+
 def plot_scaling_pass10(
     agg: dict[str, dict[int | None, dict[str, dict[str, Any]]]],
     output_dir: Path,
@@ -401,13 +590,24 @@ def write_aggregate_table(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate Experiment 4 figures from evaluation outputs.")
+    parser = argparse.ArgumentParser(
+        description="Generate Experiment 4 figures (A/B/C/D/E) from evaluation outputs."
+    )
     parser.add_argument("--metrics-summary", type=Path, required=True)
     parser.add_argument(
         "--problem-results-jsonl",
         type=Path,
         default=None,
         help="Optional problem-level JSONL containing continuous_rewards for reward histograms",
+    )
+    parser.add_argument(
+        "--training-metrics-jsonl",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSONL with per-step metrics. Supported fields include step/global_step "
+            "and pass@1/pass@10 (or pass_at_k with keys 1 and 10)."
+        ),
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
@@ -443,6 +643,11 @@ def main() -> None:
         problem_rows = load_problem_rows(args.problem_results_jsonl)
         if problem_rows:
             plot_reward_histograms(problem_rows, output_dir=args.output_dir)
+
+    if args.training_metrics_jsonl is not None and args.training_metrics_jsonl.exists():
+        training_rows = load_jsonl_rows(args.training_metrics_jsonl)
+        if training_rows:
+            plot_training_curves(training_rows=training_rows, output_dir=args.output_dir)
 
     plot_scaling_pass10(agg, output_dir=args.output_dir)
     write_aggregate_table(agg, output_dir=args.output_dir)

@@ -25,6 +25,7 @@ run_one() {
 }
 
 methods_all=(grpo maxrl_unnorm maxrl_norm reinforce)
+# 32B sweep intentionally excludes REINFORCE to match the Experiment 4 matrix.
 methods_large=(grpo maxrl_unnorm maxrl_norm)
 groups_small=(4 16 32)
 groups_large=(16 32)

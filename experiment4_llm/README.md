@@ -14,6 +14,8 @@ This directory implements the core software needed to run the Experiment 4 speci
 ## Directory Layout
 
 - `configs/`: Training templates for Qwen2.5-Coder 1.5B, 7B, 32B.
+  - 1.5B/7B include `grpo`, `maxrl_unnorm`, `maxrl_norm`, `reinforce`.
+  - 32B intentionally includes `grpo`, `maxrl_unnorm`, `maxrl_norm` only.
 - `src/advantages.py`: Advantage functions and grouping helpers.
 - `src/sandbox.py`: Best-effort local sandbox runner (timeout + memory caps).
 - `src/reward_function.py`: Continuous reward implementation.
@@ -68,6 +70,8 @@ chmod +x experiment4_llm/scripts/run_sweep.sh
 DRY_RUN=0 experiment4_llm/scripts/run_sweep.sh
 ```
 
+`qwen_32b_reinforce.yaml` is intentionally not provided because the 32B sweep uses only the 3-method matrix (`grpo`, `maxrl_unnorm`, `maxrl_norm`).
+
 ### 4) Evaluate and plot pass@k curves
 
 Problem-level input format (one row per problem per run):
@@ -111,7 +115,26 @@ Run raw-completion evaluation:
 experiment4_llm/scripts/run_evaluation.sh /path/to/raw_completions.jsonl results_experiment4/eval --raw-completions
 ```
 
+If you have per-checkpoint evaluation logs, include them to generate Figure B:
+
+```bash
+experiment4_llm/scripts/run_evaluation.sh \
+  /path/to/completions.jsonl \
+  results_experiment4/eval \
+  --training-metrics-jsonl /path/to/training_metrics.jsonl
+```
+
+Expected training-metrics JSONL rows include `model`, `method`, `seed`, `group_size`, a step field (`step` or `global_step`), and pass metrics (`pass_at_k` with keys `1` and `10`, or flat keys like `pass@1` / `pass@10`).
+
 This executes each completion in the sandbox, computes continuous reward and binary pass, then aggregates pass@k summaries and figures.
+
+Generated figures from `scripts/generate_figures.py` are:
+
+- Figure A: pass@k curves with crossover stars.
+- Figure B: training curves (pass@1 and pass@10 over step) when `--training-metrics-jsonl` is provided.
+- Figure C: reward histograms.
+- Figure D: MaxRL normalized vs unnormalized comparison.
+- Figure E: scaling with group size `G` (pass@10 vs `G`).
 
 ## Advantage API
 
