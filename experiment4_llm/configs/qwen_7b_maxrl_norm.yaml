@@ -1,0 +1,57 @@
+experiment:
+  name: experiment4_llm_qwen_7b_maxrl_norm
+  notes: "Continuous reward code RL with maxrl_norm advantages"
+
+model:
+  name_or_path: Qwen/Qwen2.5-Coder-7B-Instruct
+  max_prompt_length: 2048
+  max_completion_length: 2048
+
+algorithm:
+  adv_estimator: maxrl_norm
+  clip_ratio_low: 0.2
+  clip_ratio_high: 0.28
+  kl_coef: 0.001
+  kl_loss_type: k1
+  ppo_epochs: 1
+  loss_aggregation: token-mean
+  dynamic_sampling: false
+  advantage_eps: 1e-8
+
+rollout:
+  temperature: 1.0
+  top_p: 1.0
+  top_k: -1
+  group_size: 16
+
+training:
+  optimizer: AdamW
+  learning_rate: 1e-6
+  weight_decay: 0.01
+  warmup_steps: 50
+  lr_scheduler: cosine
+  gradient_clip_norm: 1.0
+  global_batch_size_prompts: 128
+  mini_batch_size_prompts: 32
+  total_steps: 200
+  seed: 42
+
+data:
+  train_jsonl: data/apps_train_intro_interview.jsonl
+  eval_jsonl: data/apps_test_intro_interview.jsonl
+  min_test_cases: 5
+
+reward:
+  type: continuous_fraction_passed
+  module: experiment4_llm.src.reward_function
+  function: compute_reward
+  timeout_seconds: 5
+  memory_limit_mb: 256
+
+evaluation:
+  temperature: 0.8
+  samples_per_problem: 200
+  k_values: [1, 2, 5, 10, 20, 50, 100]
+
+logging:
+  output_dir: results_experiment4/qwen_7b/maxrl_norm

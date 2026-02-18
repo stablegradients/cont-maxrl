@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+
+# Local backup created during repo migration
+README.local.md
+
+# Experiment outputs
+results/
+results_1b/
+results_1c/
+results_1c-archive/
+results_1d/
+results_2_5/
+results_experiment4/
