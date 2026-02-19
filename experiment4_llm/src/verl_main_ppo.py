@@ -285,7 +285,7 @@ def _build_verl_overrides_from_experiment_cfg(cfg: dict[str, Any], config_path: 
         _to_hydra_override("data.custom_cls.path", "pkg://experiment4_llm.src.verl_dataset"),
         _to_hydra_override("data.custom_cls.name", "ContMaxRLDataset"),
         _to_hydra_override("actor_rollout_ref.model.path", model_path),
-        _to_hydra_override("actor_rollout_ref.model.use_remove_padding", False),
+        _to_hydra_override("actor_rollout_ref.model.use_remove_padding", True),
         _to_hydra_override("actor_rollout_ref.model.enable_gradient_checkpointing", True),
         _to_hydra_override("+actor_rollout_ref.model.override_config._attn_implementation", "sdpa"),
         _to_hydra_override("+actor_rollout_ref.model.override_config.attn_implementation", "sdpa"),

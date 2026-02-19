@@ -64,8 +64,10 @@ python -m pip install -e "$ROOT_DIR/vendor/verl"
 export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
 ```
 
-> **Note on flash-attn**: not required. `use_remove_padding` is set to
-> `False` in our training config, so the flash-attn code path is never used.
+> **Note on flash-attn**: not required. `vendor/verl` includes pure-torch
+> fallbacks in `attention_utils.py` that handle `use_remove_padding=True`
+> without flash-attn. Setting `use_remove_padding=False` works too but
+> causes a ~3× slowdown (padded sequences waste compute on padding tokens).
 
 > **Note on submodule URL**: `vendor/verl` currently points to a local path.
 > If cloning on a different machine, update `.gitmodules` to point to your
