@@ -1,8 +1,5 @@
 __pycache__/
-*.py[cod]
 
-# Local backup created during repo migration
-README.local.md
 
 # Experiment outputs
 results/
