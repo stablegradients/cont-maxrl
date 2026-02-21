@@ -82,8 +82,7 @@ except (json.JSONDecodeError, ValueError):
     _args = [_input_data] if _input_data else []
 
 _result = _fn(*_args)
-if _result is not None:
-    print(json.dumps(_result))
+print(json.dumps(_result))
 """
 
 

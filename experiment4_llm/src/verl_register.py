@@ -57,7 +57,6 @@ def _make_verl_advantage_fn(per_group_fn):
         token_level_rewards: torch.Tensor,      # [B*N, seq_len]
         response_mask: torch.Tensor,             # [B*N, seq_len]
         index: np.ndarray,                       # [B*N] prompt group IDs
-        epsilon: float = 1e-6,
     ) -> tuple[torch.Tensor, torch.Tensor]:
 
         with torch.no_grad():

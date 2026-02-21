@@ -67,3 +67,25 @@ def test_large_output():
     assert len(lines) == 100
     assert lines[0] == "line 0"
     assert lines[99] == "line 99"
+
+
+# ── Function returning None (BUG R5-1) ──
+
+
+def test_function_returning_none():
+    """Function returning None should produce 'null' output, not empty string.
+
+    Bug R5-1: sandbox had `if _result is not None: print(json.dumps(_result))`
+    which silently produced empty output for None returns. Now unconditionally
+    prints json.dumps(_result), so None -> "null".
+    """
+    code = "def do_nothing(x):\n    return None"
+    result = execute_in_sandbox(code, input_data="5", fn_name="do_nothing")
+    assert result.strip() == "null"
+
+
+def test_function_returning_none_implicit():
+    """Function with no return statement (implicit None) should output 'null'."""
+    code = "def side_effect(x):\n    _ = x + 1"
+    result = execute_in_sandbox(code, input_data="5", fn_name="side_effect")
+    assert result.strip() == "null"

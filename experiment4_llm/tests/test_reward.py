@@ -278,3 +278,56 @@ def test_outputs_match_json_semantic_equality():
     assert _outputs_match("[1,2,3]", "[1, 2, 3]", fn_name="solve") is True
     # Key order in dicts
     assert _outputs_match('{"a": 1, "b": 2}', '{"b": 2, "a": 1}', fn_name="solve") is True
+
+
+# ── Function returning None: reward pipeline (BUG R5-1) ──
+
+
+def test_score_function_returning_none():
+    """Function returning None should match expected 'null' output.
+
+    Bug R5-1: sandbox previously suppressed None output, so any function
+    returning None silently scored 0. With the fix, json.dumps(None) = "null"
+    is printed and matched against expected "null".
+    """
+    code = "def get_none():\n    return None"
+    gt = _make_ground_truth(["[]"], ["null"], fn_name="get_none")
+    score = compute_score(code, gt)
+    assert score == 1.0
+
+
+def test_score_function_returning_none_wrong_expected():
+    """Function returning None should NOT match non-null expected output."""
+    code = "def get_none():\n    return None"
+    gt = _make_ground_truth(["[]"], ["42"], fn_name="get_none")
+    score = compute_score(code, gt)
+    assert score == 0.0
+
+
+# ── extract_code: python3 boundary check (BUG R5-2) ──
+
+
+def test_extract_code_python3_no_false_strip():
+    """```python3xyz should NOT strip the '3' — 'python3' must end at word boundary.
+
+    Bug R5-2: extract_code blindly stripped '3' after 'python', so
+    '```python3xyz' would become 'xyz...' instead of '3xyz...'.
+    """
+    # python3some_code should NOT be treated as python3 + some_code
+    text = "```python3some_code_here\ndef foo():\n    return 42\n```"
+    result = extract_code(text)
+    # Should NOT strip "3" because next char is 's', not whitespace/newline
+    # The "3some_code_here" stays as part of the first line of the block
+    assert "3some_code_here" in result or "def foo():" in result
+
+
+def test_extract_code_python3_with_newline():
+    """```python3\\n should strip '3' — newline is a valid boundary."""
+    text = "```python3\ndef foo():\n    return 42\n```"
+    assert extract_code(text) == "def foo():\n    return 42"
+
+
+def test_extract_code_python3_with_space():
+    """```python3 \\n should strip '3' — space is a valid boundary."""
+    text = "```python3 \ndef foo():\n    return 42\n```"
+    assert extract_code(text) == "def foo():\n    return 42"

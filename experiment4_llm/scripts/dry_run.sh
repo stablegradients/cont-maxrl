@@ -57,7 +57,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.actor.ppo_mini_batch_size=2 \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.actor.ppo_epochs=1 \
-  actor_rollout_ref.actor.use_kl_loss=False \
+  actor_rollout_ref.actor.use_kl_loss=True \
   actor_rollout_ref.actor.clip_ratio=0.2 \
   actor_rollout_ref.actor.use_torch_compile=False \
   actor_rollout_ref.actor.optim.lr=1e-6 \

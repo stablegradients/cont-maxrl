@@ -28,7 +28,7 @@ def extract_code(solution_str: str) -> str:
         idx = solution_lower.index("```python")
         after = solution_str[idx + len("```python"):]
         # Skip optional "3" after "python"
-        if after.startswith("3"):
+        if after.startswith("3") and (len(after) == 1 or after[1] in "\n\r \t"):
             after = after[1:]
         code = after.split("```")[0]
         return code.strip()
