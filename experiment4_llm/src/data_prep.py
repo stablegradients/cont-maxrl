@@ -123,9 +123,11 @@ def parse_test_cases(input_output_str: str) -> dict | None:
     if not inputs or not outputs or len(inputs) != len(outputs):
         return None
 
-    # Normalize: ensure all are strings
-    inputs = [str(x) if not isinstance(x, str) else x for x in inputs]
-    outputs = [str(x) if not isinstance(x, str) else x for x in outputs]
+    # Normalize: ensure all are strings.
+    # Use json.dumps for non-strings so the sandbox can json.loads them back.
+    # str() would produce Python repr (single quotes) which isn't valid JSON.
+    inputs = [x if isinstance(x, str) else json.dumps(x) for x in inputs]
+    outputs = [x if isinstance(x, str) else json.dumps(x) for x in outputs]
 
     result = {"inputs": inputs, "outputs": outputs}
 

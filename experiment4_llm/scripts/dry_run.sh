@@ -24,8 +24,8 @@ export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
 export TMPDIR="/tmp/${USER}_verl_tmp"
 mkdir -p "${HF_HOME}" "${TORCH_HOME}" "${RAY_TMPDIR}" "${VLLM_CACHE_ROOT}" "${TMPDIR}"
 
-# HF token for model downloads
-export HF_TOKEN="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"
+# HF token for model downloads (set in environment or ~/.huggingface/token)
+# export HF_TOKEN="your_token_here"
 
 # Ensure our project is importable
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
@@ -77,7 +77,6 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.load_format=dummy_dtensor \
   actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.rollout.enable_chunked_prefill=False \
-  critic.strategy=fsdp \
   reward_model.enable=False \
   custom_reward_function.path="${REPO_ROOT}/experiment4_llm/src/reward_function.py" \
   custom_reward_function.name=compute_score \

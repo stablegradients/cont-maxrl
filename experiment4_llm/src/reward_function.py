@@ -22,11 +22,16 @@ def extract_code(solution_str: str) -> str:
     solution_str = solution_str.strip()
 
     # Try to extract from markdown code block
-    if "```python" in solution_str:
-        parts = solution_str.split("```python")
-        if len(parts) > 1:
-            code = parts[1].split("```")[0]
-            return code.strip()
+    solution_lower = solution_str.lower()
+    if "```python" in solution_lower:
+        # Find the position case-insensitively, then extract from original
+        idx = solution_lower.index("```python")
+        after = solution_str[idx + len("```python"):]
+        # Skip optional "3" after "python"
+        if after.startswith("3"):
+            after = after[1:]
+        code = after.split("```")[0]
+        return code.strip()
 
     if "```" in solution_str:
         parts = solution_str.split("```")
@@ -34,7 +39,7 @@ def extract_code(solution_str: str) -> str:
             code = parts[1]
             # Remove optional language identifier on first line
             lines = code.split("\n")
-            if lines and lines[0].strip() in ("python", "py", ""):
+            if lines and lines[0].strip().lower() in ("python", "python3", "py", ""):
                 lines = lines[1:]
             return "\n".join(lines).strip()
 
@@ -99,12 +104,69 @@ def compute_score(
                 timeout_seconds=timeout_per_test,
                 memory_limit_mb=memory_limit_mb,
             )
-            if actual.strip() == expected.strip():
+            if _outputs_match(actual.strip(), expected.strip(), fn_name):
                 num_passed += 1
         except (TimeoutError, MemoryError, RuntimeError, SyntaxError, Exception):
             pass  # Failed test case -- counts as not passed
 
     return num_passed / num_total
+
+
+def _outputs_match(actual: str, expected: str, fn_name: str | None) -> bool:
+    """Compare actual and expected outputs.
+
+    For stdin/stdout problems: exact string match, with numeric fallback.
+    For fn_name problems: JSON-based semantic comparison (handles list
+    wrapping differences in TACO/APPS datasets).
+    """
+    # Exact string match (works for both stdin/stdout and fn_name)
+    if actual == expected:
+        return True
+
+    # Numeric fallback: handle floating-point formatting differences
+    if _numeric_match(actual, expected):
+        return True
+
+    # For fn_name problems: compare parsed JSON values
+    if fn_name is not None:
+        try:
+            actual_val = json.loads(actual)
+            expected_val = json.loads(expected)
+            if actual_val == expected_val:
+                return True
+            # Handle TACO convention: expected may wrap return value in [result]
+            if isinstance(expected_val, list) and len(expected_val) == 1:
+                if actual_val == expected_val[0]:
+                    return True
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return False
+
+
+def _numeric_match(a: str, b: str, rel_tol: float = 1e-4) -> bool:
+    """Check if two output strings represent the same number(s).
+
+    Handles single numbers and multi-line numeric outputs.
+    """
+    a_lines = a.strip().splitlines()
+    b_lines = b.strip().splitlines()
+    if len(a_lines) != len(b_lines):
+        return False
+    for al, bl in zip(a_lines, b_lines):
+        al, bl = al.strip(), bl.strip()
+        if al == bl:
+            continue
+        try:
+            af, bf = float(al), float(bl)
+            if bf == 0.0:
+                if af != 0.0:
+                    return False
+            elif abs(af - bf) / max(abs(bf), 1e-15) > rel_tol:
+                return False
+        except ValueError:
+            return False
+    return True
 
 
 def compute_score_binary(

@@ -151,8 +151,8 @@ def generate_train_script(
 #SBATCH --output=results/{exp_name}/slurm_%j.out
 #SBATCH --error=results/{exp_name}/slurm_%j.err"""
 
-    # Use kl_loss only for grpo (standard practice)
-    use_kl_loss = "True" if method == "grpo" else "False"
+    # KL loss applied uniformly to all methods for fair comparison
+    use_kl_loss = "True"
 
     script = f"""#!/usr/bin/env bash
 {slurm_header}

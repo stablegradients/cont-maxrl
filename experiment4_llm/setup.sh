@@ -9,7 +9,6 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_NAME="cont-maxrl"
-VERL_COMMIT="17f283b1e818a102bfa799c7c906d95e81fba11b"
 
 # All caches under repo root — no /tmp
 export PIP_CACHE_DIR="${REPO_ROOT}/.cache/pip"
@@ -84,14 +83,11 @@ echo ""
 echo "=== Step 4: vLLM 0.8.3 ==="
 pip install vllm==0.8.3
 
-# ── Step 5: verl (pinned commit, --no-deps, untouched) ──
+# ── Step 5: verl (vendored with patches, --no-deps) ──
 echo ""
-echo "=== Step 5: verl @ ${VERL_COMMIT} ==="
+echo "=== Step 5: verl (vendored) ==="
 VERL_DIR="${REPO_ROOT}/vendor/verl"
-[ -d "${VERL_DIR}" ] || git clone https://github.com/volcengine/verl.git "${VERL_DIR}"
-cd "${VERL_DIR}" && git fetch origin && git checkout "${VERL_COMMIT}"
-pip install --no-deps -e .
-cd "${REPO_ROOT}"
+pip install --no-deps -e "${VERL_DIR}"
 
 # ── Step 6: Remaining packages (all inside env) ──
 echo ""

@@ -14,6 +14,7 @@ echo "=== Downloading model weights ==="
 echo "Cache dir: ${HF_HOME}"
 
 MODELS=(
+    "Qwen/Qwen2.5-0.5B-Instruct"
     "Qwen/Qwen2.5-Coder-1.5B-Instruct"
     "Qwen/Qwen2.5-Coder-7B-Instruct"
     "Qwen/Qwen2.5-Coder-32B-Instruct"
