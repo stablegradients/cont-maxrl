@@ -284,7 +284,7 @@ def figure_c_reward_distribution(
         # Collect per-problem solve rates (c/n) across all seeds
         solve_rates = []
         for result in data["raw"]:
-            for p in result["per_problem"]:
+            for p in result.get("per_problem", []):
                 if p["n"] > 0:
                     solve_rates.append(p["c"] / p["n"])
 
