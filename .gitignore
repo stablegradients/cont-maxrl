@@ -18,8 +18,8 @@ data/
 # Caches
 .cache/
 
-# Vendor (cloned during setup)
-vendor/
+# Vendor: flash-attention is installed via pip (too large to track)
+vendor/flash-attention/
 
 # Generated run scripts
 experiment4_llm/scripts/runs/
