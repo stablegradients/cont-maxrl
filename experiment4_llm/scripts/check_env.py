@@ -45,16 +45,15 @@ def check():
     import verl
     print(f"  verl: {verl.__version__}")
 
-    # 6. Our monkey-patch (import triggers side-effect)
+    # 6. Custom advantage estimators (directly integrated in ray_trainer.py)
     import experiment4_llm.src.verl_register as reg
-    from verl.trainer.ppo import ray_trainer
-    # Verify the monkey-patch is active
-    assert ray_trainer.compute_advantage.__name__ == "_patched_compute_advantage", \
-        "Monkey-patch not applied!"
+    from verl.trainer.ppo.ray_trainer import AdvantageEstimator
     for name in ["maxrl_unnorm", "maxrl_norm", "reinforce_baseline"]:
         assert name in reg.CUSTOM_ESTIMATORS, f"{name} not in CUSTOM_ESTIMATORS!"
+        assert hasattr(AdvantageEstimator, name.upper()), \
+            f"AdvantageEstimator.{name.upper()} not found in ray_trainer.py!"
     print(f"  custom estimators: {list(reg.CUSTOM_ESTIMATORS.keys())}")
-    print("  monkey-patch: active")
+    print("  ray_trainer integration: OK")
 
     # 7. CUDA_HOME + PATH
     cuda_home = os.environ.get("CUDA_HOME", "")
@@ -102,9 +101,11 @@ def check():
         scripts = glob.glob(os.path.join(scripts_dir, "*.sh"))
         for s in scripts:
             with open(s) as f:
-                content = f.read()
-                assert "/tmp" not in content, f"/tmp found in {s}"
-        print(f"  run scripts: {len(scripts)} checked, no /tmp")
+                for lineno, line in enumerate(f, 1):
+                    # RAY_TMPDIR and TMPDIR use /tmp intentionally (short path for AF_UNIX)
+                    if "/tmp" in line and "TMPDIR" not in line:
+                        assert False, f"/tmp found in {s}:{lineno}: {line.strip()}"
+        print(f"  run scripts: {len(scripts)} checked, no bad /tmp")
     else:
         print("  run scripts: directory not found (generate first)")
 
