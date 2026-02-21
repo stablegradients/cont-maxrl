@@ -1,5 +1,6 @@
 __pycache__/
-
+*.pyc
+*.egg-info/
 
 # Experiment outputs
 results/
@@ -9,3 +10,19 @@ results_1c-archive/
 results_1d/
 results_2_5/
 results_experiment4/
+figures/
+
+# Data
+data/
+
+# Caches
+.cache/
+
+# Vendor (cloned during setup)
+vendor/
+
+# Generated run scripts
+experiment4_llm/scripts/runs/
+
+# Claude Code
+.claude/
