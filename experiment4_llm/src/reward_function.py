@@ -131,15 +131,18 @@ def _outputs_match(actual: str, expected: str, fn_name: str | None) -> bool:
     if fn_name is not None:
         try:
             actual_val = json.loads(actual)
-            expected_val = json.loads(expected)
-            if actual_val == expected_val:
-                return True
-            # Handle TACO convention: expected may wrap return value in [result]
-            if isinstance(expected_val, list) and len(expected_val) == 1:
-                if actual_val == expected_val[0]:
-                    return True
         except (json.JSONDecodeError, TypeError):
-            pass
+            actual_val = actual
+        try:
+            expected_val = json.loads(expected)
+        except (json.JSONDecodeError, TypeError):
+            expected_val = expected
+        if actual_val == expected_val:
+            return True
+        # Handle TACO convention: expected may wrap return value in [result]
+        if isinstance(expected_val, list) and len(expected_val) == 1:
+            if actual_val == expected_val[0]:
+                return True
 
     return False
 
