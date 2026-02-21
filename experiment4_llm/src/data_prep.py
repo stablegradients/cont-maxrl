@@ -409,6 +409,45 @@ def _decompress_livecodebench_tests(raw: str) -> list[dict] | None:
         return None
 
 
+def _parse_lcb_functional_input(raw: str) -> list:
+    """Parse LiveCodeBench functional input into an args list.
+
+    LCB functional inputs are newline-separated JSON/Python literals,
+    one per function argument. E.g.:
+        '"leetscode"\\n["leet", "code"]'  ->  ["leetscode", ["leet", "code"]]
+        '[12, 9]\\n1'                     ->  [[12, 9], 1]
+        '[[7, 2, 1], [6, 4, 2]]'          ->  [[[7, 2, 1], [6, 4, 2]]]
+    """
+    args = []
+    for line in raw.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            args.append(json.loads(line))
+        except (json.JSONDecodeError, ValueError):
+            # Fallback: try Python literal eval (e.g. True/False/None)
+            try:
+                import ast
+                args.append(ast.literal_eval(line))
+            except (ValueError, SyntaxError):
+                args.append(line)  # bare string
+    return args
+
+
+def _json_encode_value(val) -> str:
+    """Encode a return value as JSON string for ground_truth comparison."""
+    if isinstance(val, str):
+        try:
+            # If it's already a JSON-encoded value, keep it
+            json.loads(val)
+            return val
+        except (json.JSONDecodeError, ValueError):
+            # Bare string — JSON-encode it
+            return json.dumps(val)
+    return json.dumps(val)
+
+
 def prepare_livecodebench(
     output_dir: str,
     min_tests: int = 1,
@@ -453,26 +492,9 @@ def prepare_livecodebench(
 
         all_tests = public_list + test_list
 
-        # Normalize to our format
-        inputs = []
-        outputs = []
-        for tc in all_tests:
-            inp = tc.get("input", "")
-            out = tc.get("output") or tc.get("expected_output", "")
-            inputs.append(str(inp))
-            outputs.append(str(out))
-
-        if len(inputs) < min_tests:
-            skipped_tests += 1
-            continue
-
         # Determine if functional or stdin
         # Use first test's testtype as representative
         testtype = all_tests[0].get("testtype", "stdin")
-
-        question = example.get("question_content", "")
-        if not question or not question.strip():
-            continue
 
         # Parse metadata for fn_name
         metadata_str = example.get("metadata", "{}")
@@ -485,6 +507,33 @@ def prepare_livecodebench(
         starter_code = example.get("starter_code", "")
         if testtype == "functional":
             fn_name = metadata.get("func_name")
+
+        # Normalize to our format
+        inputs = []
+        outputs = []
+        for tc in all_tests:
+            inp = tc.get("input", "")
+            out = tc.get("output") or tc.get("expected_output", "")
+
+            if fn_name is not None:
+                # Functional: inputs are newline-separated JSON literals
+                # e.g. '"leetscode"\n["leet", "code"]' -> two args
+                # Convert to a JSON args list: '["leetscode", ["leet", "code"]]'
+                args = _parse_lcb_functional_input(str(inp))
+                inputs.append(json.dumps(args))
+                # Output is a single return value — wrap as JSON
+                outputs.append(_json_encode_value(out))
+            else:
+                inputs.append(str(inp))
+                outputs.append(str(out))
+
+        if len(inputs) < min_tests:
+            skipped_tests += 1
+            continue
+
+        question = example.get("question_content", "")
+        if not question or not question.strip():
+            continue
 
         prompt_text = format_prompt(question, fn_name, starter_code)
 
