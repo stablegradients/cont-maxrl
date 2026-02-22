@@ -109,7 +109,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.save_freq=25 \
   trainer.test_freq=20 \
   trainer.val_before_train=False \
-  ray_init.num_cpus=48
+  ray_init.num_cpus=120
 
 echo ""
 echo "=== Training complete: 7b_taco_reinforce_baseline_g16_s42 ==="

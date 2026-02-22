@@ -69,7 +69,7 @@ MODELS = {
         "slurm_time": "47:00:00",
         "slurm_mem": "256G",
         "slurm_gpus": 4,
-        "slurm_cpus": 48,
+        "slurm_cpus": 120,
         "slurm_partition": "general",
     },
     "7b": {
@@ -128,7 +128,7 @@ MAX_RESPONSE_LEN = 1024
 N_EVAL_COMPLETIONS = 200
 K_VALUES = "1 2 5 10 20 50 100"
 SAVE_FREQ = 25
-RAY_NUM_CPUS = 48
+RAY_NUM_CPUS = 120
 
 
 def _batch_size_for_g(G: int) -> int:
