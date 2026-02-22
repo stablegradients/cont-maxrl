@@ -20,7 +20,7 @@ import sys
 import tempfile
 
 
-DEFAULT_TIMEOUT = 10  # seconds per test case
+DEFAULT_TIMEOUT = 1  # seconds per test case
 DEFAULT_MEMORY_MB = 512
 
 # Runner script templates. These are top-level strings (no indentation issues).

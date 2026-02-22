@@ -56,60 +56,63 @@ MODELS = {
     "1.5b": {
         "hf_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
         "tensor_parallel_size": 1,
+        "fsdp_size": -1,  # full sharding — NO_SHARD OOMs on 24GB GPUs (optimizer states alone need 24GB)
         "ppo_micro_batch_size_per_gpu": 4,
         "ref_log_prob_micro_batch_size_per_gpu": 4,
         "rollout_log_prob_micro_batch_size_per_gpu": 4,
         "max_num_batched_tokens": 8192,
         "max_num_seqs": 1024,
-        "gpu_memory_utilization": "0.5",
+        "gpu_memory_utilization": "0.4",
         "seeds": [42],
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
         "group_sizes": [4, 16, 32, 64],
         "slurm_time": "47:00:00",
-        "slurm_mem": "64G",
+        "slurm_mem": "256G",
         "slurm_gpus": 4,
-        "slurm_cpus": 16,
+        "slurm_cpus": 48,
         "slurm_partition": "general",
     },
     "7b": {
         "hf_id": "Qwen/Qwen2.5-Coder-7B-Instruct",
         "tensor_parallel_size": 1,
+        "fsdp_size": -1,  # full sharding across all GPUs
         "ppo_micro_batch_size_per_gpu": 2,
-        "ref_log_prob_micro_batch_size_per_gpu": 2,
-        "rollout_log_prob_micro_batch_size_per_gpu": 2,
+        "ref_log_prob_micro_batch_size_per_gpu": 1,
+        "rollout_log_prob_micro_batch_size_per_gpu": 1,
         "max_num_batched_tokens": 8192,
         "max_num_seqs": 512,
-        "gpu_memory_utilization": "0.5",
+        "gpu_memory_utilization": "0.4",
         "seeds": [42],
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
         "group_sizes": [4, 16, 32, 64],
         "slurm_time": "47:00:00",
-        "slurm_mem": "128G",
+        "slurm_mem": "256G",
         "slurm_gpus": 4,
-        "slurm_cpus": 16,
+        "slurm_cpus": 32,
         "slurm_partition": "general",
     },
     "32b": {
         "hf_id": "Qwen/Qwen2.5-Coder-32B-Instruct",
         "tensor_parallel_size": 4,
+        "fsdp_size": -1,  # full sharding across all GPUs
         "ppo_micro_batch_size_per_gpu": 1,
         "ref_log_prob_micro_batch_size_per_gpu": 1,
         "rollout_log_prob_micro_batch_size_per_gpu": 1,
         "max_num_batched_tokens": 4096,
         "max_num_seqs": 256,
-        "gpu_memory_utilization": "0.5",
+        "gpu_memory_utilization": "0.4",
         "seeds": [42],
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm"],
         "group_sizes": [16, 32, 64],
         "slurm_time": "47:00:00",
-        "slurm_mem": "384G",
+        "slurm_mem": "256G",
         "slurm_gpus": 8,
         "slurm_cpus": 32,
         "slurm_partition": "general",
     },
 }
 
-TOTAL_STEPS = 300
+TOTAL_STEPS = 150
 TOTAL_ROLLOUTS_PER_STEP = 4096
 DEFAULT_BATCH_SIZE = 128
 MINI_BATCH = 32
@@ -121,16 +124,18 @@ CLIP_RATIO_HIGH = "0.28"
 TRAIN_TEMP = "1.0"
 EVAL_TEMP = "0.8"
 MAX_PROMPT_LEN = 1024
-MAX_RESPONSE_LEN = 2048
+MAX_RESPONSE_LEN = 1024
 N_EVAL_COMPLETIONS = 200
 K_VALUES = "1 2 5 10 20 50 100"
-SAVE_FREQ = 50
-RAY_NUM_CPUS = 16
+SAVE_FREQ = 25
+RAY_NUM_CPUS = 48
 
 
 def _batch_size_for_g(G: int) -> int:
-    """Compute batch size to keep total rollouts/step constant at 4096."""
-    return TOTAL_ROLLOUTS_PER_STEP // G
+    """Compute batch size. For G>=16, cap rollouts at 2048 to reduce cost."""
+    if G >= 16:
+        return 2048 // G  # 128 for G=16, 64 for G=32, 32 for G=64
+    return TOTAL_ROLLOUTS_PER_STEP // G  # 1024 for G=4
 
 
 def generate_train_script(
@@ -187,6 +192,8 @@ export LD_LIBRARY_PATH="${{CUDA_HOME}}/lib:${{LD_LIBRARY_PATH:-}}"
 export HF_HOME="/zfsauton/scratch/shrinivr/.cache/huggingface"
 export TORCH_HOME="${{REPO_ROOT}}/.cache/torch"
 export VLLM_CACHE_ROOT="${{REPO_ROOT}}/.cache/vllm"
+# verl requires vLLM v0 engine (v1 doesn't implement free_cache_engine)
+export VLLM_USE_V1=0
 # Ray and tmp on local disk (avoids NFS socket/cleanup issues)
 export RAY_TMPDIR="/tmp/ray_${{USER}}"
 export TMPDIR="/tmp/${{USER}}_verl_tmp"
@@ -223,6 +230,7 @@ $PYTHON "${{REPO_ROOT}}/experiment4_llm/src/train.py" \\
   actor_rollout_ref.model.enable_gradient_checkpointing=True \\
   actor_rollout_ref.model.trust_remote_code=True \\
   actor_rollout_ref.actor.strategy=fsdp \\
+  actor_rollout_ref.actor.fsdp_config.fsdp_size={model_cfg['fsdp_size']} \\
   actor_rollout_ref.actor.ppo_mini_batch_size={MINI_BATCH} \\
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu={model_cfg['ppo_micro_batch_size_per_gpu']} \\
   actor_rollout_ref.actor.ppo_epochs={PPO_EPOCHS} \\

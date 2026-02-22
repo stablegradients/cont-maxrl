@@ -902,10 +902,13 @@ class RayPPOTrainer:
         last_val_metrics = None
 
         for epoch in range(self.config.trainer.total_epochs):
+            print(f"[DEBUG] Starting epoch {epoch}", flush=True)
             for batch_dict in self.train_dataloader:
+                print(f"[DEBUG] Got batch_dict from dataloader, step={self.global_steps}", flush=True)
                 metrics = {}
                 timing_raw = {}
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
+                print(f"[DEBUG] DataProto created, batch size={len(batch)}", flush=True)
 
                 # pop those keys for generation
                 batch_keys_to_pop = ["input_ids", "attention_mask", "position_ids"]
@@ -920,6 +923,7 @@ class RayPPOTrainer:
                     batch_keys=batch_keys_to_pop,
                     non_tensor_batch_keys=non_tensor_batch_keys_to_pop,
                 )
+                print(f"[DEBUG] gen_batch popped, calling generate_sequences...", flush=True)
 
                 is_last_step = self.global_steps >= self.total_training_steps
 
@@ -927,11 +931,14 @@ class RayPPOTrainer:
                     # generate a batch
                     with _timer("gen", timing_raw):
                         if not self.async_rollout_mode:
+                            print(f"[DEBUG] Dispatching generate_sequences to workers...", flush=True)
                             gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
                         else:
                             self.async_rollout_manager.wake_up()
                             gen_batch_output = self.async_rollout_manager.generate_sequences(gen_batch)
                             self.async_rollout_manager.sleep()
+
+                    print(f"[DEBUG] generate_sequences returned, output size={len(gen_batch_output)}", flush=True)
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with _timer("gen_max", timing_raw):
@@ -965,6 +972,7 @@ class RayPPOTrainer:
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
                     with _timer("reward", timing_raw):
+                        print(f"[DEBUG] Computing rewards for {len(batch)} items...", flush=True)
                         # compute reward model score
                         if self.use_rm:
                             reward_tensor = self.rm_wg.compute_rm_score(batch)
@@ -974,9 +982,11 @@ class RayPPOTrainer:
                             future_reward = compute_reward_async.remote(batch, self.config, self.tokenizer)
                         else:
                             reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
+                        print(f"[DEBUG] Rewards computed.", flush=True)
 
                     # recompute old_log_probs
                     with _timer("old_log_prob", timing_raw):
+                        print(f"[DEBUG] Computing old_log_prob...", flush=True)
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         entropys = old_log_prob.batch["entropys"]
                         response_masks = batch.batch["response_mask"]
@@ -990,8 +1000,10 @@ class RayPPOTrainer:
                     if self.use_reference_policy:
                         # compute reference log_prob
                         with _timer("ref", timing_raw):
+                            print(f"[DEBUG] Computing ref_log_prob...", flush=True)
                             ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
                             batch = batch.union(ref_log_prob)
+                            print(f"[DEBUG] ref_log_prob done.", flush=True)
 
                     # compute values
                     if self.use_critic:

@@ -50,7 +50,7 @@ def extract_code(solution_str: str) -> str:
 def compute_score(
     solution_str: str,
     ground_truth: str,
-    timeout_per_test: int = 10,
+    timeout_per_test: int = 1,
     memory_limit_mb: int = 512,
     data_source: str | None = None,
     extra_info: dict | None = None,
@@ -175,7 +175,7 @@ def _numeric_match(a: str, b: str, rel_tol: float = 1e-4) -> bool:
 def compute_score_binary(
     solution_str: str,
     ground_truth: str,
-    timeout_per_test: int = 10,
+    timeout_per_test: int = 1,
     memory_limit_mb: int = 512,
 ) -> float:
     """
