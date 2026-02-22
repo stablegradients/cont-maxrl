@@ -17,7 +17,7 @@ import os
 import stat
 from pathlib import Path
 
-REPO_ROOT_PLACEHOLDER = '"$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"'
+REPO_ROOT_PLACEHOLDER = "/zfsauton/scratch/shrinivr/cont-maxrl"
 PYTHON_PATH = "/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
 CUDA_HOME = "/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl"
 
@@ -65,11 +65,11 @@ MODELS = {
         "seeds": [42],
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
         "group_sizes": [4, 16, 32, 64],
-        "slurm_time": "8:00:00",
+        "slurm_time": "47:00:00",
         "slurm_mem": "64G",
         "slurm_gpus": 4,
         "slurm_cpus": 16,
-        "slurm_partition": "gpu",
+        "slurm_partition": "general",
     },
     "7b": {
         "hf_id": "Qwen/Qwen2.5-Coder-7B-Instruct",
@@ -83,11 +83,11 @@ MODELS = {
         "seeds": [42],
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
         "group_sizes": [4, 16, 32, 64],
-        "slurm_time": "20:00:00",
+        "slurm_time": "47:00:00",
         "slurm_mem": "128G",
         "slurm_gpus": 4,
         "slurm_cpus": 16,
-        "slurm_partition": "gpu",
+        "slurm_partition": "general",
     },
     "32b": {
         "hf_id": "Qwen/Qwen2.5-Coder-32B-Instruct",
@@ -101,11 +101,11 @@ MODELS = {
         "seeds": [42],
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm"],
         "group_sizes": [16, 32, 64],
-        "slurm_time": "36:00:00",
+        "slurm_time": "47:00:00",
         "slurm_mem": "384G",
         "slurm_gpus": 8,
         "slurm_cpus": 32,
-        "slurm_partition": "gpu",
+        "slurm_partition": "general",
     },
 }
 
@@ -155,9 +155,10 @@ def generate_train_script(
 #SBATCH --time={model_cfg['slurm_time']}
 #SBATCH --mem={model_cfg['slurm_mem']}
 #SBATCH --cpus-per-task={model_cfg['slurm_cpus']}
+#SBATCH --nodes=1
 #SBATCH --exclude=gpu20,gpu21,gpu22,gpu23
-#SBATCH --output=results/{exp_name}/slurm_%j.out
-#SBATCH --error=results/{exp_name}/slurm_%j.err"""
+#SBATCH --output={REPO_ROOT_PLACEHOLDER}/results/{exp_name}/slurm_%j.out
+#SBATCH --error={REPO_ROOT_PLACEHOLDER}/results/{exp_name}/slurm_%j.err"""
 
     # KL loss applied uniformly to all methods for fair comparison
     use_kl_loss = "True"
@@ -170,7 +171,7 @@ set -euo pipefail
 # Train: {hf_id.split("/")[-1]} | {dataset.upper()} | {method} | G={G} | seed={seed}
 # ============================================================
 
-REPO_ROOT={REPO_ROOT_PLACEHOLDER}
+REPO_ROOT="{REPO_ROOT_PLACEHOLDER}"
 PYTHON="{PYTHON_PATH}"
 export PYTHONNOUSERSITE=1
 
@@ -198,8 +199,8 @@ export PYTHONPATH="${{REPO_ROOT}}:${{PYTHONPATH:-}}"
 export WANDB_ENTITY="{WANDB_ENTITY}"
 export WANDB_RUN_GROUP="{wandb_group}"
 
-# Use all visible GPUs (SLURM sets CUDA_VISIBLE_DEVICES automatically)
-N_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l || echo {model_cfg['slurm_gpus']})
+# Use SLURM-assigned GPU count, fall back to nvidia-smi for local runs
+N_GPUS=${{SLURM_GPUS_ON_NODE:-$(nvidia-smi -L 2>/dev/null | wc -l || echo {model_cfg['slurm_gpus']})}}
 echo "=== Train: {exp_name} ==="
 echo "GPUs: ${{N_GPUS}}, Model: {hf_id}"
 echo "Method: {method}, G={G}, Seed={seed}"
@@ -245,7 +246,6 @@ $PYTHON "${{REPO_ROOT}}/experiment4_llm/src/train.py" \\
   actor_rollout_ref.rollout.max_num_seqs={model_cfg['max_num_seqs']} \\
   actor_rollout_ref.rollout.enforce_eager=True \\
   actor_rollout_ref.rollout.free_cache_engine=True \\
-  actor_rollout_ref.rollout.load_format=dummy_dtensor \\
   actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu={model_cfg['rollout_log_prob_micro_batch_size_per_gpu']} \\
   actor_rollout_ref.rollout.enable_chunked_prefill=False \\
   reward_model.enable=False \\
@@ -290,12 +290,13 @@ def generate_eval_script(
     slurm_header = f"""#SBATCH --job-name=eval_{eval_name}
 #SBATCH --partition={model_cfg['slurm_partition']}
 #SBATCH --gres=gpu:{model_cfg['slurm_gpus']}
-#SBATCH --time=4:00:00
+#SBATCH --time=47:00:00
 #SBATCH --mem={model_cfg['slurm_mem']}
 #SBATCH --cpus-per-task={model_cfg['slurm_cpus']}
+#SBATCH --nodes=1
 #SBATCH --exclude=gpu20,gpu21,gpu22,gpu23
-#SBATCH --output=results/{exp_name}/eval_{eval_benchmark}/slurm_%j.out
-#SBATCH --error=results/{exp_name}/eval_{eval_benchmark}/slurm_%j.err"""
+#SBATCH --output={REPO_ROOT_PLACEHOLDER}/results/{exp_name}/eval_{eval_benchmark}/slurm_%j.out
+#SBATCH --error={REPO_ROOT_PLACEHOLDER}/results/{exp_name}/eval_{eval_benchmark}/slurm_%j.err"""
 
     script = f"""#!/usr/bin/env bash
 {slurm_header}
@@ -306,7 +307,7 @@ set -euo pipefail
 # {method} | G={G} | seed={seed}
 # ============================================================
 
-REPO_ROOT={REPO_ROOT_PLACEHOLDER}
+REPO_ROOT="{REPO_ROOT_PLACEHOLDER}"
 PYTHON="{PYTHON_PATH}"
 export PYTHONNOUSERSITE=1
 
@@ -328,7 +329,7 @@ CHECKPOINT_DIR="${{REPO_ROOT}}/results/{exp_name}"
 OUTPUT_DIR="${{CHECKPOINT_DIR}}/eval_{eval_benchmark}"
 mkdir -p "${{OUTPUT_DIR}}"
 
-N_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l || echo {model_cfg['slurm_gpus']})
+N_GPUS=${{SLURM_GPUS_ON_NODE:-$(nvidia-smi -L 2>/dev/null | wc -l || echo {model_cfg['slurm_gpus']})}}
 echo "=== Eval: {eval_name} ==="
 echo "GPUs: ${{N_GPUS}}"
 echo "Checkpoint: ${{CHECKPOINT_DIR}}"
