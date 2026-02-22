@@ -47,9 +47,9 @@ TRAIN_DATASETS = ["apps", "taco", "code_contests"]
 WANDB_ENTITY = "stablegradients"
 WANDB_PROJECT = "cont-maxrl-code"
 SEEDS = {
-    "1.5b": [42, 43, 44],
-    "7b": [42, 43, 44],
-    "32b": [42, 43],
+    "1.5b": [42],
+    "7b": [42],
+    "32b": [42],
 }
 
 
@@ -402,7 +402,7 @@ def figure_e_scaling_with_g(
     fig, ax = plt.subplots(1, 1, figsize=(7, 5))
 
     methods = ["grpo", "maxrl_unnorm", "maxrl_norm"]
-    group_sizes = [4, 16, 32]
+    group_sizes = [4, 16, 32, 64]
     has_data = False
 
     for method in methods:
@@ -467,7 +467,7 @@ def main():
         for train_dataset in TRAIN_DATASETS:
             print(f"Model: {model}, Dataset: {train_dataset}")
 
-            for G in [4, 16, 32]:
+            for G in [4, 16, 32, 64]:
                 # Figure A: pass@k (one per eval benchmark)
                 for bench in EVAL_BENCHMARKS:
                     figure_a_pass_at_k(

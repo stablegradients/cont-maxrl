@@ -62,9 +62,9 @@ MODELS = {
         "max_num_batched_tokens": 8192,
         "max_num_seqs": 1024,
         "gpu_memory_utilization": "0.5",
-        "seeds": [42, 43, 44],
+        "seeds": [42],
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
-        "group_sizes": [4, 16, 32],
+        "group_sizes": [4, 16, 32, 64],
         "slurm_time": "8:00:00",
         "slurm_mem": "64G",
         "slurm_gpus": 4,
@@ -80,9 +80,9 @@ MODELS = {
         "max_num_batched_tokens": 8192,
         "max_num_seqs": 512,
         "gpu_memory_utilization": "0.5",
-        "seeds": [42, 43, 44],
+        "seeds": [42],
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
-        "group_sizes": [4, 16, 32],
+        "group_sizes": [4, 16, 32, 64],
         "slurm_time": "20:00:00",
         "slurm_mem": "128G",
         "slurm_gpus": 4,
@@ -98,9 +98,9 @@ MODELS = {
         "max_num_batched_tokens": 4096,
         "max_num_seqs": 256,
         "gpu_memory_utilization": "0.5",
-        "seeds": [42, 43],
+        "seeds": [42],
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm"],
-        "group_sizes": [16, 32],
+        "group_sizes": [16, 32, 64],
         "slurm_time": "36:00:00",
         "slurm_mem": "384G",
         "slurm_gpus": 8,
@@ -110,7 +110,8 @@ MODELS = {
 }
 
 TOTAL_STEPS = 300
-BATCH_SIZE = 128
+TOTAL_ROLLOUTS_PER_STEP = 4096
+DEFAULT_BATCH_SIZE = 128
 MINI_BATCH = 32
 PPO_EPOCHS = 1
 LR = "1e-6"
@@ -127,6 +128,11 @@ SAVE_FREQ = 50
 RAY_NUM_CPUS = 16
 
 
+def _batch_size_for_g(G: int) -> int:
+    """Compute batch size to keep total rollouts/step constant at 4096."""
+    return TOTAL_ROLLOUTS_PER_STEP // G
+
+
 def generate_train_script(
     model_key: str,
     model_cfg: dict,
@@ -138,6 +144,7 @@ def generate_train_script(
 ) -> str:
     """Generate a standalone training script (works as both bash and sbatch)."""
     hf_id = model_cfg["hf_id"]
+    batch_size = _batch_size_for_g(G)
     exp_name = f"{model_key}_{dataset}_{method}_g{G}_s{seed}"
     wandb_group = f"{model_key}_{dataset}_{method}_g{G}"
 
@@ -148,6 +155,7 @@ def generate_train_script(
 #SBATCH --time={model_cfg['slurm_time']}
 #SBATCH --mem={model_cfg['slurm_mem']}
 #SBATCH --cpus-per-task={model_cfg['slurm_cpus']}
+#SBATCH --exclude=gpu20,gpu21,gpu22,gpu23
 #SBATCH --output=results/{exp_name}/slurm_%j.out
 #SBATCH --error=results/{exp_name}/slurm_%j.err"""
 
@@ -204,7 +212,7 @@ $PYTHON "${{REPO_ROOT}}/experiment4_llm/src/train.py" \\
   algorithm.kl_ctrl.kl_coef={KL_COEF} \\
   data.train_files="${{REPO_ROOT}}/data/{dataset_cfg['train_file']}" \\
   data.val_files="${{REPO_ROOT}}/data/{dataset_cfg['val_file']}" \\
-  data.train_batch_size={BATCH_SIZE} \\
+  data.train_batch_size={batch_size} \\
   data.max_prompt_length={MAX_PROMPT_LEN} \\
   data.max_response_length={MAX_RESPONSE_LEN} \\
   data.shuffle=True \\
@@ -285,6 +293,7 @@ def generate_eval_script(
 #SBATCH --time=4:00:00
 #SBATCH --mem={model_cfg['slurm_mem']}
 #SBATCH --cpus-per-task={model_cfg['slurm_cpus']}
+#SBATCH --exclude=gpu20,gpu21,gpu22,gpu23
 #SBATCH --output=results/{exp_name}/eval_{eval_benchmark}/slurm_%j.out
 #SBATCH --error=results/{exp_name}/eval_{eval_benchmark}/slurm_%j.err"""
 
@@ -383,12 +392,14 @@ def main():
 
     # Print summary table
     print("\n=== Experiment Matrix ===")
-    print(f"{'Model':<6} {'Datasets':<30} {'Methods':<45} {'G sizes':<15} {'Seeds':<12}")
-    print("-" * 115)
+    print(f"{'Model':<6} {'Datasets':<30} {'Methods':<45} {'G (B)':<20} {'Seeds':<12}")
+    print("-" * 120)
     for model_key, model_cfg in MODELS.items():
         datasets = ", ".join(TRAIN_DATASETS.keys())
         methods = ", ".join(model_cfg["methods"])
-        g_sizes = ", ".join(str(g) for g in model_cfg["group_sizes"])
+        g_sizes = ", ".join(
+            f"{g}(B={_batch_size_for_g(g)})" for g in model_cfg["group_sizes"]
+        )
         seeds = ", ".join(str(s) for s in model_cfg["seeds"])
         n_train = (
             len(TRAIN_DATASETS)
