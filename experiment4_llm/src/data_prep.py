@@ -273,6 +273,19 @@ def prepare_taco(
         if record is not None:
             records.append(record)
 
+    # Deduplicate by prompt text
+    seen_prompts = set()
+    unique_records = []
+    for r in records:
+        prompt_key = str(r["prompt"])
+        if prompt_key not in seen_prompts:
+            seen_prompts.add(prompt_key)
+            unique_records.append(r)
+    n_dedup = len(records) - len(unique_records)
+    if n_dedup:
+        print(f"  Removed {n_dedup} duplicate prompts ({len(records)} -> {len(unique_records)})")
+    records = unique_records
+
     # Split into train/val
     rng = random.Random(seed)
     rng.shuffle(records)
@@ -373,6 +386,19 @@ def prepare_code_contests(
             record = make_record("code_contests", prompt_text, test_cases, max_tests)
             if record is not None:
                 records.append(record)
+
+        # Deduplicate by prompt text
+        seen_prompts = set()
+        unique_records = []
+        for r in records:
+            prompt_key = str(r["prompt"])
+            if prompt_key not in seen_prompts:
+                seen_prompts.add(prompt_key)
+                unique_records.append(r)
+        n_dedup = len(records) - len(unique_records)
+        if n_dedup:
+            print(f"  Removed {n_dedup} duplicate prompts ({len(records)} -> {len(unique_records)})")
+        records = unique_records
 
         output_path = Path(output_dir) / f"code_contests_{out_name}.parquet"
         write_parquet(records, output_path)

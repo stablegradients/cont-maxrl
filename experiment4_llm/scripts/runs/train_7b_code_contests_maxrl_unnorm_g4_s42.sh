@@ -95,6 +95,11 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.free_cache_engine=True \
   actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
   actor_rollout_ref.rollout.enable_chunked_prefill=False \
+  actor_rollout_ref.rollout.val_kwargs.n=4 \
+  actor_rollout_ref.rollout.val_kwargs.do_sample=True \
+  actor_rollout_ref.rollout.val_kwargs.temperature=1.0 \
+  actor_rollout_ref.rollout.val_kwargs.top_p=1.0 \
+  actor_rollout_ref.rollout.val_kwargs.top_k=-1 \
   reward_model.enable=False \
   custom_reward_function.path="${REPO_ROOT}/experiment4_llm/src/reward_function.py" \
   custom_reward_function.name=compute_score \
