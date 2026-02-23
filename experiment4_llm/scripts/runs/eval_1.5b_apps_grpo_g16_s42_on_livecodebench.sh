@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:4
 #SBATCH --time=47:00:00
 #SBATCH --mem=256G
-#SBATCH --cpus-per-task=120
+#SBATCH --cpus-per-task=48
 #SBATCH --nodes=1
 #SBATCH --exclude=gpu20,gpu21,gpu22,gpu23
 #SBATCH --output=/zfsauton/scratch/shrinivr/cont-maxrl/results/1.5b_apps_grpo_g16_s42/eval_livecodebench/slurm_%j.out
