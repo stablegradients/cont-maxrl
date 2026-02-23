@@ -60,6 +60,195 @@ Given `N` rollouts with rewards `r_1, ..., r_N`, the gradient estimator has a cl
 
 ---
 
+## Quick Start
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/stablegradients/cont-maxrl.git
+cd cont-maxrl
+```
+
+### 2. Install the environment
+
+The setup script creates a conda env with Python 3.10, CUDA 12.4 toolkit, PyTorch 2.6.0, flash-attention 2.7.4, vLLM 0.8.3, verl 0.2.0 (vendored with patches), and all dependencies.
+
+```bash
+bash experiment4_llm/setup.sh
+conda activate cont-maxrl
+```
+
+This takes ~30 minutes (flash-attention builds from source for sm_86). If your GPUs are not A5000/A6000, edit `TORCH_CUDA_ARCH_LIST` in `setup.sh` before running (e.g. `"8.0"` for A100, `"9.0"` for H100).
+
+### 3. Verify installation
+
+```bash
+python experiment4_llm/scripts/check_env.py
+pytest experiment4_llm/tests/ -q
+```
+
+All 179 tests should pass.
+
+### 4. Download and prepare datasets
+
+```bash
+bash experiment4_llm/scripts/download_data.sh
+```
+
+This downloads from HuggingFace, deduplicates, and creates parquet files in `data/`:
+
+| Dataset | Train | Val/Test | Source |
+|---------|-------|----------|--------|
+| APPS | 1,980 (`apps_train.parquet`) | 3,393 (`apps_test.parquet`) | `codeparrot/apps` |
+| TACO-verified | 5,187 (`taco_train.parquet`) | 576 (`taco_val.parquet`, 10% held out) | `likaixin/TACO-verified` |
+| CodeContests | 11,530 (`code_contests_train.parquet`) | 162 (`code_contests_test.parquet`) | `deepmind/code_contests` |
+| LiveCodeBench | — (eval-only) | 529 (`livecodebench_test.parquet`) | `livecodebench/code_generation_lite` |
+
+### 5. Download model weights
+
+```bash
+bash experiment4_llm/scripts/download_models.sh
+```
+
+Pre-downloads Qwen2.5-Coder weights (1.5B, 7B, 32B) so training doesn't block on HF downloads.
+
+### 6. Generate experiment scripts
+
+```bash
+python experiment4_llm/scripts/generate_run_scripts.py
+```
+
+Generates 123 training + 369 evaluation scripts in `experiment4_llm/scripts/runs/`.
+
+**Important:** The generated scripts contain hardcoded paths (`REPO_ROOT`, `PYTHON`, `CUDA_HOME`). If running on a different machine, edit the three path variables at the top of `generate_run_scripts.py` and re-run it.
+
+### 7. Run training
+
+```bash
+# Run locally (SBATCH lines are ignored)
+bash experiment4_llm/scripts/runs/train_1.5b_taco_grpo_g4_s42.sh
+
+# Or submit to SLURM
+sbatch experiment4_llm/scripts/runs/train_1.5b_taco_grpo_g4_s42.sh
+
+# Submit all 1.5B TACO experiments
+for f in experiment4_llm/scripts/runs/train_1.5b_taco_*.sh; do sbatch "$f"; done
+```
+
+### 8. Evaluate (cross-benchmark)
+
+After training, evaluate each checkpoint on all benchmarks:
+
+```bash
+# Evaluate TACO-trained model on all benchmarks
+for f in experiment4_llm/scripts/runs/eval_1.5b_taco_grpo_g4_s42_on_*.sh; do
+  sbatch "$f"
+done
+
+# Or run a single benchmark eval
+bash experiment4_llm/scripts/runs/eval_1.5b_taco_grpo_g4_s42_on_livecodebench.sh
+```
+
+Each eval script generates 200 completions per test problem at temperature 0.8 and computes unbiased pass@k for k in {1, 2, 5, 10, 20, 50, 100}.
+
+---
+
+## Experiment 4: LLM Code Generation
+
+### Methods
+
+| Method | Config key | Description |
+|--------|-----------|-------------|
+| GRPO | `grpo` | `A_i = (r_i - mean) / std` (z-score, mean-seeking) |
+| MaxRL (unnorm) | `maxrl_unnorm` | Gap-over-survivors, mean-centered (tail-seeking) |
+| MaxRL (norm) | `maxrl_norm` | Gap-over-survivors, mean-centered + std-normalized |
+| REINFORCE+baseline | `reinforce_baseline` | `A_i = r_i - mean` |
+
+### Experiment Matrix
+
+| Model | Methods | Group sizes (G) | Seeds | Train scripts |
+|-------|---------|-----------------|-------|---------------|
+| 1.5B (`Qwen2.5-Coder-1.5B-Instruct`) | all 4 | 4, 16, 32, 64 | 42 | 48 |
+| 7B (`Qwen2.5-Coder-7B-Instruct`) | all 4 | 4, 16, 32, 64 | 42 | 48 |
+| 32B (`Qwen2.5-Coder-32B-Instruct`) | grpo, maxrl_unnorm, maxrl_norm | 16, 32, 64 | 42 | 27 |
+
+Each trained model is evaluated on **3 benchmarks** (APPS, CodeContests, LiveCodeBench) for cross-dataset generalization.
+
+### Training Hyperparameters
+
+| Parameter | Value |
+|-----------|-------|
+| Total steps | 150 |
+| PPO epochs | 1 |
+| Learning rate | 1e-6 |
+| KL coefficient (beta) | 0.001 |
+| Clip ratio | 0.2 / 0.28 |
+| Temperature (train) | 1.0 |
+| Temperature (eval) | 0.8 |
+| Max prompt length | 1024 |
+| Max response length | 1024 |
+| Checkpoint frequency | every 25 steps |
+| Validation frequency | every 20 steps |
+| FSDP | full sharding (`fsdp_size=-1`) |
+
+Batch sizes depend on G (group size):
+- G=4: batch_size=1024, 4096 rollouts/step
+- G=16: batch_size=128, 2048 rollouts/step
+- G=32: batch_size=64, 2048 rollouts/step
+- G=64: batch_size=32, 2048 rollouts/step
+
+### Reward Function
+
+The reward for each generated solution is **continuous** in `[0, 1]`:
+
+```
+reward = (number of test cases passed) / (total test cases)
+```
+
+Each test case is executed in a sandbox with a 1-second timeout and 512MB memory limit.
+
+### Inline Validation
+
+During training (every 20 steps), the model generates G completions per validation problem with sampling (temperature 1.0). Metrics logged to wandb:
+
+- `val-core/{dataset}/reward/mean@G` — mean reward across G completions
+- `val-core/{dataset}/reward/best@G/mean` — mean best-of-G reward (best@k)
+
+### Post-Training Evaluation
+
+After training, standalone eval scripts generate 200 completions per test problem at temperature 0.8 and compute unbiased pass@k for k in {1, 2, 5, 10, 20, 50, 100}.
+
+### Script Naming Convention
+
+```
+experiment4_llm/scripts/runs/
+├── train_{model}_{dataset}_{method}_g{G}_s{seed}.sh
+└── eval_{model}_{dataset}_{method}_g{G}_s{seed}_on_{benchmark}.sh
+```
+
+Examples:
+- `train_1.5b_taco_maxrl_unnorm_g16_s42.sh` — train on TACO
+- `eval_1.5b_taco_maxrl_unnorm_g16_s42_on_livecodebench.sh` — eval TACO-trained model on LiveCodeBench
+
+### Results Directory
+
+```
+results/
+└── 1.5b_taco_maxrl_unnorm_g16_s42/
+    ├── global_step_25/               # Checkpoint (model + optimizer shards)
+    ├── global_step_50/
+    ├── ...
+    ├── latest_checkpointed_iteration.txt
+    ├── slurm_*.out / slurm_*.err
+    ├── eval_apps/
+    │   ├── completions.json
+    │   └── eval_results.json
+    ├── eval_code_contests/
+    └── eval_livecodebench/
+```
+
+---
+
 ## Repository Structure
 
 ```
@@ -80,231 +269,22 @@ cont-maxrl/
 │   │   ├── verl_register.py           # verl integration (estimator dispatch table)
 │   │   ├── train.py                   # Hydra entrypoint for training
 │   │   ├── evaluate.py                # Evaluation + pass@k computation
-│   │   ├── data_prep.py               # Multi-dataset preparation (APPS, TACO, CodeContests, LiveCodeBench)
-│   │   └── sandbox.py                 # Sandboxed code execution
+│   │   ├── data_prep.py               # Dataset preparation with deduplication
+│   │   └── sandbox.py                 # Sandboxed code execution (1s timeout)
 │   ├── scripts/
+│   │   ├── setup.sh                   # Full environment setup (conda + CUDA + all deps)
+│   │   ├── download_data.sh           # Download and prepare all datasets
+│   │   ├── download_models.sh         # Pre-download model weights
+│   │   ├── generate_run_scripts.py    # Generate all experiment scripts
+│   │   ├── check_env.py               # Verify installation
 │   │   ├── dry_run.sh                 # Quick 3-step test (0.5B model, 2 GPUs)
-│   │   ├── generate_run_scripts.py    # Generate all experiment scripts (252 train + 756 eval)
-│   │   ├── runs/                      # Generated bash+SLURM scripts
 │   │   ├── create_dry_run_data.py     # Tiny parquet dataset for testing
-│   │   └── check_env.py               # Verify installation
-│   └── tests/                         # 126 tests covering math, integration, gradients
+│   │   └── runs/                      # Generated bash+SLURM scripts
+│   └── tests/                         # 179 tests
 │
-├── vendor/verl/                       # Vendored verl (git submodule, patched)
-├── data/                              # Training data (parquet)
-└── results/                           # Output from training runs
-```
-
----
-
-## Quick Start
-
-### 1. Clone and set up the environment
-
-```bash
-git clone --recurse-submodules <repo-url>
-cd cont-maxrl
-
-# Create conda env with Python 3.12
-conda create -n cont-maxrl python=3.12 -y
-conda activate cont-maxrl
-
-# Install PyTorch (CUDA 12.8)
-pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu128
-
-# Install vllm + verl
-pip install vllm==0.12.0
-pip install -e vendor/verl
-
-# Install project
-pip install -e .
-
-# Install remaining deps
-pip install ray==2.54.0 "transformers>=4.45,<5" datasets hydra-core wandb
-```
-
-### 2. Verify installation
-
-```bash
-python experiment4_llm/scripts/check_env.py
-pytest experiment4_llm/tests/ -q
-```
-
-### 3. Run the dry run (2 GPUs, ~20 minutes)
-
-```bash
-# Create tiny test data
-python experiment4_llm/scripts/create_dry_run_data.py
-
-# Run 3 training steps with 0.5B model
-bash experiment4_llm/scripts/dry_run.sh
-```
-
-### 4. Prepare datasets
-
-```bash
-# Prepare all datasets (APPS, TACO, CodeContests, LiveCodeBench)
-python experiment4_llm/src/data_prep.py --dataset all --output_dir data/
-
-# Or prepare individually
-python experiment4_llm/src/data_prep.py --dataset apps --output_dir data/
-python experiment4_llm/src/data_prep.py --dataset taco --output_dir data/
-python experiment4_llm/src/data_prep.py --dataset code_contests --output_dir data/
-python experiment4_llm/src/data_prep.py --dataset livecodebench --output_dir data/
-```
-
-This downloads from HuggingFace and creates parquet files:
-
-| Dataset | Train | Test | Source |
-|---------|-------|------|--------|
-| APPS | `apps_train.parquet` | `apps_test.parquet` | `codeparrot/apps` |
-| TACO-verified | `taco_train.parquet` | `taco_val.parquet` (10% held out) | `likaixin/TACO-verified` |
-| CodeContests | `code_contests_train.parquet` | `code_contests_test.parquet` | `deepmind/code_contests` |
-| LiveCodeBench | — (eval-only) | `livecodebench_test.parquet` | `livecodebench/code_generation_lite` |
-
-### 5. Run experiments
-
-```bash
-# Generate all scripts (252 train + 756 cross-benchmark eval)
-python experiment4_llm/scripts/generate_run_scripts.py
-
-# Run locally
-bash experiment4_llm/scripts/runs/train_1.5b_apps_maxrl_unnorm_g16_s42.sh
-
-# Or submit to SLURM (SBATCH headers are embedded in each script)
-sbatch experiment4_llm/scripts/runs/train_1.5b_apps_maxrl_unnorm_g16_s42.sh
-
-# Submit all 1.5B APPS experiments
-for f in experiment4_llm/scripts/runs/train_1.5b_apps_*.sh; do sbatch "$f"; done
-
-# Submit all 1.5B experiments (all datasets)
-for f in experiment4_llm/scripts/runs/train_1.5b_*.sh; do sbatch "$f"; done
-```
-
-### 6. Evaluate (cross-benchmark)
-
-Each trained model gets eval scripts for **every** benchmark:
-
-```bash
-# Evaluate APPS-trained model on all benchmarks
-for f in experiment4_llm/scripts/runs/eval_1.5b_apps_maxrl_unnorm_g16_s42_on_*.sh; do
-  sbatch "$f"
-done
-
-# Or run a single benchmark eval
-bash experiment4_llm/scripts/runs/eval_1.5b_apps_maxrl_unnorm_g16_s42_on_livecodebench.sh
-```
-
----
-
-## Experiment 4: LLM Code Generation
-
-### Overview
-
-Train Qwen2.5-Coder models on programming problems using continuous rewards (fraction of test cases passed) instead of binary pass/fail across multiple datasets. Compare four advantage estimators:
-
-| Method | Config key | Description |
-|--------|-----------|-------------|
-| GRPO | `grpo` | `A_i = (r_i - mean) / std` (z-score, mean-seeking) |
-| MaxRL (unnorm) | `maxrl_unnorm` | Gap-over-survivors, mean-centered (tail-seeking) |
-| MaxRL (norm) | `maxrl_norm` | Gap-over-survivors, mean-centered + std-normalized |
-| REINFORCE+baseline | `reinforce_baseline` | `A_i = r_i - mean` |
-
-### Datasets
-
-| Dataset | Problems (train) | Problems (test) | Source | Use |
-|---------|-----------------|-----------------|--------|-----|
-| APPS | ~3K | ~2K | `codeparrot/apps` | Train + eval |
-| TACO-verified | ~7.5K | — | `likaixin/TACO-verified` | Train only |
-| CodeContests | ~3.7K | ~165 | `deepmind/code_contests` | Train + eval |
-| LiveCodeBench | — | ~880 | `livecodebench/code_generation_lite` | Eval only |
-
-### Experiment Matrix
-
-Training: 3 datasets x (models x methods x G x seeds):
-
-| Model | Methods | Group sizes (G) | Seeds | Train scripts |
-|-------|---------|-----------------|-------|---------------|
-| 1.5B (`Qwen2.5-Coder-1.5B-Instruct`) | all 4 | 4, 16, 32 | 42, 43, 44 | 108 |
-| 7B (`Qwen2.5-Coder-7B-Instruct`) | all 4 | 4, 16, 32 | 42, 43, 44 | 108 |
-| 32B (`Qwen2.5-Coder-32B-Instruct`) | grpo, maxrl_unnorm, maxrl_norm | 16, 32 | 42, 43 | 36 |
-
-Each trained model is evaluated on **3 benchmarks** (APPS, CodeContests, LiveCodeBench).
-
-**Total: 252 training + 756 evaluation = 1008 scripts**
-
-### Training Hyperparameters (fixed across experiments)
-
-| Parameter | Value |
-|-----------|-------|
-| Total steps | 300 |
-| Batch size | 128 |
-| Mini batch | 32 |
-| PPO epochs | 1 |
-| Learning rate | 1e-6 |
-| KL coefficient | 0.001 |
-| Clip ratio | 0.2 / 0.28 |
-| Temperature (train) | 1.0 |
-| Temperature (eval) | 0.8 |
-| Max prompt length | 1024 |
-| Max response length | 2048 |
-| Checkpoint frequency | every 50 steps |
-
-### Reward Function
-
-The reward for each generated solution is **continuous** in `[0, 1]`:
-
-```
-reward = (number of test cases passed) / (total test cases)
-```
-
-Each test case is executed in a sandbox with a 10-second timeout and 512MB memory limit. This provides a richer training signal than binary pass/fail.
-
-### Evaluation
-
-After training, each checkpoint is evaluated by:
-
-1. Generating 200 completions per test problem at temperature 0.8
-2. Executing each completion against all test cases (binary: all pass or not)
-3. Computing unbiased pass@k for k in {1, 2, 5, 10, 20, 50, 100}
-
-### Compute Requirements
-
-| Model | GPUs | SLURM memory | Time estimate |
-|-------|------|-------------|---------------|
-| 1.5B | 4 | 64 GB | ~8 hours |
-| 7B | 4 | 128 GB | ~20 hours |
-| 32B | 8 | 384 GB | ~36 hours |
-
-### Generated Script Naming Convention
-
-```
-experiment4_llm/scripts/runs/
-├── train_{model}_{dataset}_{method}_g{G}_s{seed}.sh
-└── eval_{model}_{dataset}_{method}_g{G}_s{seed}_on_{benchmark}.sh
-```
-
-Examples:
-- `train_1.5b_apps_maxrl_unnorm_g16_s42.sh` — train on APPS
-- `train_1.5b_taco_maxrl_unnorm_g16_s42.sh` — train on TACO
-- `eval_1.5b_apps_maxrl_unnorm_g16_s42_on_livecodebench.sh` — eval APPS-trained model on LiveCodeBench
-
-Each script works both as a standalone bash script (`bash script.sh`) and as a SLURM job (`sbatch script.sh`). SLURM directives are embedded as `#SBATCH` comments at the top.
-
-### Results Directory Structure
-
-```
-results/
-└── 1.5b_apps_maxrl_unnorm_g16_s42/
-    ├── global_step_50/               # Checkpoint at step 50
-    ├── global_step_100/              # Checkpoint at step 100
-    ├── ...
-    ├── slurm_12345.out               # SLURM stdout
-    ├── eval_apps/                    # Same-dataset eval
-    │   ├── completions.json
-    │   └── eval_results.json
-    ├── eval_code_contests/           # Cross-dataset eval on CodeContests
-    └── eval_livecodebench/           # Cross-dataset eval on LiveCodeBench
+├── vendor/verl/                       # Vendored verl 0.2.0.dev (patched)
+├── data/                              # Training/eval data (parquet, not in git)
+└── results/                           # Training outputs (not in git)
 ```
 
 ---
@@ -353,86 +333,17 @@ Each experiment produces:
 - `metrics_summary.json` — aggregated final metrics by method and N
 - `fig1_scaling_curves.png` through `fig4_*.png` — paper figures
 
-Regenerate figures without retraining:
-
-```bash
-python experiment1c_scaling.py --plots-only --output-dir results_1c --metrics-path results_1c/metrics.json
-```
-
 ---
 
-## Key Results (Bandit Experiments)
+## Vendored verl Patches
 
-### Experiment 1 — Moderate environment (50 arms, 5 Type B)
+verl 0.2.0.dev is vendored at `vendor/verl/` with the following patches:
 
-| N | Method | E[r] | Best-of-N | ILS | π(B) |
-|---|--------|------|-----------|-----|------|
-| 256 | GRPO | **0.806** | 0.962 | -0.770 | 0.0% |
-| 256 | Cont. MaxRL (unnorm) | 0.766 | **0.987** | **-0.627** | **8.9%** |
-| — | ILS-Optimal | 0.753 | 0.992 | -0.605 | 12.8% |
-
-### Experiment 2 — Hard environment (100 arms, 3 Type B)
-
-| N | Method | E[r] | Best-of-16 | Best-of-N | ILS | π(B) |
-|---|--------|------|-----------|-----------|-----|------|
-| 1024 | GRPO | **0.504** | 0.764 | 0.911 | -2.155 | <0.1% |
-| 1024 | MaxRL (unnorm) | 0.398 | **0.821** | **0.998** | **-1.581** | **31.5%** |
-
----
-
-## Methods
-
-| Key | Label | Description |
-|-----|-------|-------------|
-| `grpo` | GRPO | `A_i = (r_i - mean) / std`, z-score normalization |
-| `maxrl_unnorm` | Cont. MaxRL (unnorm) | Gap-over-survivors weights, centered only |
-| `maxrl_norm` | Cont. MaxRL (norm) | Gap-over-survivors weights, centered and std-normalized |
-| `reinforce_baseline` | REINFORCE+baseline | `A_i = r_i - mean` |
-
-The **unnormalized** variant is theoretically cleaner and recommended. Dividing by the within-batch std compresses the weight spike, reducing the tail amplification that distinguishes MaxRL from GRPO.
-
----
-
-## Tests
-
-```bash
-# Run all 126 tests
-pytest experiment4_llm/tests/ -q
-
-# Test categories:
-#   test_advantages_core.py          - Worked examples, edge cases, algebraic properties
-#   test_advantages_cross_method.py  - Relationships between methods
-#   test_advantages_batch.py         - Batch-level behavior
-#   test_reward.py                   - Code extraction, partial scoring
-#   test_sandbox.py                  - Sandboxed execution
-#   test_integration_critical.py     - PPO gradient direction, verl wrapper, dry run verification
-#   test_verl_integration.py         - Custom estimator enum + dispatch
-```
-
----
-
-## Technical Notes
-
-### verl Integration
-
-Custom advantage estimators are integrated directly into the vendored verl source (`vendor/verl/verl/trainer/ppo/ray_trainer.py`). This is necessary because verl uses Ray actors, and monkey-patching in the driver process does not propagate to worker processes.
-
-The dispatch table lives in `experiment4_llm/src/verl_register.py` and is imported by `ray_trainer.py` at compute-advantage time. The `PYTHONPATH` must include the repo root for this import to work (all generated scripts set this).
-
-### Environment Requirements
-
-- The generated scripts use the full Python path (`/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python`) rather than `conda activate` to avoid PATH contamination.
-- `RAY_TMPDIR` and `TMPDIR` are set to `/tmp/` (local disk) to avoid NFS socket path limits and cleanup issues.
-- `PYTHONNOUSERSITE=1` prevents user-site packages from interfering.
-
-### Data Format
-
-verl expects **parquet** files with columns:
-- `data_source`: string identifier (e.g., `"apps"`)
-- `prompt`: list of chat message dicts (`[{"role": "system", ...}, {"role": "user", ...}]`)
-- `reward_model`: dict with `"ground_truth"` key containing JSON test cases
-
-The `data_prep.py` script handles the conversion from HuggingFace datasets (APPS, TACO, CodeContests, LiveCodeBench) to this format.
+| File | Patch |
+|------|-------|
+| `verl/trainer/ppo/ray_trainer.py` | Added `MAXRL_UNNORM`, `MAXRL_NORM`, `REINFORCE_BASELINE` to `AdvantageEstimator` enum; dispatch to custom estimators in `experiment4_llm.src.verl_register` |
+| `verl/workers/fsdp_workers.py` | `AutoModelForVision2Seq` → `AutoModelForImageTextToText` (transformers compat); guard `reshard(True)` calls with `uses_sharded_strategy` check (prevents crash with NO_SHARD) |
+| `verl/utils/checkpoint/fsdp_checkpoint_manager.py` | Same AutoModel rename |
 
 ---
 
@@ -442,14 +353,42 @@ The `data_prep.py` script handles the conversion from HuggingFace datasets (APPS
 - Reduce `gpu_memory_utilization` in the script or ensure GPUs have enough free memory.
 - Check `nvidia-smi` — other processes may be using GPU memory.
 
+**`AssertionError: Expects sharded strategy` (FSDP reshard)**
+- Already fixed in vendored verl. The `reshard(True)` calls are guarded with `uses_sharded_strategy`.
+
+**CUDA OOM during `optimizer.step()` for 1.5B on 24GB GPUs**
+- `fsdp_size=1` (NO_SHARD) is impossible on 24GB GPUs for 1.5B — model + optimizer + gradients = 24GB with no room for activations.
+- Use `fsdp_size=-1` (FULL_SHARD). This is already the default.
+
 **`Ray AF_UNIX socket path too long`**
 - Already fixed: scripts use `RAY_TMPDIR=/tmp/ray_${USER}` to avoid long NFS paths.
 
 **`ImportError: cannot import name 'experiment4_llm'`**
 - Ensure `PYTHONPATH` includes the repo root. All generated scripts set this automatically.
 
-**`NotImplementedError` in `compute_advantage`**
-- The custom estimators must be patched into `vendor/verl/verl/trainer/ppo/ray_trainer.py`. Run `git submodule update --init` and verify the patches exist.
+**Flash-attention build fails**
+- Ensure `CUDA_HOME` points to conda's CUDA 12.4, not the system CUDA. The setup script handles this.
+- If your GPUs are not sm_86, edit `TORCH_CUDA_ARCH_LIST` in `setup.sh`.
 
-**NFS `.nfs*` cleanup errors during shutdown**
-- Harmless. Set `TMPDIR=/tmp/${USER}_verl_tmp` to avoid (already done in generated scripts).
+**Training resumes from old checkpoint instead of starting fresh**
+- verl auto-resumes from `results/{experiment}/latest_checkpointed_iteration.txt`. Delete or rename the results directory to start fresh.
+
+---
+
+## Tests
+
+```bash
+# Run all 179 tests
+pytest experiment4_llm/tests/ -q
+
+# Test categories:
+#   test_advantages_core.py          - Worked examples, edge cases, algebraic properties
+#   test_advantages_cross_method.py  - Relationships between methods
+#   test_advantages_batch.py         - Batch-level behavior
+#   test_reward.py                   - Code extraction, partial scoring
+#   test_sandbox.py                  - Sandboxed execution
+#   test_integration_critical.py     - PPO gradient direction, verl wrapper
+#   test_verl_integration.py         - Custom estimator enum + dispatch
+#   test_data_prep.py                - Dataset preparation + deduplication
+#   test_generate_scripts.py         - Script generation
+```

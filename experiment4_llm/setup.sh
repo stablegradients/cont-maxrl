@@ -110,6 +110,7 @@ pip install \
   pyarrow==18.1.0 \
   orjson==3.10.12 \
   tensordict<=0.6.2 \
+  torchdata==0.11.0 \
   pytest==8.3.4 \
   pytest-timeout==2.3.1
 
