@@ -18,6 +18,7 @@ FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
 
+import gc
 import json
 import os
 import uuid
@@ -1082,6 +1083,10 @@ class RayPPOTrainer:
                             if is_last_step:
                                 last_val_metrics = val_metrics
                         metrics.update(val_metrics)
+
+                    # Free memory between validation and checkpoint save to avoid OOM
+                    gc.collect()
+                    torch.cuda.empty_cache()
 
                     if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
                         with _timer("save_checkpoint", timing_raw):
