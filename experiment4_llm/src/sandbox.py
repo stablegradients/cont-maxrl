@@ -154,6 +154,7 @@ def execute_in_sandbox(
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
+            cwd=tmp_dir,
             env={
                 "PATH": os.environ.get("PATH", ""),
                 "HOME": os.environ.get("HOME", "/tmp"),
