@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--completions_file", type=str, required=True)
     parser.add_argument("--data_file", type=str, required=True)
     parser.add_argument("--output_file", type=str, required=True)
-    parser.add_argument("--timeout_per_test", type=int, default=10)
+    parser.add_argument("--timeout_per_test", type=int, default=1)
     parser.add_argument(
         "--k_values", type=int, nargs="+",
         default=[1, 2, 5, 10, 20, 50, 100],

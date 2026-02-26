@@ -20,6 +20,7 @@ import argparse
 import json
 import math
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pandas as pd
@@ -126,8 +127,8 @@ def evaluate_completions(
     completions: list[list[str]],
     problems: list[dict],
     k_values: list[int] | None = None,
-    timeout_per_test: int = 10,
-    n_workers: int = 1,
+    timeout_per_test: int = 1,
+    n_workers: int = 128,
 ) -> dict:
     """
     Evaluate completions and compute pass@k.
@@ -136,8 +137,8 @@ def evaluate_completions(
         completions: completions[i] = list of code strings for problem i
         problems: list of problem dicts with ground_truth
         k_values: k values for pass@k
-        timeout_per_test: timeout per test case
-        n_workers: number of parallel workers for evaluation
+        timeout_per_test: timeout per test case (seconds)
+        n_workers: number of parallel threads for evaluation
 
     Returns:
         dict with:
@@ -150,28 +151,43 @@ def evaluate_completions(
     if k_values is None:
         k_values = [1, 2, 5, 10, 20, 50, 100]
 
-    per_problem_results = []
-
+    # Build flat list of all (problem_idx, code, ground_truth) for parallel eval
+    work_items = []
     for i, (problem, problem_completions) in enumerate(zip(problems, completions)):
         ground_truth = problem["reward_model"]["ground_truth"]
-        n = len(problem_completions)
-
-        # Count passing completions (binary: all tests pass)
-        c = 0
         for code in problem_completions:
-            score = compute_score_binary(
-                code, ground_truth, timeout_per_test=timeout_per_test
-            )
-            if score == 1.0:
-                c += 1
+            work_items.append((i, code, ground_truth))
 
-        # Compute pass@k for each k
+    print(f"  Evaluating {len(work_items)} completions with {n_workers} workers...")
+
+    def _score(item):
+        _, code, gt = item
+        return compute_score_binary(code, gt, timeout_per_test=timeout_per_test)
+
+    # Parallel evaluation
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        scores = list(pool.map(_score, work_items))
+
+    # Aggregate scores per problem
+    from collections import defaultdict
+    problem_pass_counts: dict[int, int] = defaultdict(int)
+    problem_total_counts: dict[int, int] = defaultdict(int)
+    for (prob_idx, _, _), score in zip(work_items, scores):
+        problem_total_counts[prob_idx] += 1
+        if score == 1.0:
+            problem_pass_counts[prob_idx] += 1
+
+    per_problem_results = []
+    for i in range(len(problems)):
+        n = problem_total_counts[i]
+        c = problem_pass_counts[i]
+
         problem_pass_at_k = {}
         for k in k_values:
             if k <= n:
                 problem_pass_at_k[k] = pass_at_k(n, c, k)
             else:
-                problem_pass_at_k[k] = None  # k > n, can't compute
+                problem_pass_at_k[k] = None
 
         per_problem_results.append({
             "problem_idx": i,
@@ -180,8 +196,7 @@ def evaluate_completions(
             "pass_at_k": problem_pass_at_k,
         })
 
-        if (i + 1) % 50 == 0:
-            print(f"  Evaluated {i + 1}/{len(problems)} problems")
+    print(f"  Evaluated {len(problems)} problems")
 
     # Macro-average pass@k
     avg_pass_at_k = {}
@@ -223,7 +238,9 @@ def main():
     parser.add_argument("--max_tokens", type=int, default=2048)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.85)
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
-    parser.add_argument("--timeout_per_test", type=int, default=10)
+    parser.add_argument("--timeout_per_test", type=int, default=1)
+    parser.add_argument("--n_workers", type=int, default=128,
+                        help="Number of parallel threads for reward evaluation")
     parser.add_argument(
         "--k_values", type=int, nargs="+",
         default=[1, 2, 5, 10, 20, 50, 100],
@@ -262,6 +279,7 @@ def main():
         problems=problems,
         k_values=args.k_values,
         timeout_per_test=args.timeout_per_test,
+        n_workers=args.n_workers,
     )
 
     # Save results
