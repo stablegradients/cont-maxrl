@@ -123,9 +123,37 @@ def reinforce_advantages(rewards: torch.Tensor) -> torch.Tensor:
     return rewards - rewards.mean()
 
 
+def continuous_maxrl_no_baseline(rewards: torch.Tensor) -> torch.Tensor:
+    """Gap-over-survivors advantage WITHOUT mean-centering baseline.
+
+    Same as cont_maxrl but skips the baseline subtraction step.
+    """
+    N = rewards.numel()
+    if N <= 1:
+        return torch.zeros_like(rewards)
+
+    sorted_rewards, sort_indices = torch.sort(rewards)
+
+    prev = torch.cat([torch.zeros(1, device=rewards.device), sorted_rewards[:-1]])
+    gaps = sorted_rewards - prev
+    survivors = torch.arange(N, 0, -1, device=rewards.device).float()
+
+    increments = gaps / survivors
+    weights = torch.cumsum(increments, dim=0)
+    weights = weights * N
+
+    # No mean-centering — raw weights only
+
+    advantages = torch.zeros(N, device=rewards.device)
+    advantages[sort_indices] = weights
+
+    return advantages
+
+
 # Dispatch dict for convenience
 ADVANTAGE_FNS = {
     "cont_maxrl": continuous_maxrl_advantages,
+    "cont_maxrl_no_bl": continuous_maxrl_no_baseline,
     "binary_maxrl": binary_maxrl_advantages,
     "grpo": grpo_advantages,
     "reinforce": reinforce_advantages,

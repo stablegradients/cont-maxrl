@@ -19,7 +19,7 @@ $PYTHON -m experiment5_ordinal.run \
     --seed 44 \
     --epochs 50 \
     --batch_size 64 \
-    --lr 1e-4 \
+    --lr 1e-3 \
     --input_size 224 \
     --data_dir "$REPO_ROOT/data/utkface" \
     --output_dir "$REPO_ROOT/experiment5_ordinal/results" \

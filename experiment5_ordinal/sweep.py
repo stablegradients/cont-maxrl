@@ -1,9 +1,9 @@
 """Auto-generate all standalone bash scripts for the experiment sweep.
 
-Generates 135 scripts total:
-- 15 supervised: 3 methods × 5 seeds
-- 100 RL: 4 methods × 5 N values × 5 seeds
-- 20 binary recovery (L=2): 4 RL methods × 5 seeds (N=64 only, plus supervised)
+Generates scripts:
+- 9 supervised: 3 methods × 3 seeds
+- 75 RL: 5 methods × 5 N values × 3 seeds
+- binary recovery (L=2): 5 RL methods × 3 seeds (N=64), plus supervised, plus higher N
 
 Usage:
     python -m experiment5_ordinal.sweep --output_dir experiment5_ordinal/scripts/runs
@@ -14,13 +14,13 @@ import os
 from pathlib import Path
 
 SUPERVISED_METHODS = ["ordinal_ce", "plain_ce", "mse"]
-RL_METHODS = ["cont_maxrl", "binary_maxrl", "grpo", "reinforce"]
-N_VALUES = [16, 64, 256, 1024, 4096]
+RL_METHODS = ["cont_maxrl", "cont_maxrl_no_bl", "binary_maxrl", "grpo", "reinforce"]
+N_VALUES = [16, 64, 256]
 SEEDS = [42, 43, 44]
 
 # LR by method type
 SUPERVISED_LR = "1e-3"
-RL_LR = "1e-4"
+RL_LR = "1e-3"
 
 SCRIPT_TEMPLATE = """#!/bin/bash
 # {description}

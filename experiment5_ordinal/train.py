@@ -187,7 +187,7 @@ def train_rl_epoch(
         all_exact_matches += (rewards == 1.0).sum().item()
 
         # MaxRL-specific stats (before mean-centering)
-        if method in ("cont_maxrl", "binary_maxrl"):
+        if method in ("cont_maxrl", "cont_maxrl_no_bl", "binary_maxrl"):
             for i in range(B):
                 r = rewards[i]
                 sorted_r, sort_idx = torch.sort(r)

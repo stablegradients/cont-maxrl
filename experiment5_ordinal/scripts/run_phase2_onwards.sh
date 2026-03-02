@@ -51,16 +51,16 @@ wait_all() {
 
 overall_start=$(date +%s)
 
-# ─── Phase 2: RL (L=100) — 60 runs (4 methods × 5 N × 3 seeds) ───
+# ─── Phase 2: RL (L=100) — 75 runs (5 methods × 5 N × 3 seeds) ───
 echo ""
 echo "=========================================="
 echo "  Phase 2: RL training (L=100)"
-echo "  60 runs (4 methods × 5 N × 3 seeds)"
+echo "  75 runs (5 methods × 5 N × 3 seeds)"
 echo "=========================================="
 phase2_start=$(date +%s)
 
 for N in 16 64 256 1024 4096; do
-    for method in cont_maxrl binary_maxrl grpo reinforce; do
+    for method in cont_maxrl cont_maxrl_no_bl binary_maxrl grpo reinforce; do
         for script in "$SCRIPT_DIR"/train_${method}_N${N}_L100_seed*.sh; do
             [ -f "$script" ] && run_job "$script"
         done
@@ -100,7 +100,7 @@ echo "  5 methods × 4 epochs (seed=42 only)"
 echo "=========================================="
 phase4_start=$(date +%s)
 
-METHODS="ordinal_ce plain_ce cont_maxrl grpo reinforce"
+METHODS="ordinal_ce plain_ce cont_maxrl cont_maxrl_no_bl grpo reinforce"
 EPOCHS="1 10 25 50"
 
 for METHOD in $METHODS; do

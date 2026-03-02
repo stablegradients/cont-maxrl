@@ -27,7 +27,7 @@ from .model import create_model
 from .train import train_supervised_epoch, train_rl_epoch
 
 SUPERVISED_METHODS = {"ordinal_ce", "plain_ce", "mse"}
-RL_METHODS = {"cont_maxrl", "binary_maxrl", "grpo", "reinforce"}
+RL_METHODS = {"cont_maxrl", "cont_maxrl_no_bl", "binary_maxrl", "grpo", "reinforce"}
 ALL_METHODS = SUPERVISED_METHODS | RL_METHODS
 
 # Epochs at which to save checkpoints for gradient analysis
@@ -43,12 +43,14 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=None,
-                        help="Learning rate. Default: 1e-3 for supervised, 1e-4 for RL.")
+                        help="Learning rate. Default: 1e-3.")
     parser.add_argument("--input_size", type=int, default=224)
     parser.add_argument("--data_dir", type=str, default="./data/utkface")
     parser.add_argument("--output_dir", type=str, default="./results")
     parser.add_argument("--wandb", action="store_true", help="Enable W&B logging")
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--run_suffix", type=str, default="",
+                        help="Suffix appended to run name (e.g. _lr1e-4)")
     return parser.parse_args()
 
 
@@ -57,15 +59,15 @@ def main():
 
     # Set default LR based on method type
     if args.lr is None:
-        args.lr = 1e-3 if args.method in SUPERVISED_METHODS else 1e-4
+        args.lr = 1e-3
 
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Run name and config
-    run_name = f"{args.method}_L{args.L}_N{args.N}_seed{args.seed}"
-    run_group = f"{args.method}_L{args.L}_N{args.N}"
+    run_name = f"{args.method}_L{args.L}_N{args.N}_seed{args.seed}{args.run_suffix}"
+    run_group = f"{args.method}_L{args.L}_N{args.N}{args.run_suffix}"
 
     print(f"\n{'='*60}")
     print(f"Run: {run_name}")
