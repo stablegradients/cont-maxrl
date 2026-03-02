@@ -1,0 +1,32 @@
+wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
+wandb: Currently logged in as: stablegradients. Use `wandb login --relogin` to force relogin
+wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: | Waiting for wandb.init()...wandb: Tracking run with wandb version 0.19.1
+wandb: Run data is saved locally in /zfsauton/scratch/shrinivr/cont-maxrl/wandb/run-20260302_041443-b0e7v2uu
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run grpo_L100_N16_seed44
+wandb: ⭐️ View project at https://wandb.ai/stablegradients/cont-maxrl-ordinal
+wandb: 🚀 View run at https://wandb.ai/stablegradients/cont-maxrl-ordinal/runs/b0e7v2uu
+Using device: cuda
+
+============================================================
+Run: grpo_L100_N16_seed44
+Method: grpo | N: 16 | L: 100 | Seed: 44
+LR: 0.0001 | Batch: 64 | Epochs: 50
+============================================================
+
+Loaded 23672 images from /zfsauton/scratch/shrinivr/cont-maxrl/data/utkface
+Split sizes: train=18937, val=2367, test=2368
+Model parameters: 11,227,812
+Epoch   1/50 | loss=-0.3390 | MAE=17.45 | J_ML=-0.4875 | 63.2s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/grpo_L100_N16_seed44/checkpoints/epoch_1.pt
+Epoch   2/50 | loss=-0.4614 | MAE=14.09 | J_ML=-0.6844 | 61.1s
+Epoch   3/50 | loss=-0.3288 | MAE=12.56 | J_ML=-0.9032 | 62.8s
+Epoch   4/50 | loss=-0.1791 | MAE=12.47 | J_ML=-1.0242 | 62.5s
+Epoch   5/50 | loss=-0.1245 | MAE=12.29 | J_ML=-1.1046 | 63.8s
+Epoch   6/50 | loss=-0.1010 | MAE=12.22 | J_ML=-1.1751 | 62.9s
+Epoch   7/50 | loss=-0.0901 | MAE=12.13 | J_ML=-1.2314 | 62.3s
+Epoch   8/50 | loss=-0.0722 | MAE=12.14 | J_ML=-1.2801 | 61.1s
+Epoch   9/50 | loss=-0.0642 | MAE=12.06 | J_ML=-1.3248 | 61.9s
+Epoch  10/50 | loss=-0.0626 | MAE=12.08 | J_ML=-1.3488 | 63.3s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/grpo_L100_N16_seed44/checkpoints/epoch_10.pt
+Epoch  11/50 | loss=-0.0543 | MAE=12.03 | J_ML=-1.3676 | 61.3s

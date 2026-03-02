@@ -69,6 +69,9 @@ def maxrl_unnormalized_advantage(rewards: torch.Tensor) -> torch.Tensor:
     # Step 4: Cumulative weight = cumsum(gaps / survivors)
     w_sorted = torch.cumsum(gaps / survivors, dim=0)
 
+    # Scale by G so the 1/G in the policy gradient loss doesn't shrink the gradient
+    w_sorted = w_sorted * G
+
     # Step 5: Mean-center
     w_centered = w_sorted - w_sorted.mean()
 

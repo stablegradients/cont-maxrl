@@ -243,6 +243,8 @@ def advantages_survival(rewards, eps, normalize):
     gaps = sr - prev
     survivors = torch.arange(N, 0, -1, device=dev, dtype=dt).view(1, N)
     w = torch.cumsum(gaps / survivors, dim=1)
+    # Scale by N so the 1/N in the policy gradient loss doesn't shrink the gradient
+    w = w * N
     w = w - w.mean(dim=1, keepdim=True)
     if normalize:
         std = w.std(dim=1, keepdim=True, unbiased=False)
@@ -287,6 +289,8 @@ def advantages_qw_maxrl(rewards, q_transform, beta=1.0, alpha=0.1, normalize=Fal
     gaps = Q_sr - Q_prev
     survivors = torch.arange(N, 0, -1, device=dev, dtype=dt).view(1, N)
     w = torch.cumsum(gaps / survivors, dim=1)
+    # Scale by N so the 1/N in the policy gradient loss doesn't shrink the gradient
+    w = w * N
     w = w - w.mean(dim=1, keepdim=True)
 
     if normalize:

@@ -287,8 +287,8 @@ def advantages_binary_maxrl(rewards: torch.Tensor, threshold: float) -> torch.Te
     n = rewards.size(1)
     b = (rewards > threshold).to(rewards.dtype)
     k = b.sum(dim=1, keepdim=True)
-    fail_adv = -torch.ones_like(rewards) / float(n)
-    success_adv = (n - k) / (k * float(n) + 1e-12)
+    fail_adv = -torch.ones_like(rewards)
+    success_adv = (n - k) / (k + 1e-12)
     out = torch.where(b > 0, success_adv, fail_adv)
     no_success = k.squeeze(1) == 0
     if no_success.any():
@@ -328,6 +328,8 @@ def advantages_continuous_maxrl_unnormalized(rewards: torch.Tensor, eps: float) 
     gaps = sorted_rewards - prev
     survivors = torch.arange(n, 0, -1, dtype=rewards.dtype, device=rewards.device).view(1, n)
     sorted_weights = torch.cumsum(gaps / survivors, dim=1)
+    # Scale by n so the 1/n in the policy gradient loss doesn't shrink the gradient
+    sorted_weights = sorted_weights * n
     centered = sorted_weights - sorted_weights.mean(dim=1, keepdim=True)
 
     adv = torch.zeros_like(rewards)

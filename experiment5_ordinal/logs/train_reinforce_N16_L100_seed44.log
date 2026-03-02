@@ -1,0 +1,32 @@
+wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
+wandb: Currently logged in as: stablegradients. Use `wandb login --relogin` to force relogin
+wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: Tracking run with wandb version 0.19.1
+wandb: Run data is saved locally in /zfsauton/scratch/shrinivr/cont-maxrl/wandb/run-20260302_041440-m1hnd445
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run reinforce_L100_N16_seed44
+wandb: ⭐️ View project at https://wandb.ai/stablegradients/cont-maxrl-ordinal
+wandb: 🚀 View run at https://wandb.ai/stablegradients/cont-maxrl-ordinal/runs/m1hnd445
+Using device: cuda
+
+============================================================
+Run: reinforce_L100_N16_seed44
+Method: reinforce | N: 16 | L: 100 | Seed: 44
+LR: 0.0001 | Batch: 64 | Epochs: 50
+============================================================
+
+Loaded 23672 images from /zfsauton/scratch/shrinivr/cont-maxrl/data/utkface
+Split sizes: train=18937, val=2367, test=2368
+Model parameters: 11,227,812
+Epoch   1/50 | loss=-0.0125 | MAE=18.44 | J_ML=-0.5454 | 63.5s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/reinforce_L100_N16_seed44/checkpoints/epoch_1.pt
+Epoch   2/50 | loss=-0.0397 | MAE=16.48 | J_ML=-0.5035 | 61.1s
+Epoch   3/50 | loss=-0.0602 | MAE=15.58 | J_ML=-0.4733 | 59.2s
+Epoch   4/50 | loss=-0.0780 | MAE=14.83 | J_ML=-0.4542 | 60.2s
+Epoch   5/50 | loss=-0.0943 | MAE=14.77 | J_ML=-0.4517 | 60.5s
+Epoch   6/50 | loss=-0.0971 | MAE=14.86 | J_ML=-0.4985 | 61.7s
+Epoch   7/50 | loss=-0.0699 | MAE=14.86 | J_ML=-0.5844 | 60.4s
+Epoch   8/50 | loss=-0.0453 | MAE=14.86 | J_ML=-0.6515 | 61.0s
+Epoch   9/50 | loss=-0.0301 | MAE=14.86 | J_ML=-0.6990 | 62.3s
+Epoch  10/50 | loss=-0.0238 | MAE=14.86 | J_ML=-0.7327 | 60.0s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/reinforce_L100_N16_seed44/checkpoints/epoch_10.pt
+Epoch  11/50 | loss=-0.0185 | MAE=14.86 | J_ML=-0.7630 | 64.6s

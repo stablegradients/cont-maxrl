@@ -1,0 +1,26 @@
+wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
+wandb: Currently logged in as: stablegradients. Use `wandb login --relogin` to force relogin
+wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: Tracking run with wandb version 0.19.1
+wandb: Run data is saved locally in /zfsauton/scratch/shrinivr/cont-maxrl/wandb/run-20260302_041443-zejckpeb
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run cont_maxrl_L100_N64_seed42
+wandb: ⭐️ View project at https://wandb.ai/stablegradients/cont-maxrl-ordinal
+wandb: 🚀 View run at https://wandb.ai/stablegradients/cont-maxrl-ordinal/runs/zejckpeb
+Using device: cuda
+
+============================================================
+Run: cont_maxrl_L100_N64_seed42
+Method: cont_maxrl | N: 64 | L: 100 | Seed: 42
+LR: 0.0001 | Batch: 64 | Epochs: 50
+============================================================
+
+Loaded 23672 images from /zfsauton/scratch/shrinivr/cont-maxrl/data/utkface
+Split sizes: train=18937, val=2367, test=2368
+Model parameters: 11,227,812
+Epoch   1/50 | loss=-0.0444 | MAE=16.51 | J_ML=-0.5031 | 108.3s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/cont_maxrl_L100_N64_seed42/checkpoints/epoch_1.pt
+Epoch   2/50 | loss=-0.0953 | MAE=14.58 | J_ML=-0.4496 | 101.6s
+Epoch   3/50 | loss=-0.0816 | MAE=14.64 | J_ML=-0.4247 | 103.7s
+Epoch   4/50 | loss=-0.0601 | MAE=14.67 | J_ML=-0.4093 | 100.9s
+Epoch   5/50 | loss=-0.0606 | MAE=14.38 | J_ML=-0.3943 | 104.3s
+Epoch   6/50 | loss=-0.0638 | MAE=13.62 | J_ML=-0.3790 | 107.9s

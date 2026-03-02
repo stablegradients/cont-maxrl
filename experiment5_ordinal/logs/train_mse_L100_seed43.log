@@ -1,0 +1,124 @@
+wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
+wandb: Currently logged in as: stablegradients. Use `wandb login --relogin` to force relogin
+wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: | Waiting for wandb.init()...wandb: / Waiting for wandb.init()...wandb: Tracking run with wandb version 0.19.1
+wandb: Run data is saved locally in /zfsauton/scratch/shrinivr/cont-maxrl/wandb/run-20260302_000735-qlc785eh
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run mse_L100_N0_seed43
+wandb: ⭐️ View project at https://wandb.ai/stablegradients/cont-maxrl-ordinal
+wandb: 🚀 View run at https://wandb.ai/stablegradients/cont-maxrl-ordinal/runs/qlc785eh
+Using device: cuda
+
+============================================================
+Run: mse_L100_N0_seed43
+Method: mse | N: 0 | L: 100 | Seed: 43
+LR: 0.001 | Batch: 64 | Epochs: 50
+============================================================
+
+Loaded 23672 images from /zfsauton/scratch/shrinivr/cont-maxrl/data/utkface
+Split sizes: train=18937, val=2367, test=2368
+Model parameters: 11,177,025
+Epoch   1/50 | loss=0.0302 | MAE=10.80 |  | 61.7s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/mse_L100_N0_seed43/checkpoints/epoch_1.pt
+Epoch   2/50 | loss=0.0187 | MAE=9.92 |  | 66.9s
+Epoch   3/50 | loss=0.0166 | MAE=9.37 |  | 69.9s
+Epoch   4/50 | loss=0.0153 | MAE=8.97 |  | 62.5s
+Epoch   5/50 | loss=0.0144 | MAE=8.69 |  | 72.1s
+Epoch   6/50 | loss=0.0134 | MAE=8.47 |  | 72.7s
+Epoch   7/50 | loss=0.0130 | MAE=8.29 |  | 66.5s
+Epoch   8/50 | loss=0.0125 | MAE=8.10 |  | 60.5s
+Epoch   9/50 | loss=0.0124 | MAE=8.00 |  | 64.7s
+Epoch  10/50 | loss=0.0116 | MAE=7.90 |  | 63.2s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/mse_L100_N0_seed43/checkpoints/epoch_10.pt
+Epoch  11/50 | loss=0.0114 | MAE=7.80 |  | 59.9s
+Epoch  12/50 | loss=0.0113 | MAE=7.66 |  | 60.1s
+Epoch  13/50 | loss=0.0111 | MAE=7.62 |  | 57.3s
+Epoch  14/50 | loss=0.0108 | MAE=7.54 |  | 63.0s
+Epoch  15/50 | loss=0.0106 | MAE=7.51 |  | 66.0s
+Epoch  16/50 | loss=0.0104 | MAE=7.45 |  | 185.3s
+Epoch  17/50 | loss=0.0104 | MAE=7.50 |  | 66.1s
+Epoch  18/50 | loss=0.0101 | MAE=7.35 |  | 66.6s
+Epoch  19/50 | loss=0.0100 | MAE=7.28 |  | 65.4s
+Epoch  20/50 | loss=0.0098 | MAE=7.24 |  | 67.5s
+Epoch  21/50 | loss=0.0098 | MAE=7.23 |  | 64.0s
+Epoch  22/50 | loss=0.0097 | MAE=7.23 |  | 65.4s
+Epoch  23/50 | loss=0.0096 | MAE=7.16 |  | 63.4s
+Epoch  24/50 | loss=0.0097 | MAE=7.18 |  | 67.2s
+Epoch  25/50 | loss=0.0096 | MAE=7.11 |  | 64.6s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/mse_L100_N0_seed43/checkpoints/epoch_25.pt
+Epoch  26/50 | loss=0.0094 | MAE=7.10 |  | 65.5s
+Epoch  27/50 | loss=0.0091 | MAE=7.06 |  | 67.6s
+Epoch  28/50 | loss=0.0094 | MAE=7.06 |  | 67.7s
+Epoch  29/50 | loss=0.0093 | MAE=7.08 |  | 67.3s
+Epoch  30/50 | loss=0.0093 | MAE=7.07 |  | 64.2s
+Epoch  31/50 | loss=0.0092 | MAE=7.01 |  | 69.0s
+Epoch  32/50 | loss=0.0092 | MAE=7.00 |  | 66.8s
+Epoch  33/50 | loss=0.0091 | MAE=6.99 |  | 65.6s
+Epoch  34/50 | loss=0.0092 | MAE=6.99 |  | 67.8s
+Epoch  35/50 | loss=0.0091 | MAE=6.98 |  | 67.4s
+Epoch  36/50 | loss=0.0091 | MAE=6.96 |  | 67.9s
+Epoch  37/50 | loss=0.0090 | MAE=6.97 |  | 71.0s
+Epoch  38/50 | loss=0.0090 | MAE=6.94 |  | 66.6s
+Epoch  39/50 | loss=0.0089 | MAE=6.95 |  | 68.5s
+Epoch  40/50 | loss=0.0089 | MAE=6.94 |  | 67.3s
+Epoch  41/50 | loss=0.0090 | MAE=6.93 |  | 65.1s
+Epoch  42/50 | loss=0.0088 | MAE=6.93 |  | 66.4s
+Epoch  43/50 | loss=0.0088 | MAE=6.93 |  | 66.8s
+Epoch  44/50 | loss=0.0088 | MAE=6.97 |  | 68.8s
+Epoch  45/50 | loss=0.0088 | MAE=6.94 |  | 67.1s
+Epoch  46/50 | loss=0.0088 | MAE=6.93 |  | 67.9s
+Epoch  47/50 | loss=0.0090 | MAE=6.96 |  | 67.6s
+Epoch  48/50 | loss=0.0089 | MAE=6.96 |  | 68.4s
+Epoch  49/50 | loss=0.0090 | MAE=7.00 |  | 68.6s
+wandb:                                                                                
+wandb: 
+wandb: Run history:
+wandb:                      epoch ▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▃▃▃▃▄▄▄▅▅▅▆▆▆▆▆▇▇▇▇▇█████
+wandb:                       step ▁▁▁▁▁▂▂▂▂▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▅▆▆▆▆▇▇▇▇▇▇▇████
+wandb:     train/grad_norm_global ▅▃▃▄▅▂█▄▃▄▃▅▁▃▄▂▂▂▂▂▃▄▂▃▂▄▅▂▁▂▆▂▂▁▂▁▆▁▆▂
+wandb:                 train/loss █▃▆▆▆▄▅▄▄▇▃▃▄▆▂▃▃▃▄▃▂▂▃▄▂▁▂▂▃▂▁▁▂▅▃▃▂▄▃▃
+wandb:                   train/lr ██▇▇▇▇▇▆▆▆▆▆▆▆▆▆▅▅▅▅▅▄▄▄▄▃▃▃▃▃▃▃▃▃▂▂▁▁▁▁
+wandb:        val/expected_reward ▁▃▄▄▅▆▆▆▆▇▇▇▇▇▇▇▇███████████████████████
+wandb:                    val/mae █▆▅▅▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:   val_easy/expected_reward ▁▂▃▄▄▅▆▆▆▇▆▇▇▆▇▇▇▇▇███▇▇▇██▇██▇███████▇█
+wandb:               val_easy/mae █▆▅▅▄▃▃▃▃▂▃▂▂▃▂▂▂▂▂▂▁▁▁▂▂▂▁▁▂▁▂▁▁▁▁▁▁▁▂▁
+wandb:   val_hard/expected_reward ▁▃▄▄▅▅▅▆▆▆▇▇▇▇▇▇▇▇▇▇▇▇██████████████████
+wandb:               val_hard/mae █▆▅▅▄▄▄▃▃▃▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: val_medium/expected_reward ▁▃▄▄▅▅▆▆▆▆▇▇▇▇▇▇▇▇▇▇▇▇█▇███████▇████████
+wandb:             val_medium/mae █▆▅▅▄▄▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▁▂▁▁▁▁▁▁▂▁▁▁▁▁▁▁▁
+wandb: 
+wandb: Run summary:
+wandb:                          epoch 50
+wandb:                final/acc_exact 0
+wandb:             final/acc_within_5 0
+wandb:           final/best_epoch_mae 6.92691
+wandb:    final/best_epoch_ordinal_ce -inf
+wandb:        final/best_of_64_reward 0
+wandb:             final/entropy_mean 0
+wandb:          final/expected_reward 0.93002
+wandb:                      final/mae 6.92818
+wandb:     final/ordinal_ce_objective 0
+wandb:       final/plain_ce_objective 0
+wandb: final/total_train_time_seconds 3427.45245
+wandb:                           step 14750
+wandb:         train/grad_norm_global 0.19536
+wandb:                     train/loss 0.00692
+wandb:                       train/lr 0
+wandb:            val/expected_reward 0.93002
+wandb:                        val/mae 6.92818
+wandb:       val_easy/expected_reward 0.94599
+wandb:                   val_easy/mae 5.34709
+wandb:       val_hard/expected_reward 0.91263
+wandb:                   val_hard/mae 8.64987
+wandb:     val_medium/expected_reward 0.91648
+wandb:                 val_medium/mae 8.26847
+wandb: 
+wandb: 🚀 View run mse_L100_N0_seed43 at: https://wandb.ai/stablegradients/cont-maxrl-ordinal/runs/qlc785eh
+wandb: ⭐️ View project at: https://wandb.ai/stablegradients/cont-maxrl-ordinal
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260302_000735-qlc785eh/logs
+Epoch  50/50 | loss=0.0088 | MAE=6.93 |  | 66.1s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/mse_L100_N0_seed43/checkpoints/epoch_50.pt
+
+Training complete in 3427.5s (57.1min)
+Best MAE: 6.93
+Metrics saved to /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/mse_L100_N0_seed43/metrics.json
