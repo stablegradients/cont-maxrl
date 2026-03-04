@@ -1,0 +1,21 @@
+nohup: ignoring input
+==========================================
+  Phase 2 extra: N=4,8
+  30 runs (5 methods × 2 N × 3 seeds)
+==========================================
+[07:35:52] GPU 0 | START  cont_maxrl_L100_N4_seed42
+[07:35:52] GPU 1 | START  cont_maxrl_L100_N4_seed43
+[07:35:52] GPU 2 | START  cont_maxrl_L100_N4_seed44
+[07:35:52] GPU 3 | START  cont_maxrl_no_bl_L100_N4_seed42
+[08:06:09] GPU 0 | START  cont_maxrl_no_bl_L100_N4_seed43
+[08:06:11] GPU 1 | START  cont_maxrl_no_bl_L100_N4_seed44
+[08:07:16] GPU 2 | START  binary_maxrl_L100_N4_seed42
+[08:07:41] GPU 3 | START  binary_maxrl_L100_N4_seed43
+[08:36:22] GPU 0 | START  binary_maxrl_L100_N4_seed44
+[08:36:23] GPU 1 | START  grpo_L100_N4_seed42
+[08:37:17] GPU 2 | START  grpo_L100_N4_seed43
+[08:37:40] GPU 3 | START  grpo_L100_N4_seed44
+[09:02:46] GPU 0 | START  reinforce_L100_N4_seed42
+[09:03:06] GPU 1 | START  reinforce_L100_N4_seed43
+[09:03:33] GPU 2 | START  reinforce_L100_N4_seed44
+experiment5_ordinal/scripts/run_phase2_extra_N.sh: line 66: it: command not found

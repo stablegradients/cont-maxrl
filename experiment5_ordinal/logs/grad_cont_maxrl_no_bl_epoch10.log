@@ -1,0 +1,5 @@
+Gradient analysis: method=cont_maxrl_no_bl, epoch=10, L=100
+Loaded 23672 images from /zfsauton/scratch/shrinivr/cont-maxrl/data/utkface
+Split sizes: train=18937, val=2367, test=2368
+  Computing per-image gradients for 500 images...
+  Gradient analysis complete. Results saved to /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/cont_maxrl_no_bl_L100_N64_seed42/gradient_analysis

@@ -1,27 +1,234 @@
 wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
 wandb: Currently logged in as: stablegradients. Use `wandb login --relogin` to force relogin
-wandb: Tracking run with wandb version 0.19.1
-wandb: Run data is saved locally in /zfsauton/scratch/shrinivr/cont-maxrl/wandb/run-20260302_041442-popus67j
+wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: Tracking run with wandb version 0.19.1
+wandb: Run data is saved locally in /zfsauton/scratch/shrinivr/cont-maxrl/wandb/run-20260302_072652-yy6nk9uw
 wandb: Run `wandb offline` to turn off syncing.
 wandb: Syncing run grpo_L100_N16_seed42
 wandb: ⭐️ View project at https://wandb.ai/stablegradients/cont-maxrl-ordinal
-wandb: 🚀 View run at https://wandb.ai/stablegradients/cont-maxrl-ordinal/runs/popus67j
+wandb: 🚀 View run at https://wandb.ai/stablegradients/cont-maxrl-ordinal/runs/yy6nk9uw
 Using device: cuda
 
 ============================================================
 Run: grpo_L100_N16_seed42
 Method: grpo | N: 16 | L: 100 | Seed: 42
-LR: 0.0001 | Batch: 64 | Epochs: 50
+LR: 0.001 | Batch: 64 | Epochs: 50
 ============================================================
 
 Loaded 23672 images from /zfsauton/scratch/shrinivr/cont-maxrl/data/utkface
 Split sizes: train=18937, val=2367, test=2368
 Model parameters: 11,227,812
-Epoch   1/50 | loss=-0.3426 | MAE=18.17 | J_ML=-0.8154 | 106.0s
+Epoch   1/50 | loss=-0.0635 | MAE=14.90 | J_ML=-1.4418 | 39.5s
   Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/grpo_L100_N16_seed42/checkpoints/epoch_1.pt
-Epoch   2/50 | loss=-0.1321 | MAE=18.17 | J_ML=-1.0967 | 99.8s
-Epoch   3/50 | loss=-0.0503 | MAE=18.17 | J_ML=-1.1839 | 104.6s
-Epoch   4/50 | loss=-0.0229 | MAE=18.17 | J_ML=-1.1532 | 99.1s
-Epoch   5/50 | loss=0.0029 | MAE=18.17 | J_ML=-0.9233 | 97.2s
-Epoch   6/50 | loss=-0.2055 | MAE=13.78 | J_ML=-0.8334 | 100.4s
-Epoch   7/50 | loss=-0.2371 | MAE=13.25 | J_ML=-0.9923 | 97.7s
+Epoch   2/50 | loss=-0.0188 | MAE=13.39 | J_ML=-1.1057 | 41.6s
+Epoch   3/50 | loss=-0.0618 | MAE=12.90 | J_ML=-1.5123 | 42.4s
+Epoch   4/50 | loss=-0.0327 | MAE=12.65 | J_ML=-1.7833 | 41.9s
+Epoch   5/50 | loss=-0.0225 | MAE=12.68 | J_ML=-1.8340 | 42.5s
+Epoch   6/50 | loss=-0.0197 | MAE=12.68 | J_ML=-1.9786 | 42.0s
+Epoch   7/50 | loss=-0.0155 | MAE=12.60 | J_ML=-2.0742 | 43.3s
+Epoch   8/50 | loss=-0.0144 | MAE=12.60 | J_ML=-2.0853 | 42.0s
+Epoch   9/50 | loss=-0.0146 | MAE=12.56 | J_ML=-2.1512 | 42.3s
+Epoch  10/50 | loss=-0.0136 | MAE=12.53 | J_ML=-2.2148 | 41.8s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/grpo_L100_N16_seed42/checkpoints/epoch_10.pt
+Epoch  11/50 | loss=-0.0157 | MAE=12.56 | J_ML=-2.2162 | 43.1s
+Epoch  12/50 | loss=-0.0151 | MAE=12.44 | J_ML=-2.2982 | 42.4s
+Epoch  13/50 | loss=-0.0149 | MAE=12.47 | J_ML=-2.2934 | 41.8s
+Epoch  14/50 | loss=-0.0106 | MAE=12.45 | J_ML=-2.3484 | 42.6s
+Epoch  15/50 | loss=-0.0106 | MAE=12.49 | J_ML=-2.3514 | 42.4s
+Epoch  16/50 | loss=-0.0123 | MAE=12.50 | J_ML=-2.3569 | 42.8s
+Epoch  17/50 | loss=-0.0122 | MAE=12.52 | J_ML=-2.3545 | 88.5s
+Epoch  18/50 | loss=-0.0113 | MAE=12.49 | J_ML=-2.3707 | 44.8s
+Epoch  19/50 | loss=-0.0094 | MAE=12.47 | J_ML=-2.3657 | 41.5s
+Epoch  20/50 | loss=-0.0134 | MAE=12.52 | J_ML=-2.4109 | 42.1s
+Epoch  21/50 | loss=-0.0081 | MAE=12.47 | J_ML=-2.4223 | 42.2s
+Epoch  22/50 | loss=-0.0115 | MAE=12.48 | J_ML=-2.3690 | 41.8s
+Epoch  23/50 | loss=-0.0113 | MAE=12.49 | J_ML=-2.4464 | 42.6s
+Epoch  24/50 | loss=-0.0090 | MAE=12.47 | J_ML=-2.4083 | 42.4s
+Epoch  25/50 | loss=-0.0134 | MAE=12.49 | J_ML=-2.4573 | 42.3s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/grpo_L100_N16_seed42/checkpoints/epoch_25.pt
+Epoch  26/50 | loss=-0.0109 | MAE=12.46 | J_ML=-2.4122 | 42.6s
+Epoch  27/50 | loss=-0.0105 | MAE=12.44 | J_ML=-2.3298 | 42.2s
+Epoch  28/50 | loss=-0.0118 | MAE=12.44 | J_ML=-2.3652 | 41.9s
+Epoch  29/50 | loss=-0.0115 | MAE=12.45 | J_ML=-2.4493 | 41.6s
+Epoch  30/50 | loss=-0.0113 | MAE=12.45 | J_ML=-2.4026 | 41.9s
+Epoch  31/50 | loss=-0.0117 | MAE=12.45 | J_ML=-2.4049 | 42.1s
+Epoch  32/50 | loss=-0.0101 | MAE=12.43 | J_ML=-2.3965 | 42.2s
+Epoch  33/50 | loss=-0.0140 | MAE=12.42 | J_ML=-2.3583 | 41.7s
+Epoch  34/50 | loss=-0.0140 | MAE=12.44 | J_ML=-2.3852 | 41.9s
+Epoch  35/50 | loss=-0.0120 | MAE=12.48 | J_ML=-2.4126 | 42.7s
+Epoch  36/50 | loss=-0.0102 | MAE=12.43 | J_ML=-2.4129 | 42.2s
+Epoch  37/50 | loss=-0.0104 | MAE=12.47 | J_ML=-2.4181 | 42.7s
+Epoch  38/50 | loss=-0.0118 | MAE=12.43 | J_ML=-2.3955 | 41.6s
+Epoch  39/50 | loss=-0.0110 | MAE=12.43 | J_ML=-2.4055 | 42.7s
+Epoch  40/50 | loss=-0.0118 | MAE=12.44 | J_ML=-2.4043 | 42.3s
+Epoch  41/50 | loss=-0.0124 | MAE=12.46 | J_ML=-2.3530 | 42.5s
+Epoch  42/50 | loss=-0.0131 | MAE=12.45 | J_ML=-2.3805 | 42.6s
+Epoch  43/50 | loss=-0.0127 | MAE=12.44 | J_ML=-2.3704 | 42.7s
+Epoch  44/50 | loss=-0.0120 | MAE=12.45 | J_ML=-2.3692 | 42.5s
+Epoch  45/50 | loss=-0.0116 | MAE=12.43 | J_ML=-2.3708 | 41.9s
+Epoch  46/50 | loss=-0.0111 | MAE=12.41 | J_ML=-2.3944 | 42.5s
+Epoch  47/50 | loss=-0.0128 | MAE=12.45 | J_ML=-2.3593 | 42.5s
+Epoch  48/50 | loss=-0.0086 | MAE=12.43 | J_ML=-2.4059 | 42.6s
+Epoch  49/50 | loss=-0.0111 | MAE=12.43 | J_ML=-2.3898 | 42.7s
+wandb:                                                                                
+wandb: 
+wandb: Run history:
+wandb:                           epoch ▁▁▁▁▂▂▂▂▂▃▃▃▃▃▄▄▅▅▅▅▅▅▅▅▅▆▆▆▆▆▇▇▇▇▇▇▇███
+wandb:                            step ▁▁▂▂▂▂▂▂▂▂▃▃▃▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▅▅▆▆▆▆▆▇▇▇█
+wandb:          train/grad_norm_global ▁▂▃▄▅▅▄▃▅▄▇▄▆▇▅▃▅▂▄▆▃▅▇▄▁▅▅▅▃▆▅▄▅▁▅█▃▃▄▆
+wandb:                      train/loss ▃▁▄▃▃▄▅▇▆▃▅▅▄▄▅▆▅▆▇▆▇█▄▇▄▅▇▇▆▅▆▆▆▃▆▅▅▇▆▆
+wandb:                        train/lr █████████▇▇▇▇▇▇▆▆▆▆▅▅▅▅▅▅▄▄▃▃▂▂▂▁▁▁▁▁▁▁▁
+wandb:     train_rl/advantage_abs_mean █▃▇▅▄▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:          train_rl/advantage_max ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:         train_rl/advantage_mean ▁▁█▆▅▄▅▄▄▄▄▃▄▄▄▃▃▂▃▃▃▃▃▃▃▃▃▂▂▂▃▂▃▂▂▂▃▂▂▃
+wandb:          train_rl/advantage_min ▁▁▁▁▄█▇▇█▇█▄▁▇█▇█▇▇█▇▇█████▇█▇███▇███▇██
+wandb:          train_rl/advantage_std █▄▇▅▄▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:    train_rl/frac_zero_advantage ▁▆▂▄▅▆▆▇▇▇▇▇▇▇▇▇▇▇██████████████████████
+wandb:      train_rl/num_exact_matches ▁▂▄▄▄▅▅▅▆▆▆▆▆▆▆▆▆▇▆▇▇▇▇▇▇██▇████████████
+wandb:        train_rl/reward_max_mean ▅▁▇▇▇▇▇▇▇▇▇▇▇▇▇▇████████████████████████
+wandb:            train_rl/reward_mean ▁▄▆▇▇▇▇▇▇▇▇█████████████████████████████
+wandb:             train_rl/reward_std █▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                   val/acc_exact ▁▃█▄▅▃▂▄█▂▇▄▂█▅▅▅▃▅▂▇▅▅▇▃▄▄▄▄▄▃▃▂▃▁▄▅▂▄▃
+wandb:                val/acc_within_1 ▂▁▆▅▄▃▆▃▇█▆▇▆▅▆▅▆▅▅▅▄▅▅▅▄▄▄▅▅▅▄▄▃▄▃▄▄▄▄▄
+wandb:               val/acc_within_10 ▁▃▅▇▇▇▇▇███▇▇██▇██▇██████████████▇█▇██▇█
+wandb:                val/acc_within_2 ▁▃▆▆▆▅▇▅▇█▇█▇▆▇▇▆▇▇▇▆▇▇▇▇▇▇▇▇▇▇▇▆▇▆▇▇▆▇▇
+wandb:               val/acc_within_20 ▁▅▆▇▇▇▇▇▇▇██████████████████████████████
+wandb:                val/acc_within_5 ▁▁▄▅▆▄▇▅▆██▇▆▇▇▆█▇▆█▇▇▇▇█▇▇▆▇▇▇▇▆▇▆█▇▆▇▇
+wandb:            val/best_of_1_reward ▁▅▇▇▇▇██████████████████████████████████
+wandb:          val/best_of_256_reward ▁█▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅
+wandb:           val/best_of_64_reward ▁█▇▇▇▇▆▇▇▆▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+wandb:            val/best_of_8_reward ▁█▇█████████████████████████████████████
+wandb:                 val/entropy_max ▃█▃▁▂▁▂▂▂▁▁▁▁▃▂▁▂▂▂▂▂▂▂▂▂▂▂▁▁▂▂▂▁▁▁▂▁▁▂▂
+wandb:                val/entropy_mean ▁█▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂
+wandb:                 val/entropy_min █▆▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                 val/entropy_std ▁█▆▅▅▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▃▄▄▄▄▄▄▄▄▄▄▄
+wandb:             val/expected_reward ▁▅▇▇▇███████████████████████████████████
+wandb:                         val/mae █▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:         val/mse_in_bins_squared █▂▁▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:        val/ordinal_ce_objective ▆█▆▄▄▃▃▃▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▂▁▁▁▁▁▁▂▁▁▁▁▂▁
+wandb:          val/plain_ce_objective ▇█▆▅▅▄▃▃▃▂▂▂▂▂▂▂▁▁▁▁▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:             val/reward_max_mean ▁█▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅
+wandb:                 val/reward_mean ▁▅▇▇▇███████████████████████████████████
+wandb:               val/reward_median ▁▁▁▁▁▁█▁████████████████████████████████
+wandb:             val/reward_min_mean ▅▁▆▇▇███████████████████████████████████
+wandb:                  val/reward_std █▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:           val/survival_tau_0.50 ▁▇██████████████████████████████████████
+wandb:           val/survival_tau_0.80 ▁▅▆▇▇▇██▇███████████████████████████████
+wandb:           val/survival_tau_0.90 ▁▂▅▆▆▆▇▇▇█▇█▇▇▇█▇█▇█▇████▇▇▇▇▇▇▇▇▇▇▇██▇▇
+wandb:           val/survival_tau_0.95 ▁▁▆▆▅▇▅▇█▇▇▇▇▇▇█▇▇█▇██▇█▇▇▇▇▇██▇▇▇▇██▇▇▇
+wandb:           val/survival_tau_0.99 ▁▃█▄▅▃▂▄▅█▆▇▄▂█▂▅▅▃▅▄▇▅▅▇▆▄▄▄▄▃▃▂▃▁▄▅▂▄▃
+wandb:              val/top1_prob_mean █▁▅▆▆▆▆▆▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+wandb:               val/top1_prob_std ▁█▆▆▅▅▄▅▅▅▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+wandb:              val/top5_prob_mean ▁▄▆▇▇█▇█████████████████████████████████
+wandb:              val_easy/acc_exact █▄▅▄▅▂▄▃▆▄▄▃▁▄▃▂▄▃▂▄▂▅▃▃▅▃▃▂▄▃▂▃▃▁▂▁▃▂▂▂
+wandb:           val_easy/acc_within_5 █▂▃▂▄▁▄▂▃▅▃▄▄▂▄▄▃▅▄▃▃▃▄▄▃▃▃▃▄▃▃▃▂▃▂▄▄▃▃▃
+wandb:      val_easy/best_of_64_reward ▆█▅▄▄▁▃▁▃▅▂▃▃▂▄▄▂▄▃▂▂▃▃▂▄▂▂▂▃▂▂▂▃▁▂▃▃▂▂▂
+wandb:           val_easy/entropy_mean ▁█▄▃▃▃▂▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂
+wandb:        val_easy/expected_reward █▁▃▂▄▁▄▂▃▅▃▄▄▂▄▄▃▅▃▃▃▃▄▄▃▃▃▄▃▄▃▃▂▃▂▄▄▃▃▃
+wandb:                    val_easy/mae ▁▇▆▇▅▅█▆▄▆▅▆▇▅▇▇▄▆▇▅▇▅▆▅▇▆▇▆▇▆▆▆█▇▇▆▅▇▆▇
+wandb:   val_easy/ordinal_ce_objective ▇█▆▆▅▄▄▄▃▃▃▂▂▂▂▂▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:              val_hard/acc_exact ▁▆▇▇▆▇▆▇▇▆▇▇▇██▆▇▆██▆█▇▇▇▇█▇█▇▇▇▇███▇█▇█
+wandb:           val_hard/acc_within_5 ▁▅▆▇▆█▇▇▇▇▇▇█▇▇▇▇▇▇▇▇▇█▇█▇█▇█▇█▇███▇▇█▇█
+wandb:      val_hard/best_of_64_reward ▁█▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+wandb:           val_hard/entropy_mean ▁█▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▂▁▂▁▂▂▁▂▂▂▂▁▂▂▁▂▂
+wandb:        val_hard/expected_reward ▁▆▇▇▇▇██▇████▇██▇██▇████████████████████
+wandb:                    val_hard/mae █▄▃▂▂▁▂▁▂▁▁▁▁▂▁▁▂▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:   val_hard/ordinal_ce_objective ▆█▆▄▄▃▃▂▂▂▁▂▂▁▂▁▁▁▁▁▁▂▁▁▁▂▂▂▁▁▁▁▂▂▂▂▂▂▁▂
+wandb:            val_medium/acc_exact █▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:         val_medium/acc_within_5 ▃█▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:    val_medium/best_of_64_reward ▁█▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+wandb:         val_medium/entropy_mean ▁█▃▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:      val_medium/expected_reward ▁▆▇█▇████▇██████████████████████████████
+wandb:                  val_medium/mae █▃▂▁▂▁▁▁▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: val_medium/ordinal_ce_objective ▇█▆▅▄▃▃▃▂▂▂▂▂▂▁▁▁▂▁▁▂▂▁▁▁▂▁▁▁▁▁▁▁▁▁▂▁▁▁▁
+wandb: 
+wandb: Run summary:
+wandb:                           epoch 50
+wandb:                 final/acc_exact 0.01878
+wandb:              final/acc_within_5 0.36098
+wandb:            final/best_epoch_mae 12.41318
+wandb:     final/best_epoch_ordinal_ce -1.1057
+wandb:         final/best_of_64_reward 0.87768
+wandb:              final/entropy_mean 0.0315
+wandb:           final/expected_reward 0.87425
+wandb:                       final/mae 12.43684
+wandb:      final/ordinal_ce_objective -2.37297
+wandb:        final/plain_ce_objective -20.05827
+wandb:  final/total_train_time_seconds 2161.12204
+wandb:                            step 14750
+wandb:          train/grad_norm_global 5.1884
+wandb:                      train/loss 0.01086
+wandb:                        train/lr 0
+wandb:     train_rl/advantage_abs_mean 0.02477
+wandb:          train_rl/advantage_max 3.75001
+wandb:         train_rl/advantage_mean 0.0
+wandb:          train_rl/advantage_min -3.75
+wandb:          train_rl/advantage_std 0.18376
+wandb:    train_rl/frac_zero_advantage 0.96398
+wandb:      train_rl/num_exact_matches 6626
+wandb:        train_rl/reward_max_mean 0.87975
+wandb:            train_rl/reward_mean 0.87873
+wandb:             train_rl/reward_std 0.10921
+wandb:                   val/acc_exact 0.01878
+wandb:                val/acc_within_1 0.08077
+wandb:               val/acc_within_10 0.56867
+wandb:                val/acc_within_2 0.12194
+wandb:               val/acc_within_20 0.7662
+wandb:                val/acc_within_5 0.36098
+wandb:            val/best_of_1_reward 0.87427
+wandb:          val/best_of_256_reward 0.87869
+wandb:           val/best_of_64_reward 0.87768
+wandb:            val/best_of_8_reward 0.87617
+wandb:                 val/entropy_max 0.7663
+wandb:                val/entropy_mean 0.0315
+wandb:                 val/entropy_min 0.0
+wandb:                 val/entropy_std 0.1159
+wandb:             val/expected_reward 0.87425
+wandb:                         val/mae 12.43684
+wandb:         val/mse_in_bins_squared 268.54415
+wandb:        val/ordinal_ce_objective -2.37297
+wandb:          val/plain_ce_objective -20.05827
+wandb:             val/reward_max_mean 0.87859
+wandb:                 val/reward_mean 0.87424
+wandb:               val/reward_median 0.91919
+wandb:             val/reward_min_mean 0.86599
+wandb:                  val/reward_std 0.10789
+wandb:           val/survival_tau_0.50 0.99957
+wandb:           val/survival_tau_0.80 0.75522
+wandb:           val/survival_tau_0.90 0.54292
+wandb:           val/survival_tau_0.95 0.25413
+wandb:           val/survival_tau_0.99 0.01878
+wandb:              val/top1_prob_mean 0.98725
+wandb:               val/top1_prob_std 0.0575
+wandb:              val/top5_prob_mean 0.99994
+wandb:              val_easy/acc_exact 0.02742
+wandb:           val_easy/acc_within_5 0.62046
+wandb:      val_easy/best_of_64_reward 0.95079
+wandb:           val_easy/entropy_mean 0.03803
+wandb:        val_easy/expected_reward 0.94715
+wandb:                    val_easy/mae 5.22831
+wandb:   val_easy/ordinal_ce_objective -0.94679
+wandb:              val_hard/acc_exact 0.01539
+wandb:           val_hard/acc_within_5 0.15239
+wandb:      val_hard/best_of_64_reward 0.84579
+wandb:           val_hard/entropy_mean 0.03361
+wandb:        val_hard/expected_reward 0.84133
+wandb:                    val_hard/mae 15.68863
+wandb:   val_hard/ordinal_ce_objective -2.97627
+wandb:            val_medium/acc_exact 0.0
+wandb:         val_medium/acc_within_5 0.0
+wandb:    val_medium/best_of_64_reward 0.72473
+wandb:         val_medium/entropy_mean 0.00842
+wandb:      val_medium/expected_reward 0.72386
+wandb:                  val_medium/mae 27.31281
+wandb: val_medium/ordinal_ce_objective -5.39252
+wandb: 
+wandb: 🚀 View run grpo_L100_N16_seed42 at: https://wandb.ai/stablegradients/cont-maxrl-ordinal/runs/yy6nk9uw
+wandb: ⭐️ View project at: https://wandb.ai/stablegradients/cont-maxrl-ordinal
+wandb: Synced 7 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260302_072652-yy6nk9uw/logs
+Epoch  50/50 | loss=-0.0115 | MAE=12.44 | J_ML=-2.3730 | 42.4s
+  Saved checkpoint: /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/grpo_L100_N16_seed42/checkpoints/epoch_50.pt
+
+Training complete in 2161.1s (36.0min)
+Best MAE: 12.41
+Metrics saved to /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/grpo_L100_N16_seed42/metrics.json

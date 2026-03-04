@@ -1,70 +1,162 @@
 nohup: ignoring input
 
 ==========================================
-  Phase 1: Supervised training (L=100)
-  15 runs (3 methods × 5 seeds)
+  Phase 1: Supervised baselines (L=100)
+  9 runs (3 methods × 3 seeds)
 ==========================================
-[00:07:22] GPU 0 | START  train_ordinal_ce_L100_seed42
-[00:07:22] GPU 1 | START  train_ordinal_ce_L100_seed43
-[00:07:22] GPU 2 | START  train_ordinal_ce_L100_seed44
-[00:07:22] GPU 3 | START  train_ordinal_ce_L100_seed45
-[00:07:22] GPU 0 | START  train_ordinal_ce_L100_seed46
-[00:07:22] GPU 1 | START  train_plain_ce_L100_seed42
-[00:07:22] GPU 2 | START  train_plain_ce_L100_seed43
-[00:07:22] GPU 3 | START  train_plain_ce_L100_seed44
-[00:07:22] GPU 0 | START  train_plain_ce_L100_seed45
-[00:07:22] GPU 1 | START  train_plain_ce_L100_seed46
-[00:07:22] GPU 2 | START  train_mse_L100_seed42
-[00:07:22] GPU 3 | START  train_mse_L100_seed43
-[00:07:22] GPU 0 | START  train_mse_L100_seed44
-[00:07:22] GPU 1 | START  train_mse_L100_seed45
-[00:07:22] GPU 2 | START  train_mse_L100_seed46
-Phase 1 done in 67 min
+[07:26:45]        | SKIP   train_ordinal_ce_L100_seed42 (done)
+[07:26:45]        | SKIP   train_ordinal_ce_L100_seed43 (done)
+[07:26:45]        | SKIP   train_ordinal_ce_L100_seed44 (done)
+[07:26:45]        | SKIP   train_plain_ce_L100_seed42 (done)
+[07:26:45]        | SKIP   train_plain_ce_L100_seed43 (done)
+[07:26:45]        | SKIP   train_plain_ce_L100_seed44 (done)
+[07:26:45]        | SKIP   train_mse_L100_seed42 (done)
+[07:26:45]        | SKIP   train_mse_L100_seed43 (done)
+[07:26:45]        | SKIP   train_mse_L100_seed44 (done)
+Phase 1 done in 0 min
 
 ==========================================
   Phase 2: RL training (L=100)
-  100 runs (4 methods × 5 N × 5 seeds)
+  45 runs (5 methods × 3 N × 3 seeds)
 ==========================================
-[01:14:56] GPU 3 | START  train_cont_maxrl_N4_L100_seed42
-[01:14:56] GPU 0 | START  train_cont_maxrl_N4_L100_seed43
-[01:14:56] GPU 1 | START  train_cont_maxrl_N4_L100_seed44
-[01:14:56] GPU 2 | START  train_cont_maxrl_N4_L100_seed45
-[01:14:56] GPU 3 | START  train_cont_maxrl_N4_L100_seed46
-[01:14:56] GPU 0 | START  train_binary_maxrl_N4_L100_seed42
-[01:14:56] GPU 1 | START  train_binary_maxrl_N4_L100_seed43
-[01:14:56] GPU 2 | START  train_binary_maxrl_N4_L100_seed44
-[01:14:56] GPU 3 | START  train_binary_maxrl_N4_L100_seed45
-[01:14:56] GPU 0 | START  train_binary_maxrl_N4_L100_seed46
-[01:14:56] GPU 1 | START  train_grpo_N4_L100_seed42
-[01:14:56] GPU 2 | START  train_grpo_N4_L100_seed43
-[01:14:56] GPU 3 | START  train_grpo_N4_L100_seed44
-[01:14:56] GPU 0 | START  train_grpo_N4_L100_seed45
-[01:14:56] GPU 1 | START  train_grpo_N4_L100_seed46
-[01:14:56] GPU 2 | START  train_reinforce_N4_L100_seed42
-[01:14:56] GPU 3 | START  train_reinforce_N4_L100_seed43
-[01:56:27] GPU 0 | START  train_reinforce_N4_L100_seed44
-[02:08:08] GPU 1 | START  train_reinforce_N4_L100_seed45
-[02:12:06] GPU 2 | START  train_reinforce_N4_L100_seed46
-[02:12:21] GPU 3 | START  train_cont_maxrl_N16_L100_seed42
-[02:12:32] GPU 0 | START  train_cont_maxrl_N16_L100_seed43
-[02:15:10] GPU 1 | START  train_cont_maxrl_N16_L100_seed44
-[02:34:16] GPU 2 | START  train_cont_maxrl_N16_L100_seed45
-[02:35:58] GPU 3 | START  train_cont_maxrl_N16_L100_seed46
-[02:39:22] GPU 0 | START  train_binary_maxrl_N16_L100_seed42
-[02:45:06] GPU 1 | START  train_binary_maxrl_N16_L100_seed43
-[02:45:07] GPU 2 | START  train_binary_maxrl_N16_L100_seed44
-[02:48:09] GPU 3 | START  train_binary_maxrl_N16_L100_seed45
-[02:48:30] GPU 0 | START  train_binary_maxrl_N16_L100_seed46
-[02:50:38] GPU 1 | START  train_grpo_N16_L100_seed42
-[02:56:53] GPU 2 | START  train_grpo_N16_L100_seed43
-[03:01:36] GPU 3 | START  train_grpo_N16_L100_seed44
-[03:03:32] GPU 0 | START  train_grpo_N16_L100_seed45
-[03:28:50] GPU 1 | START  train_grpo_N16_L100_seed46
-[03:43:34] GPU 2 | START  train_reinforce_N16_L100_seed42
-[03:47:14] GPU 3 | START  train_reinforce_N16_L100_seed43
-[03:47:44] GPU 0 | START  train_reinforce_N16_L100_seed44
-[03:55:25] GPU 1 | START  train_reinforce_N16_L100_seed45
-[03:58:23] GPU 2 | START  train_reinforce_N16_L100_seed46
-[03:58:31] GPU 3 | START  train_cont_maxrl_N64_L100_seed42
-[04:03:12] GPU 0 | START  train_cont_maxrl_N64_L100_seed43
-[04:07:53] GPU 1 | START  train_cont_maxrl_N64_L100_seed44
+[07:26:45] GPU 0 | START  train_cont_maxrl_N16_L100_seed42
+[07:26:45] GPU 1 | START  train_cont_maxrl_N16_L100_seed43
+[07:26:45] GPU 3 | START  train_cont_maxrl_N16_L100_seed44
+[07:26:45] GPU 4 | START  train_cont_maxrl_no_bl_N16_L100_seed42
+[07:26:45] GPU 0 | START  train_cont_maxrl_no_bl_N16_L100_seed43
+[07:26:45] GPU 1 | START  train_cont_maxrl_no_bl_N16_L100_seed44
+[07:26:45] GPU 3 | START  train_binary_maxrl_N16_L100_seed42
+[07:26:45] GPU 4 | START  train_binary_maxrl_N16_L100_seed43
+[07:26:45] GPU 0 | START  train_binary_maxrl_N16_L100_seed44
+[07:26:45] GPU 1 | START  train_grpo_N16_L100_seed42
+[07:26:45] GPU 3 | START  train_grpo_N16_L100_seed43
+[07:26:45] GPU 4 | START  train_grpo_N16_L100_seed44
+[08:03:06] GPU 0 | START  train_reinforce_N16_L100_seed42
+[08:03:28] GPU 1 | START  train_reinforce_N16_L100_seed43
+[08:03:29] GPU 3 | START  train_reinforce_N16_L100_seed44
+[08:16:57] GPU 4 | START  train_cont_maxrl_N64_L100_seed42
+[08:23:49] GPU 0 | START  train_cont_maxrl_N64_L100_seed43
+[08:30:53] GPU 1 | START  train_cont_maxrl_N64_L100_seed44
+[08:31:07] GPU 3 | START  train_cont_maxrl_no_bl_N64_L100_seed42
+[08:32:42] GPU 4 | START  train_cont_maxrl_no_bl_N64_L100_seed43
+[08:34:27] GPU 0 | START  train_cont_maxrl_no_bl_N64_L100_seed44
+[08:34:47] GPU 1 | START  train_binary_maxrl_N64_L100_seed42
+[08:35:00] GPU 3 | START  train_binary_maxrl_N64_L100_seed43
+[08:35:11] GPU 4 | START  train_binary_maxrl_N64_L100_seed44
+[08:36:54] GPU 0 | START  train_grpo_N64_L100_seed42
+[08:40:05] GPU 1 | START  train_grpo_N64_L100_seed43
+[08:49:39] GPU 3 | START  train_grpo_N64_L100_seed44
+[08:50:47] GPU 4 | START  train_reinforce_N64_L100_seed42
+[09:16:29] GPU 0 | START  train_reinforce_N64_L100_seed43
+[09:17:09] GPU 1 | START  train_reinforce_N64_L100_seed44
+[09:17:17] GPU 3 | START  train_cont_maxrl_N256_L100_seed42
+[09:25:43] GPU 4 | START  train_cont_maxrl_N256_L100_seed43
+[09:30:45] GPU 0 | START  train_cont_maxrl_N256_L100_seed44
+[09:31:31] GPU 1 | START  train_cont_maxrl_no_bl_N256_L100_seed42
+[09:35:28] GPU 3 | START  train_cont_maxrl_no_bl_N256_L100_seed43
+[09:36:19] GPU 4 | START  train_cont_maxrl_no_bl_N256_L100_seed44
+[09:43:16] GPU 0 | START  train_binary_maxrl_N256_L100_seed42
+[09:44:56] GPU 1 | START  train_binary_maxrl_N256_L100_seed43
+[09:46:24] GPU 3 | START  train_binary_maxrl_N256_L100_seed44
+[09:48:54] GPU 4 | START  train_grpo_N256_L100_seed42
+[09:50:46] GPU 0 | START  train_grpo_N256_L100_seed43
+[09:54:55] GPU 1 | START  train_grpo_N256_L100_seed44
+[10:10:51] GPU 3 | START  train_reinforce_N256_L100_seed42
+[10:21:42] GPU 4 | START  train_reinforce_N256_L100_seed43
+[10:25:14] GPU 0 | START  train_reinforce_N256_L100_seed44
+Phase 2 done in 224 min
+
+==========================================
+  Phase 3: Binary recovery (L=2)
+  33 runs
+==========================================
+[11:11:06] GPU 1 | START  train_ordinal_ce_L2_seed42
+[11:11:06] GPU 3 | START  train_ordinal_ce_L2_seed43
+[11:11:06] GPU 4 | START  train_ordinal_ce_L2_seed44
+[11:11:06] GPU 0 | START  train_plain_ce_L2_seed42
+[11:11:06] GPU 1 | START  train_plain_ce_L2_seed43
+[11:11:06] GPU 3 | START  train_plain_ce_L2_seed44
+[11:11:06] GPU 4 | START  train_binary_maxrl_N1024_L2_seed42
+[11:11:06] GPU 0 | START  train_binary_maxrl_N1024_L2_seed43
+[11:11:06] GPU 1 | START  train_binary_maxrl_N1024_L2_seed44
+[11:11:06] GPU 3 | START  train_binary_maxrl_N256_L2_seed42
+[11:11:06] GPU 4 | START  train_binary_maxrl_N256_L2_seed43
+[11:11:06] GPU 0 | START  train_binary_maxrl_N256_L2_seed44
+[11:11:06] GPU 1 | START  train_binary_maxrl_N64_L2_seed42
+[11:38:37] GPU 3 | START  train_binary_maxrl_N64_L2_seed43
+[11:39:17] GPU 4 | START  train_binary_maxrl_N64_L2_seed44
+[11:47:42] GPU 0 | START  train_cont_maxrl_N1024_L2_seed42
+[11:47:50] GPU 1 | START  train_cont_maxrl_N1024_L2_seed43
+[11:52:11] GPU 3 | START  train_cont_maxrl_N1024_L2_seed44
+[11:52:13] GPU 4 | START  train_cont_maxrl_N256_L2_seed42
+[12:12:58] GPU 0 | START  train_cont_maxrl_N256_L2_seed43
+[12:24:16] GPU 1 | START  train_cont_maxrl_N256_L2_seed44
+[12:24:31] GPU 3 | START  train_cont_maxrl_N64_L2_seed42
+[12:32:46] GPU 4 | START  train_cont_maxrl_N64_L2_seed43
+[12:39:58] GPU 0 | START  train_cont_maxrl_N64_L2_seed44
+[12:42:23] GPU 1 | START  train_cont_maxrl_no_bl_N64_L2_seed42
+[12:50:16] GPU 3 | START  train_cont_maxrl_no_bl_N64_L2_seed43
+[12:54:20] GPU 4 | START  train_cont_maxrl_no_bl_N64_L2_seed44
+[12:55:25] GPU 0 | START  train_grpo_N64_L2_seed42
+[12:56:00] GPU 1 | START  train_grpo_N64_L2_seed43
+[13:02:17] GPU 3 | START  train_grpo_N64_L2_seed44
+[13:08:36] GPU 4 | START  train_reinforce_N64_L2_seed42
+[13:14:21] GPU 0 | START  train_reinforce_N64_L2_seed43
+[13:25:17] GPU 1 | START  train_reinforce_N64_L2_seed44
+Phase 3 done in 204 min
+
+==========================================
+  Phase 4: Gradient analysis
+  6 methods × 4 epochs = 24 jobs
+==========================================
+[14:35:57] GPU 3 | GRAD  ordinal_ce epoch=1
+[14:35:57] GPU 4 | GRAD  ordinal_ce epoch=10
+[14:35:57] GPU 0 | GRAD  ordinal_ce epoch=25
+[14:35:57] GPU 1 | GRAD  ordinal_ce epoch=50
+[14:35:57] GPU 3 | GRAD  plain_ce epoch=1
+[14:35:57] GPU 4 | GRAD  plain_ce epoch=10
+[14:35:57] GPU 0 | GRAD  plain_ce epoch=25
+[14:35:57] GPU 1 | GRAD  plain_ce epoch=50
+[14:35:57] GPU 3 | GRAD  cont_maxrl epoch=1
+[14:35:57] GPU 4 | GRAD  cont_maxrl epoch=10
+[14:35:57] GPU 0 | GRAD  cont_maxrl epoch=25
+[14:35:57] GPU 1 | GRAD  cont_maxrl epoch=50
+[14:35:57] GPU 3 | GRAD  cont_maxrl_no_bl epoch=1
+[14:36:32] GPU 4 | GRAD  cont_maxrl_no_bl epoch=10
+[14:36:32] GPU 0 | GRAD  cont_maxrl_no_bl epoch=25
+[14:36:33] GPU 1 | GRAD  cont_maxrl_no_bl epoch=50
+[14:36:34] GPU 3 | GRAD  grpo epoch=1
+[14:36:36] GPU 4 | GRAD  grpo epoch=10
+[14:37:00] GPU 0 | GRAD  grpo epoch=25
+[14:37:01] GPU 1 | GRAD  grpo epoch=50
+[14:37:02] GPU 3 | GRAD  reinforce epoch=1
+[14:37:02] GPU 4 | GRAD  reinforce epoch=10
+[14:37:06] GPU 0 | GRAD  reinforce epoch=25
+[14:37:29] GPU 1 | GRAD  reinforce epoch=50
+Phase 4 done in 2 min
+
+==========================================
+  Phase 5: Generate figures
+==========================================
+Figure 1 saved to /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/figures
+Figure 2 saved to /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/figures
+Figure 3 saved to /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/figures
+Figure 4 saved to /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/figures
+Figure 5 saved to /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/figures
+
+==========================================
+  All done!
+  Total time: 431 min
+  Results:  /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results
+  Figures:  /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/results/figures
+  Logs:     /zfsauton/scratch/shrinivr/cont-maxrl/experiment5_ordinal/logs
+==========================================
+  FAILED: train_grpo_L100_N16_seed42_lr1e-4.log
+  FAILED: train_grpo_L100_N16_seed43_lr1e-4.log
+  FAILED: train_grpo_L100_N16_seed44_lr1e-4.log
+  FAILED: train_grpo_L100_N256_seed42_lr1e-4.log
+  FAILED: train_grpo_L100_N256_seed43_lr1e-4.log
+  FAILED: train_grpo_L100_N64_seed42_lr1e-4.log
+  FAILED: train_grpo_L100_N64_seed43_lr1e-4.log
+  FAILED: train_grpo_L100_N64_seed44_lr1e-4.log
+  8 jobs may have failed — check logs

@@ -332,19 +332,220 @@ def run_gradient_analysis(
     return per_image_results, per_threshold_results
 
 
+def compute_cosine_vs_G(
+    model: nn.Module,
+    images: torch.Tensor,
+    targets: torch.Tensor,
+    L: int,
+    device: torch.device,
+    G_values: list[int] = None,
+    n_trials: int = 10,
+    methods: list[str] = None,
+    ref_method: str = "ordinal_ce",
+) -> dict:
+    """Compute cosine similarity between RL and supervised gradients at various G.
+
+    For each method and each G (number of rollouts per image), estimates the
+    batch policy gradient and measures cosine similarity with the supervised
+    reference gradient. Repeats n_trials times for variance estimation.
+
+    Args:
+        model: Trained model (eval mode, on device)
+        images: (K, C, H, W) batch of images (already on CPU)
+        targets: (K,) integer targets (already on CPU)
+        L: Number of bins
+        device: Torch device
+        G_values: List of rollout counts to evaluate
+        n_trials: Repetitions per (method, G) for variance
+        methods: RL methods to evaluate
+        ref_method: Supervised reference ('ordinal_ce' or 'plain_ce')
+
+    Returns:
+        Dict: {method: {G: {"mean": float, "std": float, "values": [...]}}}
+    """
+    from .advantages import ADVANTAGE_FNS
+
+    if G_values is None:
+        G_values = [4, 8, 16, 32, 64, 128, 256, 512, 1024, 4096]
+    if methods is None:
+        methods = ["cont_maxrl", "cont_maxrl_no_bl", "binary_maxrl", "grpo", "reinforce"]
+
+    n_images = images.size(0)
+    model.eval()
+
+    # 1. Compute reference supervised gradient (deterministic)
+    model.zero_grad()
+    for i in range(n_images):
+        img = images[i:i+1].to(device)
+        tgt = targets[i:i+1].to(device, dtype=torch.long)
+        logits = model(img)
+        if ref_method == "ordinal_ce":
+            loss = ordinal_ce_loss(logits, tgt, L)
+        elif ref_method == "mse":
+            # MSE on expected value from softmax distribution
+            probs = F.softmax(logits, dim=-1)
+            bins = torch.arange(L, device=device).float()
+            pred = (probs * bins).sum(dim=-1) / (L - 1)
+            loss = F.mse_loss(pred, tgt.float() / (L - 1))
+        else:
+            loss = F.cross_entropy(logits, tgt)
+        (loss / n_images).backward()
+
+    ref_grad = torch.cat([p.grad.flatten() for p in model.parameters()
+                          if p.grad is not None]).clone()
+    ref_norm = ref_grad.norm().item()
+    model.zero_grad()
+    print(f"  Reference ({ref_method}) gradient norm: {ref_norm:.4f}")
+
+    # 2. For each method and G, compute RL gradient, cosine similarity, and magnitude ratio
+    results = {}
+    for method in methods:
+        results[method] = {}
+        adv_fn = ADVANTAGE_FNS[method]
+
+        for G in G_values:
+            cosines = []
+            mag_ratios = []
+            for trial in range(n_trials):
+                model.zero_grad()
+                for i in range(n_images):
+                    img = images[i:i+1].to(device)
+                    tgt = targets[i:i+1].to(device, dtype=torch.long)
+
+                    logits = model(img)
+                    probs = F.softmax(logits, dim=-1)
+                    log_probs = F.log_softmax(logits, dim=-1)
+
+                    samples = torch.multinomial(probs[0], G, replacement=True)
+                    errors = (samples - tgt.item()).abs().float()
+                    rewards = 1.0 - errors / (L - 1)
+
+                    advantages = adv_fn(rewards)
+                    sample_log_probs = log_probs[0, samples]
+                    img_loss = -(advantages * sample_log_probs).mean()
+                    (img_loss / n_images).backward()
+
+                rl_grad = torch.cat([p.grad.flatten() for p in model.parameters()
+                                     if p.grad is not None])
+                cos_sim = F.cosine_similarity(
+                    ref_grad.unsqueeze(0), rl_grad.unsqueeze(0)
+                ).item()
+                rl_norm = rl_grad.norm().item()
+                mag_ratio = rl_norm / ref_norm if ref_norm > 1e-12 else 0.0
+
+                cosines.append(cos_sim)
+                mag_ratios.append(mag_ratio)
+
+            mean_cos = float(np.mean(cosines))
+            std_cos = float(np.std(cosines))
+            mean_mag = float(np.mean(mag_ratios))
+            std_mag = float(np.std(mag_ratios))
+            results[method][str(G)] = {
+                "mean": mean_cos,
+                "std": std_cos,
+                "values": [float(c) for c in cosines],
+                "mag_ratio_mean": mean_mag,
+                "mag_ratio_std": std_mag,
+                "mag_ratio_values": [float(m) for m in mag_ratios],
+            }
+            print(f"  {method} G={G}: cos={mean_cos:.4f}±{std_cos:.4f}  mag={mean_mag:.4f}±{std_mag:.4f}")
+
+    return results
+
+
+def run_cosine_analysis(
+    checkpoint_path: str,
+    data_dir: str,
+    L: int,
+    seed: int,
+    output_dir: str,
+    n_images: int = 200,
+    n_trials: int = 10,
+    ref_method: str = "ordinal_ce",
+    methods: list[str] = None,
+):
+    """Run cosine similarity analysis: G vs cos(RL gradient, supervised gradient).
+
+    Args:
+        ref_method: Supervised reference loss ('ordinal_ce', 'plain_ce', or 'mse').
+                    For 'mse', uses MSE on expected value from softmax distribution.
+        methods: RL methods to evaluate. Default: all 5.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    epoch = ckpt["epoch"]
+    print(f"Cosine analysis: ref={ref_method}, epoch={epoch}, L={L}, n_images={n_images}")
+
+    # MSE reference uses L-output model (ordinal_ce architecture) since
+    # MSE model has 1-output regression head incompatible with RL sampling.
+    model_method = "ordinal_ce" if ref_method == "mse" else ref_method
+    model = create_model(L=L, method=model_method, pretrained=True, seed=seed)
+    model.load_state_dict(ckpt["model_state_dict"])
+    model = model.to(device)
+
+    _, val_loader, _, _ = get_dataloaders(
+        data_dir=data_dir, batch_size=256, L=L, num_workers=4,
+    )
+
+    all_images, all_targets = [], []
+    for images, targets, _ages in val_loader:
+        all_images.append(images)
+        all_targets.append(targets)
+    all_images = torch.cat(all_images, dim=0)
+    all_targets = torch.cat(all_targets, dim=0)
+
+    rng = np.random.RandomState(seed)
+    idx = rng.permutation(all_images.size(0))[:n_images]
+
+    results = compute_cosine_vs_G(
+        model, all_images[idx], all_targets[idx], L, device,
+        n_trials=n_trials, methods=methods, ref_method=ref_method,
+    )
+
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    suffix = f"_ref_{ref_method}" if ref_method != "ordinal_ce" else ""
+    out_file = out_path / f"cosine_vs_G_epoch{epoch}{suffix}.json"
+    with open(out_file, "w") as f:
+        json.dump({"epoch": epoch, "n_images": n_images, "n_trials": n_trials,
+                    "ref_method": ref_method, "results": results}, f, indent=2)
+    print(f"Cosine analysis saved to {out_file}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gradient analysis")
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--data_dir", type=str, default="./data/utkface")
-    parser.add_argument("--method", type=str, required=True)
+    parser.add_argument("--method", type=str, default=None,
+                        help="Method for per-image analysis (omit for cosine analysis)")
     parser.add_argument("--L", type=int, default=100)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output_dir", type=str, default="./results/gradient_analysis")
     parser.add_argument("--n_images", type=int, default=500)
+    parser.add_argument("--n_trials", type=int, default=10,
+                        help="Trials per (method, G) for cosine analysis")
     parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--mode", type=str, default="per_image",
+                        choices=["per_image", "cosine"],
+                        help="per_image: gradient norms; cosine: G vs cosine similarity")
+    parser.add_argument("--ref_method", type=str, default="ordinal_ce",
+                        choices=["ordinal_ce", "plain_ce", "mse"],
+                        help="Supervised reference for cosine analysis")
+    parser.add_argument("--methods", type=str, nargs="+", default=None,
+                        help="RL methods to evaluate (cosine mode)")
     args = parser.parse_args()
 
-    run_gradient_analysis(
-        args.checkpoint, args.data_dir, args.method, args.L,
-        args.seed, args.output_dir, args.n_images, use_wandb=args.wandb,
-    )
+    if args.mode == "cosine":
+        run_cosine_analysis(
+            args.checkpoint, args.data_dir, args.L,
+            args.seed, args.output_dir, args.n_images, args.n_trials,
+            ref_method=args.ref_method, methods=args.methods,
+        )
+    else:
+        if args.method is None:
+            parser.error("--method is required for per_image mode")
+        run_gradient_analysis(
+            args.checkpoint, args.data_dir, args.method, args.L,
+            args.seed, args.output_dir, args.n_images, use_wandb=args.wandb,
+        )
