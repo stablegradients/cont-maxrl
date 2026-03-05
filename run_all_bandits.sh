@@ -6,7 +6,7 @@
 #   nohup bash run_all_bandits.sh > logs/bandits_all.log 2>&1 &
 set -euo pipefail
 
-PYTHON="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
+PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO_ROOT"
 

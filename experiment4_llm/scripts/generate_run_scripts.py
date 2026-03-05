@@ -17,9 +17,9 @@ import os
 import stat
 from pathlib import Path
 
-REPO_ROOT_PLACEHOLDER = "/zfsauton/scratch/shrinivr/cont-maxrl"
-PYTHON_PATH = "/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
-CUDA_HOME = "/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl"
+REPO_ROOT_PLACEHOLDER = "/projects/bgmo/sramasubramanian/cont-maxrl"
+PYTHON_PATH = "/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
+CUDA_HOME = "/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 
 # wandb config
 WANDB_ENTITY = "stablegradients"
@@ -52,14 +52,16 @@ EVAL_BENCHMARKS = {
 
 # ── Experimental matrix ──
 
+SLURM_ACCOUNT = "bgmo-dtai-gh"
+
 MODELS = {
     "1.5b": {
         "hf_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
         "tensor_parallel_size": 1,
-        "fsdp_size": -1,  # full sharding — NO_SHARD OOMs on 24GB GPUs (optimizer states alone need 24GB)
-        "ppo_micro_batch_size_per_gpu": 4,
-        "ref_log_prob_micro_batch_size_per_gpu": 4,
-        "rollout_log_prob_micro_batch_size_per_gpu": 4,
+        "fsdp_size": -1,  # full sharding
+        "ppo_micro_batch_size_per_gpu": 16,
+        "ref_log_prob_micro_batch_size_per_gpu": 16,
+        "rollout_log_prob_micro_batch_size_per_gpu": 16,
         "max_num_batched_tokens": 8192,
         "max_num_seqs": 1024,
         "gpu_memory_utilization": "0.4",
@@ -67,18 +69,19 @@ MODELS = {
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
         "group_sizes": [4, 16, 32, 64],
         "slurm_time": "47:00:00",
-        "slurm_mem": "256G",
+        "slurm_mem": "860G",
         "slurm_gpus": 4,
-        "slurm_cpus": 48,
-        "slurm_partition": "general",
+        "slurm_cpus": 288,
+        "slurm_nodes": 1,
+        "slurm_partition": "ghx4",
     },
     "7b": {
         "hf_id": "Qwen/Qwen2.5-Coder-7B-Instruct",
         "tensor_parallel_size": 1,
         "fsdp_size": -1,  # full sharding across all GPUs
-        "ppo_micro_batch_size_per_gpu": 2,
-        "ref_log_prob_micro_batch_size_per_gpu": 1,
-        "rollout_log_prob_micro_batch_size_per_gpu": 1,
+        "ppo_micro_batch_size_per_gpu": 8,
+        "ref_log_prob_micro_batch_size_per_gpu": 8,
+        "rollout_log_prob_micro_batch_size_per_gpu": 8,
         "max_num_batched_tokens": 8192,
         "max_num_seqs": 512,
         "gpu_memory_utilization": "0.4",
@@ -86,10 +89,11 @@ MODELS = {
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
         "group_sizes": [4, 16, 32, 64],
         "slurm_time": "47:00:00",
-        "slurm_mem": "256G",
+        "slurm_mem": "860G",
         "slurm_gpus": 4,
-        "slurm_cpus": 32,
-        "slurm_partition": "general",
+        "slurm_cpus": 288,
+        "slurm_nodes": 1,
+        "slurm_partition": "ghx4",
     },
     "32b": {
         "hf_id": "Qwen/Qwen2.5-Coder-32B-Instruct",
@@ -105,30 +109,34 @@ MODELS = {
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm"],
         "group_sizes": [16, 32, 64],
         "slurm_time": "47:00:00",
-        "slurm_mem": "256G",
-        "slurm_gpus": 8,
-        "slurm_cpus": 32,
-        "slurm_partition": "general",
+        "slurm_mem": "860G",
+        "slurm_gpus": 4,
+        "slurm_nodes": 2,
+        "slurm_cpus": 288,
+        "slurm_partition": "ghx4",
     },
 }
 
 TOTAL_STEPS = 150
 TOTAL_ROLLOUTS_PER_STEP = 4096
 DEFAULT_BATCH_SIZE = 128
-MINI_BATCH = 32
+MINI_BATCH = 128
 PPO_EPOCHS = 1
 LR = "1e-6"
 KL_COEF = "0.001"
 CLIP_RATIO = "0.2"
-CLIP_RATIO_HIGH = "0.28"
+CLIP_RATIO_HIGH = "0.2"
+GRAD_CLIP = "0.3"
 TRAIN_TEMP = "1.0"
-EVAL_TEMP = "0.8"
+EVAL_TEMP = "0.6"
+EVAL_TOP_P = "0.95"
+EVAL_TOP_K = "-1"
 MAX_PROMPT_LEN = 1024
 MAX_RESPONSE_LEN = 1024
 N_EVAL_COMPLETIONS = 200
-K_VALUES = "1 2 5 10 20 50 100"
+K_VALUES = "1 2 5 10 20 50 100 200"
 SAVE_FREQ = 25
-RAY_NUM_CPUS = 48
+RAY_NUM_CPUS = 280
 
 
 def _batch_size_for_g(G: int) -> int:
@@ -155,15 +163,15 @@ def generate_train_script(
 
     # SLURM header
     slurm_header = f"""#SBATCH --job-name={exp_name}
+#SBATCH --account={SLURM_ACCOUNT}
 #SBATCH --partition={model_cfg['slurm_partition']}
-#SBATCH --gres=gpu:{model_cfg['slurm_gpus']}
+#SBATCH --gpus-per-node={model_cfg['slurm_gpus']}
 #SBATCH --time={model_cfg['slurm_time']}
 #SBATCH --mem={model_cfg['slurm_mem']}
 #SBATCH --cpus-per-task={model_cfg['slurm_cpus']}
-#SBATCH --nodes=1
-#SBATCH --exclude=gpu20,gpu21,gpu22,gpu23
-#SBATCH --output={REPO_ROOT_PLACEHOLDER}/results/{exp_name}/slurm_%j.out
-#SBATCH --error={REPO_ROOT_PLACEHOLDER}/results/{exp_name}/slurm_%j.err"""
+#SBATCH --nodes={model_cfg['slurm_nodes']}
+#SBATCH --output={REPO_ROOT_PLACEHOLDER}/slurm_logs/%x_%j.out
+#SBATCH --error={REPO_ROOT_PLACEHOLDER}/slurm_logs/%x_%j.err"""
 
     # KL loss applied uniformly to all methods for fair comparison
     use_kl_loss = "True"
@@ -175,6 +183,11 @@ set -euo pipefail
 # ============================================================
 # Train: {hf_id.split("/")[-1]} | {dataset.upper()} | {method} | G={G} | seed={seed}
 # ============================================================
+
+# Activate conda environment
+module load python/miniforge3_pytorch/2.10.0
+eval "$(conda shell.bash hook)"
+conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
 
 REPO_ROOT="{REPO_ROOT_PLACEHOLDER}"
 PYTHON="{PYTHON_PATH}"
@@ -189,7 +202,7 @@ export PATH="${{CUDA_HOME}}/bin:${{PATH}}"
 export LD_LIBRARY_PATH="${{CUDA_HOME}}/lib:${{LD_LIBRARY_PATH:-}}"
 
 # Caches
-export HF_HOME="/zfsauton/scratch/shrinivr/.cache/huggingface"
+export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"
 export TORCH_HOME="${{REPO_ROOT}}/.cache/torch"
 export VLLM_CACHE_ROOT="${{REPO_ROOT}}/.cache/vllm"
 # verl requires vLLM v0 engine (v1 doesn't implement free_cache_engine)
@@ -239,6 +252,7 @@ $PYTHON "${{REPO_ROOT}}/experiment4_llm/src/train.py" \\
   actor_rollout_ref.actor.kl_loss_type=low_var_kl \\
   actor_rollout_ref.actor.clip_ratio={CLIP_RATIO} \\
   actor_rollout_ref.actor.clip_ratio_high={CLIP_RATIO_HIGH} \\
+  actor_rollout_ref.actor.grad_clip={GRAD_CLIP} \\
   actor_rollout_ref.actor.use_torch_compile=False \\
   actor_rollout_ref.actor.optim.lr={LR} \\
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={model_cfg['ref_log_prob_micro_batch_size_per_gpu']} \\
@@ -301,15 +315,15 @@ def generate_eval_script(
     eval_name = f"{exp_name}_on_{eval_benchmark}"
 
     slurm_header = f"""#SBATCH --job-name=eval_{eval_name}
+#SBATCH --account={SLURM_ACCOUNT}
 #SBATCH --partition={model_cfg['slurm_partition']}
-#SBATCH --gres=gpu:{model_cfg['slurm_gpus']}
+#SBATCH --gpus-per-node={model_cfg['slurm_gpus']}
 #SBATCH --time=47:00:00
 #SBATCH --mem={model_cfg['slurm_mem']}
 #SBATCH --cpus-per-task={model_cfg['slurm_cpus']}
 #SBATCH --nodes=1
-#SBATCH --exclude=gpu20,gpu21,gpu22,gpu23
-#SBATCH --output={REPO_ROOT_PLACEHOLDER}/results/{exp_name}/eval_{eval_benchmark}/slurm_%j.out
-#SBATCH --error={REPO_ROOT_PLACEHOLDER}/results/{exp_name}/eval_{eval_benchmark}/slurm_%j.err"""
+#SBATCH --output={REPO_ROOT_PLACEHOLDER}/slurm_logs/%x_%j.out
+#SBATCH --error={REPO_ROOT_PLACEHOLDER}/slurm_logs/%x_%j.err"""
 
     script = f"""#!/usr/bin/env bash
 {slurm_header}
@@ -319,6 +333,11 @@ set -euo pipefail
 # Eval: {model_key} trained on {train_dataset.upper()} | eval on {eval_benchmark.upper()}
 # {method} | G={G} | seed={seed}
 # ============================================================
+
+# Activate conda environment
+module load python/miniforge3_pytorch/2.10.0
+eval "$(conda shell.bash hook)"
+conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
 
 REPO_ROOT="{REPO_ROOT_PLACEHOLDER}"
 PYTHON="{PYTHON_PATH}"
@@ -330,7 +349,7 @@ export PATH="${{CUDA_HOME}}/bin:${{PATH}}"
 export LD_LIBRARY_PATH="${{CUDA_HOME}}/lib:${{LD_LIBRARY_PATH:-}}"
 
 # Caches
-export HF_HOME="/zfsauton/scratch/shrinivr/.cache/huggingface"
+export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"
 export TORCH_HOME="${{REPO_ROOT}}/.cache/torch"
 export TMPDIR="/tmp/${{USER}}_verl_tmp"
 mkdir -p "${{TMPDIR}}"
@@ -354,6 +373,8 @@ $PYTHON "${{REPO_ROOT}}/experiment4_llm/src/evaluate.py" \\
   --output_dir "${{OUTPUT_DIR}}" \\
   --n_completions {N_EVAL_COMPLETIONS} \\
   --temperature {EVAL_TEMP} \\
+  --top_p {EVAL_TOP_P} \\
+  --top_k {EVAL_TOP_K} \\
   --max_tokens {MAX_RESPONSE_LEN} \\
   --tensor_parallel_size ${{N_GPUS}} \\
   --k_values {K_VALUES}

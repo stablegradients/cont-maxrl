@@ -1,4 +1,4 @@
 {
-    "python.defaultInterpreterPath": "/zfsauton/scratch/shrinivr/miniconda3/bin/python",
+    "python.defaultInterpreterPath": "/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python",
     "python.terminal.activateEnvironment": false
 }

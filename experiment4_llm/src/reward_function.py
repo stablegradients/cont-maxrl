@@ -54,7 +54,7 @@ def compute_score(
     memory_limit_mb: int = 512,
     data_source: str | None = None,
     extra_info: dict | None = None,
-) -> float:
+) -> dict:
     """
     Compute continuous reward: fraction of test cases passed.
 
@@ -66,29 +66,31 @@ def compute_score(
         memory_limit_mb: memory limit per test case
 
     Returns:
-        float in [0, 1]: fraction of test cases passed
+        dict with:
+            "score": float in [0, 1] (fraction of test cases passed)
+            "acc": 1.0 if all tests passed, 0.0 otherwise
     """
     # Parse ground truth
     try:
         test_cases = json.loads(ground_truth)
     except (json.JSONDecodeError, TypeError):
-        return 0.0
+        return {"score": 0.0, "acc": 0.0}
 
     inputs = test_cases.get("inputs", [])
     expected_outputs = test_cases.get("outputs", [])
     fn_name = test_cases.get("fn_name", None)
 
     if not inputs or not expected_outputs:
-        return 0.0
+        return {"score": 0.0, "acc": 0.0}
 
     num_total = min(len(inputs), len(expected_outputs))
     if num_total == 0:
-        return 0.0
+        return {"score": 0.0, "acc": 0.0}
 
     # Extract code from model output
     code = extract_code(solution_str)
     if not code:
-        return 0.0
+        return {"score": 0.0, "acc": 0.0}
 
     num_passed = 0
 
@@ -109,7 +111,9 @@ def compute_score(
         except (TimeoutError, MemoryError, RuntimeError, SyntaxError, Exception):
             pass  # Failed test case -- counts as not passed
 
-    return num_passed / num_total
+    score = num_passed / num_total
+    acc = 1.0 if num_passed == num_total else 0.0
+    return {"score": score, "acc": acc}
 
 
 def _outputs_match(actual: str, expected: str, fn_name: str | None) -> bool:
@@ -182,7 +186,7 @@ def compute_score_binary(
     Binary reward: 1.0 if ALL test cases pass, 0.0 otherwise.
     Used for evaluation (pass@k), not training.
     """
-    score = compute_score(
+    result = compute_score(
         solution_str, ground_truth, timeout_per_test, memory_limit_mb
     )
-    return 1.0 if score == 1.0 else 0.0
+    return 1.0 if result["score"] == 1.0 else 0.0

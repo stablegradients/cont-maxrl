@@ -189,7 +189,7 @@ def compute_response_mask(data: DataProto):
 
 def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, norm_adv_by_std_in_grpo=True):
     # Back-compatible with trainers that do not compute response mask in fit
-    if "response_mask" not in data.batch:
+    if "response_mask" not in data.batch.keys():
         data.batch["response_mask"] = compute_response_mask(data)
     # prepare response group
     # TODO: add other ways to estimate advantages

@@ -23,7 +23,7 @@ import sys as _sys
 _sys.set_int_max_str_digits(100000)  # Python 3.10 safety limit for huge ints in TACO
 
 PROJ = Path(__file__).resolve().parents[2]
-PYTHON = "/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
+PYTHON = "/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 PER_PROBLEM_TIMEOUT = 120   # kill entire problem after 120s
 PER_TEST_TIMEOUT = 30       # per-test timeout inside the subprocess
 MEMORY_MB = 512
@@ -255,7 +255,7 @@ def main():
 
     print("Loading TACO dataset...", flush=True)
     ds = load_dataset("BAAI/TACO", split="train",
-                      cache_dir="/zfsauton/scratch/shrinivr/.cache/huggingface")
+                      cache_dir="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface")
     print(f"Loaded {len(ds)} problems", flush=True)
 
     work = []

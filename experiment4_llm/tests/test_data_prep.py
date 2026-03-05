@@ -226,8 +226,8 @@ def test_end_to_end_fn_name_round_trip():
 
     ground_truth = json.dumps(parsed)
     code = "def is_even(n):\n    return n % 2 == 0"
-    score = compute_score(code, ground_truth)
-    assert score == 1.0, f"End-to-end round trip failed: score={score}"
+    result = compute_score(code, ground_truth)
+    assert result["score"] == 1.0, f"End-to-end round trip failed: score={result}"
 
 
 def test_end_to_end_nested_list_round_trip():
@@ -245,5 +245,5 @@ def test_end_to_end_nested_list_round_trip():
 
     ground_truth = json.dumps(parsed)
     code = "def add_lists(a, b):\n    return [x+y for x,y in zip(a, b)]"
-    score = compute_score(code, ground_truth)
-    assert score == 1.0, f"Nested list round trip failed: score={score}"
+    result = compute_score(code, ground_truth)
+    assert result["score"] == 1.0, f"Nested list round trip failed: score={result}"

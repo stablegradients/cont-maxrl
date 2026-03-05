@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
-SCRIPT="/zfsauton/scratch/shrinivr/cont-maxrl/experiment1f_qweighted.py"
+PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
+SCRIPT="/projects/bgmo/sramasubramanian/cont-maxrl/experiment1f_qweighted.py"
 OUT_BASE="results-bandits/results_1f"
 NUM_WORKERS=24  # 3 GPUs × 8 per GPU
 GPU_IDS="1 2 3"

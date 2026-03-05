@@ -5,14 +5,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Use conda env's python directly (no conda activate needed)
-PYTHON="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
+PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 
 # Use only GPUs 2,3
 export CUDA_VISIBLE_DEVICES=1,2
 
 # Conda's CUDA 12.4
-export CUDA_HOME="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl"
+export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}"
 

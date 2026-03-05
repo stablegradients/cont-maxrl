@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
+PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 SCRIPT="experiment1e_inference_maxrl.py"
 OUT_BASE="results-bandits/results_1e"
 NUM_WORKERS=32  # 4 GPUs × 8 per GPU

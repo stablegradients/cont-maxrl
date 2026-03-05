@@ -333,20 +333,14 @@ class TestDryRunSanity:
         # Worst case for max advantage: [0, 0, 0, 1]
         rewards = torch.tensor([0.0, 0.0, 0.0, 1.0])
         adv = maxrl_unnormalized_advantage(rewards)
-        # Max advantage should be 0.75 (= 1/1 - mean of weights)
-        # Let's verify:
+        # With G-scaling (w *= G=4 to prevent gradient magnitude decay):
         # sorted: [0, 0, 0, 1], gaps = [0, 0, 0, 1], survivors = [4,3,2,1]
         # w = cumsum([0/4, 0/3, 0/2, 1/1]) = [0, 0, 0, 1]
-        # mean(w) = 0.25
-        # centered = [-0.25, -0.25, -0.25, 0.75]
-        expected = torch.tensor([-0.25, -0.25, -0.25, 0.75])
-        # But rewards [0,0,0,1] map to indices [0,1,2,3] after sort
-        # sort_indices = [0,1,2,3] (they're already sorted)
-        # So adv[0]=adv[1]=adv[2]=-0.25, adv[3]=0.75
+        # w *= G=4: [0, 0, 0, 4]
+        # mean(w) = 1.0
+        # centered = [-1.0, -1.0, -1.0, 3.0]
+        expected = torch.tensor([-1.0, -1.0, -1.0, 3.0])
         assert torch.allclose(adv, expected, atol=1e-5), f"Got {adv}, expected {expected}"
-
-        # This matches the dry run step 1: advantages min=-0.250, max=0.750
-        # (from step 3 log, which had [0,0,0,1] reward pattern)
 
     def test_score_advantage_consistency(self):
         """Mean score 0.875 with G=4 means 7/8 passed.

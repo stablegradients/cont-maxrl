@@ -32,7 +32,7 @@ export WANDB_PROJECT="cont-maxrl-ordinal"
 export WANDB_RUN_GROUP="{group}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-PYTHON="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
+PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 
 cd "$REPO_ROOT"
 

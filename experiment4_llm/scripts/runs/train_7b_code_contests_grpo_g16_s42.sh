@@ -1,34 +1,39 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=7b_code_contests_grpo_g16_s42
-#SBATCH --partition=general
-#SBATCH --gres=gpu:4
+#SBATCH --account=bgmo-dtai-gh
+#SBATCH --partition=ghx4
+#SBATCH --gpus-per-node=4
 #SBATCH --time=47:00:00
-#SBATCH --mem=256G
-#SBATCH --cpus-per-task=32
+#SBATCH --mem=860G
+#SBATCH --cpus-per-task=288
 #SBATCH --nodes=1
-#SBATCH --exclude=gpu20,gpu21,gpu22,gpu23
-#SBATCH --output=/zfsauton/scratch/shrinivr/cont-maxrl/results/7b_code_contests_grpo_g16_s42/slurm_%j.out
-#SBATCH --error=/zfsauton/scratch/shrinivr/cont-maxrl/results/7b_code_contests_grpo_g16_s42/slurm_%j.err
+#SBATCH --output=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.out
+#SBATCH --error=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.err
 set -euo pipefail
 
 # ============================================================
 # Train: Qwen2.5-Coder-7B-Instruct | CODE_CONTESTS | grpo | G=16 | seed=42
 # ============================================================
 
-REPO_ROOT="/zfsauton/scratch/shrinivr/cont-maxrl"
-PYTHON="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
+# Activate conda environment
+module load python/miniforge3_pytorch/2.10.0
+eval "$(conda shell.bash hook)"
+conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
+
+REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
+PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 
 OUTPUT_DIR="${REPO_ROOT}/results/7b_code_contests_grpo_g16_s42"
 mkdir -p "${OUTPUT_DIR}"
 
 # Conda CUDA (not system CUDA)
-export CUDA_HOME="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl"
+export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}"
 
 # Caches
-export HF_HOME="/zfsauton/scratch/shrinivr/.cache/huggingface"
+export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"
 export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
 # verl requires vLLM v0 engine (v1 doesn't implement free_cache_engine)
@@ -70,17 +75,18 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.model.trust_remote_code=True \
   actor_rollout_ref.actor.strategy=fsdp \
   actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
-  actor_rollout_ref.actor.ppo_mini_batch_size=32 \
-  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+  actor_rollout_ref.actor.ppo_mini_batch_size=128 \
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
   actor_rollout_ref.actor.ppo_epochs=1 \
   actor_rollout_ref.actor.use_kl_loss=True \
   actor_rollout_ref.actor.kl_loss_coef=0.001 \
   actor_rollout_ref.actor.kl_loss_type=low_var_kl \
   actor_rollout_ref.actor.clip_ratio=0.2 \
-  actor_rollout_ref.actor.clip_ratio_high=0.28 \
+  actor_rollout_ref.actor.clip_ratio_high=0.2 \
+  actor_rollout_ref.actor.grad_clip=0.3 \
   actor_rollout_ref.actor.use_torch_compile=False \
   actor_rollout_ref.actor.optim.lr=1e-6 \
-  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
   actor_rollout_ref.ref.use_torch_compile=False \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.n=16 \
@@ -93,7 +99,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.max_num_seqs=512 \
   actor_rollout_ref.rollout.enforce_eager=True \
   actor_rollout_ref.rollout.free_cache_engine=True \
-  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
   actor_rollout_ref.rollout.enable_chunked_prefill=False \
   actor_rollout_ref.rollout.val_kwargs.n=16 \
   actor_rollout_ref.rollout.val_kwargs.do_sample=True \
@@ -114,7 +120,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.save_freq=25 \
   trainer.test_freq=20 \
   trainer.val_before_train=False \
-  ray_init.num_cpus=48
+  ray_init.num_cpus=280
 
 echo ""
 echo "=== Training complete: 7b_code_contests_grpo_g16_s42 ==="

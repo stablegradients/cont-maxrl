@@ -4,7 +4,7 @@ import os
 import pytest
 import torch
 
-DATA_DIR = "/zfsauton/scratch/shrinivr/cont-maxrl/data/utkface"
+DATA_DIR = "/projects/bgmo/sramasubramanian/cont-maxrl/data/utkface"
 
 # Auto-detect device once at import time
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

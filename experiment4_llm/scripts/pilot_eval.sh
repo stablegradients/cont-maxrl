@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=pilot_eval
-#SBATCH --partition=general
-#SBATCH --gres=gpu:8
+#SBATCH --account=bgmo-dtai-gh
+#SBATCH --partition=ghx4
+#SBATCH --gpus-per-node=4
 #SBATCH --time=47:00:00
-#SBATCH --mem=256G
-#SBATCH --cpus-per-task=128
+#SBATCH --mem=860G
+#SBATCH --cpus-per-task=288
 #SBATCH --nodes=1
-#SBATCH --exclude=gpu20,gpu21,gpu22,gpu23,gpu28
 set -euo pipefail
 
 # ============================================================
@@ -14,6 +14,11 @@ set -euo pipefail
 # Usage: sbatch pilot_eval.sh <results_dir>
 #   e.g. sbatch pilot_eval.sh results/pilot_grpo
 # ============================================================
+
+# Activate conda environment
+module load python/miniforge3_pytorch/2.10.0
+eval "$(conda shell.bash hook)"
+conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: sbatch $0 <results_dir>"
@@ -23,8 +28,8 @@ fi
 
 RESULTS_DIR="$1"
 
-REPO_ROOT="/zfsauton/scratch/shrinivr/cont-maxrl"
-PYTHON="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
+REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
+PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 
 # Make results_dir absolute if relative
@@ -37,12 +42,12 @@ EVAL_LOG_DIR="${RESULTS_DIR}/eval_livecodebench"
 mkdir -p "${EVAL_LOG_DIR}"
 
 # Conda CUDA (not system CUDA)
-export CUDA_HOME="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl"
+export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}"
 
 # Caches
-export HF_HOME="/zfsauton/scratch/shrinivr/.cache/huggingface"
+export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"
 export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export TMPDIR="/tmp/${USER}_verl_tmp"
 mkdir -p "${TMPDIR}"
@@ -79,7 +84,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/evaluate.py" \
   --max_tokens 1024 \
   --tensor_parallel_size ${N_GPUS} \
   --timeout_per_test 1 \
-  --n_workers 128 \
+  --n_workers 256 \
   --k_values 1 2 5 10 20 50 100 200
 
 EVAL_STEPS+=(0)
@@ -130,7 +135,7 @@ for ACTOR_DIR in "${CKPT_DIRS[@]}"; do
       --max_tokens 1024 \
       --tensor_parallel_size ${N_GPUS} \
       --timeout_per_test 1 \
-      --n_workers 128 \
+      --n_workers 256 \
       --k_values 1 2 5 10 20 50 100 200
   fi
 

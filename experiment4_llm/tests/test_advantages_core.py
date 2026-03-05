@@ -13,9 +13,9 @@ def test_maxrl_unnorm_worked_example():
     rewards = torch.tensor([0.3, 0.9, 0.1, 0.6])
     adv = maxrl_unnormalized_advantage(rewards)
 
-    # From worked example:
-    # Result: [-0.1333, 0.3167, -0.2000, 0.0167]
-    expected = torch.tensor([-0.1333, 0.3167, -0.2000, 0.0167])
+    # From worked example (scaled by G=4 to prevent gradient magnitude decay):
+    # Result: [-0.5333, 1.2667, -0.8000, 0.0667]
+    expected = torch.tensor([-0.5333, 1.2667, -0.8000, 0.0667])
     assert torch.allclose(adv, expected, atol=1e-3), f"Got {adv}"
 
 
@@ -163,9 +163,9 @@ def test_two_rewards():
     adv = maxrl_unnormalized_advantage(rewards)
     # r_(1)=0.0, r_(2)=1.0
     # gaps=[0.0, 1.0], survivors=[2,1]
-    # w = cumsum([0/2, 1/1]) = [0, 1], mean=0.5
-    # centered = [-0.5, 0.5]
-    expected = torch.tensor([-0.5, 0.5])
+    # w = cumsum([0/2, 1/1]) = [0, 1], scaled by G=2: [0, 2], mean=1.0
+    # centered = [-1.0, 1.0]
+    expected = torch.tensor([-1.0, 1.0])
     assert torch.allclose(adv, expected, atol=1e-6)
 
 

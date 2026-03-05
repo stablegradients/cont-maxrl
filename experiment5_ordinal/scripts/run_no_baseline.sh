@@ -10,7 +10,7 @@ export WANDB_ENTITY="stablegradients"
 export WANDB_PROJECT="cont-maxrl-ordinal"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PYTHON="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
+PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 LOG_DIR="$REPO_ROOT/experiment5_ordinal/logs"
 
 GPUS=(0 1 2 3)

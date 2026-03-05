@@ -67,6 +67,8 @@ def generate_completions(
     problems: list[dict],
     n_completions: int = 200,
     temperature: float = 0.8,
+    top_p: float = 0.95,
+    top_k: int = -1,
     max_tokens: int = 2048,
     gpu_memory_utilization: float = 0.85,
     tensor_parallel_size: int = 1,
@@ -99,7 +101,8 @@ def generate_completions(
     sampling_params = SamplingParams(
         n=n_completions,
         temperature=temperature,
-        top_p=1.0,
+        top_p=top_p,
+        top_k=top_k,
         max_tokens=max_tokens,
     )
 
@@ -234,7 +237,9 @@ def main():
     parser.add_argument("--data_file", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--n_completions", type=int, default=200)
-    parser.add_argument("--temperature", type=float, default=0.8)
+    parser.add_argument("--temperature", type=float, default=0.6)
+    parser.add_argument("--top_p", type=float, default=0.95)
+    parser.add_argument("--top_k", type=int, default=-1)
     parser.add_argument("--max_tokens", type=int, default=2048)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.85)
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
@@ -243,7 +248,7 @@ def main():
                         help="Number of parallel threads for reward evaluation")
     parser.add_argument(
         "--k_values", type=int, nargs="+",
-        default=[1, 2, 5, 10, 20, 50, 100],
+        default=[1, 2, 5, 10, 20, 50, 100, 200],
     )
     args = parser.parse_args()
 
@@ -261,6 +266,8 @@ def main():
         problems=problems,
         n_completions=args.n_completions,
         temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
         max_tokens=args.max_tokens,
         gpu_memory_utilization=args.gpu_memory_utilization,
         tensor_parallel_size=args.tensor_parallel_size,

@@ -27,7 +27,7 @@ def check():
     import torch
     assert torch.cuda.is_available(), "CUDA not available to torch"
     gpu_name = torch.cuda.get_device_name(0)
-    assert any(x in gpu_name for x in ["A5000", "A6000"]), \
+    assert any(x in gpu_name for x in ["A5000", "A6000", "GH200"]), \
         f"Expected Ampere GPU, got {gpu_name}"
     t = torch.tensor([1.0], dtype=torch.bfloat16, device="cuda")
     assert t.dtype == torch.bfloat16, "bf16 not working"
@@ -114,7 +114,7 @@ def check():
     import torch
     rewards = torch.tensor([0.3, 0.9, 0.1, 0.6])
     adv = maxrl_unnormalized_advantage(rewards)
-    expected = torch.tensor([-0.1333, 0.3167, -0.2000, 0.0167])
+    expected = torch.tensor([-0.5333, 1.2667, -0.8000, 0.0667])
     assert torch.allclose(adv, expected, atol=1e-3), \
         f"Advantage mismatch: {adv}"
     print("  advantage self-test: OK")

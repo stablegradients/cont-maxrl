@@ -45,69 +45,73 @@ def test_score_all_pass_stdin():
     """Code that produces correct output for all test cases -> score 1.0."""
     code = "x = int(input())\nprint(x * 2)"
     gt = _make_ground_truth(["3\n", "5\n"], ["6\n", "10\n"])
-    score = compute_score(code, gt)
-    assert score == 1.0
+    result = compute_score(code, gt)
+    assert result["score"] == 1.0
+    assert result["acc"] == 1.0
 
 
 def test_score_partial_pass_stdin():
-    """Code that passes 1 of 2 test cases -> score 0.5."""
+    """Code that passes 1 of 2 test cases -> score 0.5, acc 0.0."""
     # This code only works for input 3
     code = "print(6)"
     gt = _make_ground_truth(["3\n", "5\n"], ["6\n", "10\n"])
-    score = compute_score(code, gt)
-    assert score == 0.5
+    result = compute_score(code, gt)
+    assert result["score"] == 0.5
+    assert result["acc"] == 0.0
 
 
 def test_score_all_fail():
     """Code that produces wrong output -> score 0.0."""
     code = "print('wrong')"
     gt = _make_ground_truth(["3\n"], ["6\n"])
-    score = compute_score(code, gt)
-    assert score == 0.0
+    result = compute_score(code, gt)
+    assert result["score"] == 0.0
+    assert result["acc"] == 0.0
 
 
 def test_score_syntax_error():
     """Code with syntax error -> score 0.0."""
     code = "def ("  # syntax error
     gt = _make_ground_truth(["3\n"], ["6\n"])
-    score = compute_score(code, gt)
-    assert score == 0.0
+    result = compute_score(code, gt)
+    assert result["score"] == 0.0
 
 
 def test_score_timeout():
     """Code that infinite loops -> score 0.0."""
     code = "while True: pass"
     gt = _make_ground_truth(["1\n"], ["1\n"])
-    score = compute_score(code, gt, timeout_per_test=2)
-    assert score == 0.0
+    result = compute_score(code, gt, timeout_per_test=2)
+    assert result["score"] == 0.0
 
 
 def test_score_function_call():
     """Function-call mode: code defines a function, we call it."""
     code = "def add(a, b):\n    return a + b"
     gt = _make_ground_truth(["[1, 2]", "[3, 4]"], ["3", "7"], fn_name="add")
-    score = compute_score(code, gt)
-    assert score == 1.0
+    result = compute_score(code, gt)
+    assert result["score"] == 1.0
+    assert result["acc"] == 1.0
 
 
 def test_score_markdown_extraction():
     """Score should extract code from markdown blocks."""
     text = "Here's my solution:\n```python\nx = int(input())\nprint(x * 2)\n```"
     gt = _make_ground_truth(["3\n"], ["6\n"])
-    score = compute_score(text, gt)
-    assert score == 1.0
+    result = compute_score(text, gt)
+    assert result["score"] == 1.0
 
 
 def test_score_empty_code():
     """Empty code -> score 0.0."""
-    score = compute_score("", _make_ground_truth(["1\n"], ["1\n"]))
-    assert score == 0.0
+    result = compute_score("", _make_ground_truth(["1\n"], ["1\n"]))
+    assert result["score"] == 0.0
 
 
 def test_score_invalid_ground_truth():
     """Invalid JSON ground truth -> score 0.0."""
-    score = compute_score("print(1)", "not json")
-    assert score == 0.0
+    result = compute_score("print(1)", "not json")
+    assert result["score"] == 0.0
 
 
 # ── compute_score_binary ──
@@ -170,8 +174,8 @@ def test_function_call_with_nested_list_arg():
     test_input = json.dumps([[[1, 2, 3], [4, 5, 6]]])
     test_output = json.dumps(21)
     gt = _make_ground_truth([test_input], [test_output], fn_name="sum_nested")
-    score = compute_score(code, gt)
-    assert score == 1.0
+    result = compute_score(code, gt)
+    assert result["score"] == 1.0
 
 
 def test_function_call_with_dict_arg():
@@ -180,8 +184,8 @@ def test_function_call_with_dict_arg():
     test_input = json.dumps([{"a": 1, "b": 2}, "b"])
     test_output = json.dumps(2)
     gt = _make_ground_truth([test_input], [test_output], fn_name="get_key")
-    score = compute_score(code, gt)
-    assert score == 1.0
+    result = compute_score(code, gt)
+    assert result["score"] == 1.0
 
 
 def test_function_call_with_bool_return():
@@ -190,8 +194,8 @@ def test_function_call_with_bool_return():
     test_input = json.dumps([4])
     test_output = json.dumps(True)  # "true", not "True"
     gt = _make_ground_truth([test_input], [test_output], fn_name="is_even")
-    score = compute_score(code, gt)
-    assert score == 1.0
+    result = compute_score(code, gt)
+    assert result["score"] == 1.0
 
 
 # ── Float tolerance (BUG R1-7) ──
@@ -201,8 +205,8 @@ def test_score_float_tolerance():
     """Outputs differing only by float precision should match."""
     code = "print(f'{1/3:.6f}')"  # prints "0.333333"
     gt = _make_ground_truth([""], ["0.3333333333"])
-    score = compute_score(code, gt)
-    assert score == 1.0
+    result = compute_score(code, gt)
+    assert result["score"] == 1.0
 
 
 def test_numeric_match_multiline():
@@ -292,16 +296,16 @@ def test_score_function_returning_none():
     """
     code = "def get_none():\n    return None"
     gt = _make_ground_truth(["[]"], ["null"], fn_name="get_none")
-    score = compute_score(code, gt)
-    assert score == 1.0
+    result = compute_score(code, gt)
+    assert result["score"] == 1.0
 
 
 def test_score_function_returning_none_wrong_expected():
     """Function returning None should NOT match non-null expected output."""
     code = "def get_none():\n    return None"
     gt = _make_ground_truth(["[]"], ["42"], fn_name="get_none")
-    score = compute_score(code, gt)
-    assert score == 0.0
+    result = compute_score(code, gt)
+    assert result["score"] == 0.0
 
 
 # ── extract_code: python3 boundary check (BUG R5-2) ──

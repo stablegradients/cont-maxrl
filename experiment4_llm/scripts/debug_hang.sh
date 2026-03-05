@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=debug_hang
-#SBATCH --partition=general
-#SBATCH --gres=gpu:4
+#SBATCH --account=bgmo-dtai-gh
+#SBATCH --partition=ghx4
+#SBATCH --gpus-per-node=4
 #SBATCH --time=01:00:00
-#SBATCH --mem=256G
-#SBATCH --cpus-per-task=32
+#SBATCH --mem=860G
+#SBATCH --cpus-per-task=288
 #SBATCH --nodes=1
-#SBATCH --exclude=gpu20,gpu21,gpu22,gpu23
-#SBATCH --output=/zfsauton/scratch/shrinivr/cont-maxrl/results/debug_hang/slurm_%j.out
-#SBATCH --error=/zfsauton/scratch/shrinivr/cont-maxrl/results/debug_hang/slurm_%j.err
+#SBATCH --output=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.out
+#SBATCH --error=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.err
 set -euo pipefail
 
 # ============================================================
@@ -16,20 +16,25 @@ set -euo pipefail
 # Goal: find where the training hangs
 # ============================================================
 
-REPO_ROOT="/zfsauton/scratch/shrinivr/cont-maxrl"
-PYTHON="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl/bin/python"
+# Activate conda environment
+module load python/miniforge3_pytorch/2.10.0
+eval "$(conda shell.bash hook)"
+conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
+
+REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
+PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 
 OUTPUT_DIR="${REPO_ROOT}/results/debug_hang"
 mkdir -p "${OUTPUT_DIR}"
 
 # Conda CUDA
-export CUDA_HOME="/zfsauton/scratch/shrinivr/conda-envs/cont-maxrl"
+export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}"
 
 # Caches
-export HF_HOME="/zfsauton/scratch/shrinivr/.cache/huggingface"
+export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"
 export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
 export RAY_TMPDIR="/tmp/ray_${USER}"
@@ -110,7 +115,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.save_freq=-1 \
   trainer.test_freq=-1 \
   trainer.val_before_train=False \
-  ray_init.num_cpus=32
+  ray_init.num_cpus=280
 
 echo ""
 echo "=== Debug complete ==="
