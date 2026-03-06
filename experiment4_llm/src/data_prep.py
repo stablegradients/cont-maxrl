@@ -583,15 +583,169 @@ def prepare_livecodebench(
     return stats
 
 
+# ── DeepCoder (minus LCB) ──
+
+_DEEPCODER_PROBLEM_PREFIX = (
+    "Solve the following coding problem using the programming language python:\n\n"
+)
+
+
+def _strip_deepcoder_prefix(problem: str) -> str:
+    """Strip the DeepCoder-specific prompt prefix to get the raw problem statement."""
+    if problem.startswith(_DEEPCODER_PROBLEM_PREFIX):
+        return problem[len(_DEEPCODER_PROBLEM_PREFIX):]
+    return problem
+
+
+def prepare_deepcoder(
+    output_dir: str,
+    min_tests: int = 3,
+    max_tests: int = 50,
+    hf_cache_dir: str | None = None,
+    val_fraction: float = 0.1,
+    seed: int = 42,
+) -> dict[str, int]:
+    """Download and prepare DeepCoder dataset (minus LCB subset) as parquet.
+
+    Uses taco + primeintellect configs from agentica-org/DeepCoder-Preview-Dataset.
+    The lcbv5 config is excluded entirely to avoid contamination with LiveCodeBench eval.
+    """
+    import random
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    records = []
+    skipped_tests = 0
+    skipped_parse = 0
+
+    # ── TACO config: tests are {"inputs": [...], "outputs": [...]} ──
+    print("Loading DeepCoder taco config...")
+    ds_taco = load_dataset(
+        "agentica-org/DeepCoder-Preview-Dataset",
+        "taco",
+        split="train",
+        trust_remote_code=True,
+        cache_dir=hf_cache_dir,
+    )
+
+    for example in ds_taco:
+        test_cases = parse_test_cases(example.get("tests", ""))
+        if test_cases is None:
+            skipped_parse += 1
+            continue
+
+        if len(test_cases["inputs"]) < min_tests:
+            skipped_tests += 1
+            continue
+
+        question = example.get("problem", "")
+        if not question or not question.strip():
+            continue
+
+        fn_name = test_cases.get("fn_name")
+        prompt_text = format_prompt(question, fn_name, starter_code=None)
+        record = make_record("deepcoder", prompt_text, test_cases, max_tests)
+        if record is not None:
+            records.append(record)
+
+    n_taco = len(records)
+    print(f"  taco: {n_taco} problems")
+
+    # ── PrimeIntellect config: tests are [{"type": "stdin_stdout", "input": ..., "output": ...}] ──
+    print("Loading DeepCoder primeintellect config...")
+    ds_pi = load_dataset(
+        "agentica-org/DeepCoder-Preview-Dataset",
+        "primeintellect",
+        split="train",
+        trust_remote_code=True,
+        cache_dir=hf_cache_dir,
+    )
+
+    n_before_pi = len(records)
+    for example in ds_pi:
+        raw_tests = example.get("tests", "")
+        try:
+            test_list = json.loads(raw_tests)
+        except (json.JSONDecodeError, TypeError):
+            skipped_parse += 1
+            continue
+
+        if not isinstance(test_list, list) or not test_list:
+            skipped_parse += 1
+            continue
+
+        inputs = []
+        outputs = []
+        for tc in test_list:
+            inp = tc.get("input", "")
+            out = tc.get("output") or tc.get("expected_output", "")
+            inputs.append(str(inp))
+            outputs.append(str(out))
+
+        if len(inputs) < min_tests:
+            skipped_tests += 1
+            continue
+
+        question = _strip_deepcoder_prefix(example.get("problem", ""))
+        if not question or not question.strip():
+            continue
+
+        # All PrimeIntellect problems are stdin/stdout
+        prompt_text = format_prompt(question, fn_name=None, starter_code=None)
+        test_cases = {"inputs": inputs, "outputs": outputs}
+        record = make_record("deepcoder", prompt_text, test_cases, max_tests)
+        if record is not None:
+            records.append(record)
+
+    n_pi = len(records) - n_before_pi
+    print(f"  primeintellect: {n_pi} problems")
+
+    # Deduplicate by prompt text
+    seen_prompts = set()
+    unique_records = []
+    for r in records:
+        prompt_key = str(r["prompt"])
+        if prompt_key not in seen_prompts:
+            seen_prompts.add(prompt_key)
+            unique_records.append(r)
+    n_dedup = len(records) - len(unique_records)
+    if n_dedup:
+        print(f"  Removed {n_dedup} duplicate prompts ({len(records)} -> {len(unique_records)})")
+    records = unique_records
+
+    # Split into train/val
+    rng = random.Random(seed)
+    rng.shuffle(records)
+    n_val = max(1, int(len(records) * val_fraction))
+    val_records = records[:n_val]
+    train_records = records[n_val:]
+
+    train_path = Path(output_dir) / "deepcoder_train.parquet"
+    val_path = Path(output_dir) / "deepcoder_val.parquet"
+    write_parquet(train_records, train_path)
+    write_parquet(val_records, val_path)
+
+    stats = {"train": len(train_records), "val": len(val_records)}
+    print(
+        f"  train: {len(train_records)} problems written to {train_path}"
+        f"\n  val: {len(val_records)} problems written to {val_path}"
+        f"\n  (skipped: {skipped_tests} too few tests, {skipped_parse} parse errors)"
+        f"\n  NOTE: lcbv5 config excluded to avoid LiveCodeBench contamination"
+    )
+
+    return stats
+
+
 # ── CLI ──
 
-ALL_DATASETS = ["apps", "taco", "code_contests", "livecodebench"]
+ALL_DATASETS = ["apps", "taco", "code_contests", "livecodebench", "deepcoder"]
 
 PREPARE_FNS = {
     "apps": prepare_apps,
     "taco": prepare_taco,
     "code_contests": prepare_code_contests,
     "livecodebench": prepare_livecodebench,
+    "deepcoder": prepare_deepcoder,
 }
 
 
@@ -674,6 +828,13 @@ def main():
                 max_tests=args.max_tests,
                 hf_cache_dir=args.hf_cache_dir,
                 version_tag=args.lcb_version,
+            )
+        elif ds_name == "deepcoder":
+            stats = prepare_deepcoder(
+                output_dir=args.output_dir,
+                min_tests=args.min_tests,
+                max_tests=args.max_tests,
+                hf_cache_dir=args.hf_cache_dir,
             )
         else:
             print(f"Unknown dataset: {ds_name}")

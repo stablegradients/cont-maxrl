@@ -40,6 +40,10 @@ TRAIN_DATASETS = {
         "train_file": "code_contests_train.parquet",
         "val_file": "code_contests_test.parquet",
     },
+    "deepcoder": {
+        "train_file": "deepcoder_train.parquet",
+        "val_file": "deepcoder_val.parquet",
+    },
 }
 
 # ── Eval benchmarks (all test sets) ──
@@ -69,7 +73,7 @@ MODELS = {
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
         "group_sizes": [4, 16, 32, 64],
         "slurm_time": "47:00:00",
-        "slurm_mem": "860G",
+        "slurm_mem": "0",
         "slurm_gpus": 4,
         "slurm_cpus": 288,
         "slurm_nodes": 1,
@@ -89,7 +93,7 @@ MODELS = {
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm", "reinforce_baseline"],
         "group_sizes": [4, 16, 32, 64],
         "slurm_time": "47:00:00",
-        "slurm_mem": "860G",
+        "slurm_mem": "0",
         "slurm_gpus": 4,
         "slurm_cpus": 288,
         "slurm_nodes": 1,
@@ -109,7 +113,7 @@ MODELS = {
         "methods": ["grpo", "maxrl_unnorm", "maxrl_norm"],
         "group_sizes": [16, 32, 64],
         "slurm_time": "47:00:00",
-        "slurm_mem": "860G",
+        "slurm_mem": "0",
         "slurm_gpus": 4,
         "slurm_nodes": 2,
         "slurm_cpus": 288,
@@ -117,7 +121,7 @@ MODELS = {
     },
 }
 
-TOTAL_STEPS = 150
+TOTAL_STEPS = 10000
 TOTAL_ROLLOUTS_PER_STEP = 4096
 DEFAULT_BATCH_SIZE = 128
 MINI_BATCH = 128
@@ -178,16 +182,17 @@ def generate_train_script(
 
     script = f"""#!/usr/bin/env bash
 {slurm_header}
-set -euo pipefail
 
 # ============================================================
 # Train: {hf_id.split("/")[-1]} | {dataset.upper()} | {method} | G={G} | seed={seed}
 # ============================================================
 
-# Activate conda environment
+# Activate conda environment (before set -u, conda scripts use unset vars)
 module load python/miniforge3_pytorch/2.10.0
 eval "$(conda shell.bash hook)"
 conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
+
+set -euo pipefail
 
 REPO_ROOT="{REPO_ROOT_PLACEHOLDER}"
 PYTHON="{PYTHON_PATH}"
@@ -201,10 +206,22 @@ export CUDA_HOME="{CUDA_HOME}"
 export PATH="${{CUDA_HOME}}/bin:${{PATH}}"
 export LD_LIBRARY_PATH="${{CUDA_HOME}}/lib:${{LD_LIBRARY_PATH:-}}"
 
+# NCCL: disable system network plugin (incompatible with conda NCCL)
+# Single-node uses NVLink/shared memory, no libfabric needed
+unset NCCL_NET
+unset NCCL_NET_PLUGIN
+export NCCL_PLUGIN_P2P=0
+
+# W&B
+export WANDB_API_KEY="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"
+export WANDB_ENTITY="stablegradients"
+
 # Caches
 export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"
 export TORCH_HOME="${{REPO_ROOT}}/.cache/torch"
 export VLLM_CACHE_ROOT="${{REPO_ROOT}}/.cache/vllm"
+# Maximize parallel reward computation (subprocess-based sandbox)
+export VERL_REWARD_WORKERS=256
 # verl requires vLLM v0 engine (v1 doesn't implement free_cache_engine)
 export VLLM_USE_V1=0
 # Ray and tmp on local disk (avoids NFS socket/cleanup issues)
@@ -327,17 +344,18 @@ def generate_eval_script(
 
     script = f"""#!/usr/bin/env bash
 {slurm_header}
-set -euo pipefail
 
 # ============================================================
 # Eval: {model_key} trained on {train_dataset.upper()} | eval on {eval_benchmark.upper()}
 # {method} | G={G} | seed={seed}
 # ============================================================
 
-# Activate conda environment
+# Activate conda environment (before set -u, conda scripts use unset vars)
 module load python/miniforge3_pytorch/2.10.0
 eval "$(conda shell.bash hook)"
 conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
+
+set -euo pipefail
 
 REPO_ROOT="{REPO_ROOT_PLACEHOLDER}"
 PYTHON="{PYTHON_PATH}"
@@ -347,6 +365,16 @@ export PYTHONNOUSERSITE=1
 export CUDA_HOME="{CUDA_HOME}"
 export PATH="${{CUDA_HOME}}/bin:${{PATH}}"
 export LD_LIBRARY_PATH="${{CUDA_HOME}}/lib:${{LD_LIBRARY_PATH:-}}"
+
+# NCCL: disable system network plugin (incompatible with conda NCCL)
+# Single-node uses NVLink/shared memory, no libfabric needed
+unset NCCL_NET
+unset NCCL_NET_PLUGIN
+export NCCL_PLUGIN_P2P=0
+
+# W&B
+export WANDB_API_KEY="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"
+export WANDB_ENTITY="stablegradients"
 
 # Caches
 export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"

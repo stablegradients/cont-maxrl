@@ -4,21 +4,22 @@
 #SBATCH --partition=ghx4
 #SBATCH --gpus-per-node=4
 #SBATCH --time=47:00:00
-#SBATCH --mem=860G
+#SBATCH --mem=0
 #SBATCH --cpus-per-task=288
 #SBATCH --nodes=1
 #SBATCH --output=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.out
 #SBATCH --error=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.err
-set -euo pipefail
 
 # ============================================================
 # Train: Qwen2.5-Coder-1.5B-Instruct | CODE_CONTESTS | maxrl_norm | G=32 | seed=42
 # ============================================================
 
-# Activate conda environment
+# Activate conda environment (before set -u, conda scripts use unset vars)
 module load python/miniforge3_pytorch/2.10.0
 eval "$(conda shell.bash hook)"
 conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
+
+set -euo pipefail
 
 REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
@@ -32,10 +33,22 @@ export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}"
 
+# NCCL: disable system network plugin (incompatible with conda NCCL)
+# Single-node uses NVLink/shared memory, no libfabric needed
+unset NCCL_NET
+unset NCCL_NET_PLUGIN
+export NCCL_PLUGIN_P2P=0
+
+# W&B
+export WANDB_API_KEY="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"
+export WANDB_ENTITY="stablegradients"
+
 # Caches
 export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"
 export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
+# Maximize parallel reward computation (subprocess-based sandbox)
+export VERL_REWARD_WORKERS=256
 # verl requires vLLM v0 engine (v1 doesn't implement free_cache_engine)
 export VLLM_USE_V1=0
 # Ray and tmp on local disk (avoids NFS socket/cleanup issues)
@@ -109,7 +122,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   reward_model.enable=False \
   custom_reward_function.path="${REPO_ROOT}/experiment4_llm/src/reward_function.py" \
   custom_reward_function.name=compute_score \
-  trainer.total_training_steps=150 \
+  trainer.total_training_steps=10000 \
   trainer.total_epochs=30 \
   trainer.project_name=cont-maxrl-code \
   trainer.experiment_name=1.5b_code_contests_maxrl_norm_g32_s42 \

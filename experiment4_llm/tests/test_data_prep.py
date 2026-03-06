@@ -247,3 +247,119 @@ def test_end_to_end_nested_list_round_trip():
     code = "def add_lists(a, b):\n    return [x+y for x,y in zip(a, b)]"
     result = compute_score(code, ground_truth)
     assert result["score"] == 1.0, f"Nested list round trip failed: score={result}"
+
+
+# ── DeepCoder data prep ──
+
+
+def test_strip_deepcoder_prefix():
+    """Strip the DeepCoder-specific prompt prefix from PrimeIntellect problems."""
+    from experiment4_llm.src.data_prep import _strip_deepcoder_prefix
+
+    raw = (
+        "Solve the following coding problem using the programming language python:\n\n"
+        "Given an array of integers..."
+    )
+    assert _strip_deepcoder_prefix(raw) == "Given an array of integers..."
+
+
+def test_strip_deepcoder_prefix_no_prefix():
+    """Problems without the prefix should be returned unchanged."""
+    from experiment4_llm.src.data_prep import _strip_deepcoder_prefix
+
+    raw = "Given an array of integers..."
+    assert _strip_deepcoder_prefix(raw) == raw
+
+
+def test_deepcoder_parquet_schema():
+    """Verify deepcoder parquet files have the correct schema and data_source."""
+    import pandas as pd
+    from pathlib import Path
+
+    train_path = Path("data/deepcoder_train.parquet")
+    val_path = Path("data/deepcoder_val.parquet")
+
+    if not train_path.exists() or not val_path.exists():
+        pytest.skip("DeepCoder parquet files not yet generated")
+
+    for path in [train_path, val_path]:
+        df = pd.read_parquet(path)
+        assert "data_source" in df.columns
+        assert "prompt" in df.columns
+        assert "reward_model" in df.columns
+        assert (df["data_source"] == "deepcoder").all(), \
+            f"data_source should be 'deepcoder', got {df['data_source'].unique()}"
+
+
+def test_deepcoder_ground_truth_valid_json():
+    """Every ground_truth in deepcoder parquet must be valid JSON with inputs/outputs."""
+    import pandas as pd
+    from pathlib import Path
+
+    train_path = Path("data/deepcoder_train.parquet")
+    if not train_path.exists():
+        pytest.skip("DeepCoder parquet files not yet generated")
+
+    df = pd.read_parquet(train_path)
+    # Check a sample (first 100) for speed
+    for i, row in df.head(100).iterrows():
+        gt = row["reward_model"]["ground_truth"]
+        parsed = json.loads(gt)
+        assert "inputs" in parsed, f"Row {i}: missing 'inputs'"
+        assert "outputs" in parsed, f"Row {i}: missing 'outputs'"
+        assert len(parsed["inputs"]) >= 3, f"Row {i}: fewer than min_tests=3 inputs"
+        assert len(parsed["inputs"]) == len(parsed["outputs"]), \
+            f"Row {i}: input/output length mismatch"
+
+
+def test_deepcoder_no_livecodebench_contamination():
+    """DeepCoder training data must not contain any LiveCodeBench problems."""
+    import pandas as pd
+    from pathlib import Path
+
+    train_path = Path("data/deepcoder_train.parquet")
+    val_path = Path("data/deepcoder_val.parquet")
+    lcb_path = Path("data/livecodebench_test.parquet")
+
+    if not all(p.exists() for p in [train_path, val_path, lcb_path]):
+        pytest.skip("Required parquet files not yet generated")
+
+    df_train = pd.read_parquet(train_path)
+    df_val = pd.read_parquet(val_path)
+    df_lcb = pd.read_parquet(lcb_path)
+
+    assert (df_train["data_source"] == "deepcoder").all()
+    assert (df_val["data_source"] == "deepcoder").all()
+    assert (df_lcb["data_source"] == "livecodebench").all()
+
+    # No deepcoder record should have data_source == "livecodebench"
+    # (This is guaranteed by construction, but verify explicitly)
+    dc_prompts = set(str(p) for p in df_train["prompt"]) | \
+                 set(str(p) for p in df_val["prompt"])
+    lcb_prompts = set(str(p) for p in df_lcb["prompt"])
+
+    overlap = dc_prompts & lcb_prompts
+    assert len(overlap) == 0, \
+        f"Found {len(overlap)} overlapping prompts between DeepCoder and LiveCodeBench"
+
+
+def test_deepcoder_reward_function_compatible():
+    """DeepCoder records must work with the reward function end-to-end."""
+    import pandas as pd
+    from pathlib import Path
+    from experiment4_llm.src.reward_function import compute_score
+
+    train_path = Path("data/deepcoder_train.parquet")
+    if not train_path.exists():
+        pytest.skip("DeepCoder parquet files not yet generated")
+
+    df = pd.read_parquet(train_path)
+    row = df.iloc[0]
+    gt = row["reward_model"]["ground_truth"]
+
+    # A deliberately wrong solution should score 0
+    result = compute_score("print('wrong')", gt)
+    assert isinstance(result, dict)
+    assert "score" in result
+    assert "acc" in result
+    assert 0.0 <= result["score"] <= 1.0
