@@ -14,6 +14,7 @@ Handles both:
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -22,6 +23,7 @@ import tempfile
 
 DEFAULT_TIMEOUT = 1  # seconds per test case
 DEFAULT_MEMORY_MB = 512
+DEFAULT_GLOBAL_TIMEOUT = 15  # hard cap per completion
 
 # Runner script templates. These are top-level strings (no indentation issues).
 # They read the user code and input from files passed as argv[1] and argv[2].
@@ -83,6 +85,102 @@ except (json.JSONDecodeError, ValueError):
 
 _result = _fn(*_args)
 print(json.dumps(_result))
+"""
+
+# ── Batch runner: all test cases for one completion in a single process ──
+# Uses signal.alarm for per-test timeout and early-stop on consecutive failures.
+# Outputs JSON list of per-test results (string output or null for failure).
+
+_RUNNER_BATCH = """\
+import sys, io, json, signal, resource
+
+mem_bytes = {mem_mb} * 1024 * 1024
+try:
+    resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
+except (ValueError, OSError):
+    pass
+
+class _Timeout(Exception):
+    pass
+
+def _alarm(signum, frame):
+    raise _Timeout()
+
+signal.signal(signal.SIGALRM, _alarm)
+
+with open(sys.argv[1]) as _f:
+    _code = _f.read()
+with open(sys.argv[2]) as _f:
+    _td = json.load(_f)
+
+_fn_name = _td.get("fn_name")
+_inputs = _td["inputs"]
+_timeout = _td["timeout"]
+_early_stop = _td.get("early_stop", 3)
+_results = []
+_consec_fail = 0
+
+if _fn_name:
+    _ns = {{}}
+    try:
+        exec(compile(_code, '<solution>', 'exec'), _ns)
+    except Exception:
+        print(json.dumps([None] * len(_inputs)))
+        sys.exit(0)
+    _fn = _ns.get(_fn_name)
+    if _fn is None:
+        print(json.dumps([None] * len(_inputs)))
+        sys.exit(0)
+    for _inp in _inputs:
+        if _consec_fail >= _early_stop:
+            _results.append(None)
+            continue
+        signal.alarm(_timeout)
+        try:
+            _s = _inp.strip() if isinstance(_inp, str) else str(_inp)
+            try:
+                _args = json.loads(_s)
+                if not isinstance(_args, list):
+                    _args = [_args]
+            except (json.JSONDecodeError, ValueError):
+                _args = [_s] if _s else []
+            _r = _fn(*_args)
+            signal.alarm(0)
+            _results.append(json.dumps(_r))
+            _consec_fail = 0
+        except Exception:
+            signal.alarm(0)
+            _results.append(None)
+            _consec_fail += 1
+else:
+    try:
+        _compiled = compile(_code, '<solution>', 'exec')
+    except SyntaxError:
+        print(json.dumps([None] * len(_inputs)))
+        sys.exit(0)
+    for _inp in _inputs:
+        if _consec_fail >= _early_stop:
+            _results.append(None)
+            continue
+        signal.alarm(_timeout)
+        _saved = sys.stdout
+        _captured = io.StringIO()
+        sys.stdout = _captured
+        try:
+            _s = _inp if isinstance(_inp, str) else str(_inp)
+            sys.stdin = io.StringIO(_s)
+            exec(_compiled, {{}})
+            signal.alarm(0)
+            sys.stdout = _saved
+            _results.append(_captured.getvalue())
+            _consec_fail = 0
+        except Exception:
+            signal.alarm(0)
+            sys.stdout = _saved
+            _results.append(None)
+            _consec_fail += 1
+
+print(json.dumps(_results))
 """
 
 
@@ -176,6 +274,94 @@ def execute_in_sandbox(
         raise TimeoutError(f"Execution exceeded {timeout_seconds}s timeout")
     finally:
         for f in [code_file, input_file, runner_file]:
+            try:
+                os.unlink(f.name)
+            except OSError:
+                pass
+
+
+def execute_batch_in_sandbox(
+    code: str,
+    inputs: list[str],
+    fn_name: str | None = None,
+    timeout_per_test: int = DEFAULT_TIMEOUT,
+    memory_limit_mb: int = DEFAULT_MEMORY_MB,
+    global_timeout: int = DEFAULT_GLOBAL_TIMEOUT,
+    early_stop: int = 3,
+) -> list[str | None]:
+    """Run ALL test cases for one completion in a single subprocess.
+
+    Uses signal.alarm for per-test timeouts and early-stop on consecutive
+    failures.  The parent enforces a hard global timeout via subprocess.run.
+
+    Args:
+        code: extracted Python source
+        inputs: list of test-case input strings
+        fn_name: function name for call-based problems, None for stdin/stdout
+        timeout_per_test: per-test alarm timeout (seconds)
+        memory_limit_mb: memory limit for the subprocess
+        global_timeout: hard wall-clock cap for the entire subprocess
+        early_stop: stop after this many consecutive failures
+
+    Returns:
+        List of output strings (one per test), None for failed tests.
+    """
+    if not inputs:
+        return []
+
+    tmp_dir = os.environ.get("TMPDIR", tempfile.gettempdir())
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    code_file = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", dir=tmp_dir, delete=False
+    )
+    test_file = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", dir=tmp_dir, delete=False
+    )
+    runner_file = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", dir=tmp_dir, delete=False
+    )
+
+    try:
+        code_file.write(code)
+        code_file.close()
+
+        test_data = {
+            "inputs": inputs,
+            "fn_name": fn_name,
+            "timeout": timeout_per_test,
+            "early_stop": early_stop,
+        }
+        json.dump(test_data, test_file)
+        test_file.close()
+
+        runner_file.write(_RUNNER_BATCH.format(mem_mb=memory_limit_mb))
+        runner_file.close()
+
+        result = subprocess.run(
+            [sys.executable, runner_file.name, code_file.name, test_file.name],
+            capture_output=True,
+            text=True,
+            timeout=global_timeout,
+            cwd=tmp_dir,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": os.environ.get("HOME", "/tmp"),
+                "TMPDIR": tmp_dir,
+            },
+        )
+
+        if result.returncode != 0:
+            return [None] * len(inputs)
+
+        return json.loads(result.stdout)
+
+    except subprocess.TimeoutExpired:
+        return [None] * len(inputs)
+    except (json.JSONDecodeError, Exception):
+        return [None] * len(inputs)
+    finally:
+        for f in [code_file, test_file, runner_file]:
             try:
                 os.unlink(f.name)
             except OSError:

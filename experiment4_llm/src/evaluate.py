@@ -20,7 +20,6 @@ import argparse
 import json
 import math
 import os
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pandas as pd
@@ -96,6 +95,7 @@ def generate_completions(
         gpu_memory_utilization=gpu_memory_utilization,
         tensor_parallel_size=tensor_parallel_size,
         dtype="bfloat16",
+        enforce_eager=True,
     )
 
     sampling_params = SamplingParams(
@@ -136,6 +136,10 @@ def evaluate_completions(
     """
     Evaluate completions and compute pass@k.
 
+    Uses compute_scores_batch for efficiency: syntax pre-check, code dedup,
+    batched subprocess execution (one process per unique completion instead of
+    one per test case), and early-stop on consecutive failures.
+
     Args:
         completions: completions[i] = list of code strings for problem i
         problems: list of problem dicts with ground_truth
@@ -149,36 +153,52 @@ def evaluate_completions(
             - per_problem: [{problem_idx, n, c, pass_at_k: {k: val}}]
             - summary: {total_problems, mean_reward, ...}
     """
-    from experiment4_llm.src.reward_function import compute_score_binary
+    from experiment4_llm.src.reward_function import compute_scores_batch
 
     if k_values is None:
         k_values = [1, 2, 5, 10, 20, 50, 100]
 
-    # Build flat list of all (problem_idx, code, ground_truth) for parallel eval
-    work_items = []
+    # Build flat list of reward inputs for batch scoring
+    reward_inputs = []
+    problem_indices = []
     for i, (problem, problem_completions) in enumerate(zip(problems, completions)):
         ground_truth = problem["reward_model"]["ground_truth"]
         for code in problem_completions:
-            work_items.append((i, code, ground_truth))
+            reward_inputs.append({
+                "solution_str": code,
+                "ground_truth": ground_truth,
+            })
+            problem_indices.append(i)
 
-    print(f"  Evaluating {len(work_items)} completions with {n_workers} workers...")
+    print(f"  Evaluating {len(reward_inputs)} completions with {n_workers} workers (batched)...")
 
-    def _score(item):
-        _, code, gt = item
-        return compute_score_binary(code, gt, timeout_per_test=timeout_per_test)
-
-    # Parallel evaluation
-    with ThreadPoolExecutor(max_workers=n_workers) as pool:
-        scores = list(pool.map(_score, work_items))
+    # Batch scoring: syntax filter, dedup, one subprocess per unique completion
+    scores = compute_scores_batch(
+        reward_inputs,
+        timeout_per_test=timeout_per_test,
+        num_workers=n_workers,
+    )
 
     # Aggregate scores per problem
     from collections import defaultdict
     problem_pass_counts: dict[int, int] = defaultdict(int)
     problem_total_counts: dict[int, int] = defaultdict(int)
-    for (prob_idx, _, _), score in zip(work_items, scores):
+    problem_scores: dict[int, list[float]] = defaultdict(list)
+    for prob_idx, score_dict in zip(problem_indices, scores):
         problem_total_counts[prob_idx] += 1
-        if score == 1.0:
+        problem_scores[prob_idx].append(score_dict["score"])
+        if score_dict["acc"] == 1.0:
             problem_pass_counts[prob_idx] += 1
+
+    # Unique solution rate and output length per problem
+    from experiment4_llm.src.reward_function import extract_code
+    problem_unique_rates: dict[int, float] = {}
+    problem_mean_lengths: dict[int, float] = {}
+    for i, problem_completions in enumerate(completions):
+        codes = [extract_code(c) for c in problem_completions]
+        unique_codes = set(codes)
+        problem_unique_rates[i] = len(unique_codes) / max(len(codes), 1)
+        problem_mean_lengths[i] = sum(len(c) for c in problem_completions) / max(len(problem_completions), 1)
 
     per_problem_results = []
     for i in range(len(problems)):
@@ -197,6 +217,9 @@ def evaluate_completions(
             "n": n,
             "c": c,
             "pass_at_k": problem_pass_at_k,
+            "mean_score": sum(problem_scores[i]) / max(len(problem_scores[i]), 1),
+            "unique_solution_rate": problem_unique_rates[i],
+            "mean_output_length": problem_mean_lengths[i],
         })
 
     print(f"  Evaluated {len(problems)} problems")
@@ -217,6 +240,7 @@ def evaluate_completions(
     # Summary statistics
     total_passing = sum(r["c"] for r in per_problem_results)
     total_completions = sum(r["n"] for r in per_problem_results)
+    all_scores = [s for sl in problem_scores.values() for s in sl]
 
     return {
         "pass_at_k": avg_pass_at_k,
@@ -226,6 +250,9 @@ def evaluate_completions(
             "total_completions": total_completions,
             "total_passing": total_passing,
             "mean_pass_rate": total_passing / max(total_completions, 1),
+            "mean_score": sum(all_scores) / max(len(all_scores), 1),
+            "mean_unique_solution_rate": sum(problem_unique_rates.values()) / max(len(problem_unique_rates), 1),
+            "mean_output_length": sum(problem_mean_lengths.values()) / max(len(problem_mean_lengths), 1),
             "k_values": k_values,
         },
     }
@@ -259,25 +286,29 @@ def main():
     problems = load_problems(args.data_file)
     print(f"  {len(problems)} problems loaded")
 
-    # Generate completions
-    print(f"Generating {args.n_completions} completions per problem...")
-    completions = generate_completions(
-        model_path=args.checkpoint_dir,
-        problems=problems,
-        n_completions=args.n_completions,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        top_k=args.top_k,
-        max_tokens=args.max_tokens,
-        gpu_memory_utilization=args.gpu_memory_utilization,
-        tensor_parallel_size=args.tensor_parallel_size,
-    )
-
-    # Save completions
+    # Generate completions (skip if already saved from a previous run)
     completions_path = Path(args.output_dir) / "completions.json"
-    with open(completions_path, "w") as f:
-        json.dump(completions, f)
-    print(f"  Completions saved to {completions_path}")
+    if completions_path.exists():
+        print(f"Loading cached completions from {completions_path}")
+        with open(completions_path) as f:
+            completions = json.load(f)
+        print(f"  {len(completions)} problems × {len(completions[0])} completions loaded")
+    else:
+        print(f"Generating {args.n_completions} completions per problem...")
+        completions = generate_completions(
+            model_path=args.checkpoint_dir,
+            problems=problems,
+            n_completions=args.n_completions,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            top_k=args.top_k,
+            max_tokens=args.max_tokens,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            tensor_parallel_size=args.tensor_parallel_size,
+        )
+        with open(completions_path, "w") as f:
+            json.dump(completions, f)
+        print(f"  Completions saved to {completions_path}")
 
     # Evaluate
     print("Evaluating completions...")
@@ -300,8 +331,12 @@ def main():
     for k, v in results["pass_at_k"].items():
         if v is not None:
             print(f"  pass@{k}: {v:.4f} ({v*100:.1f}%)")
-    print(f"\n  Total problems: {results['summary']['total_problems']}")
-    print(f"  Mean pass rate: {results['summary']['mean_pass_rate']:.4f}")
+    s = results["summary"]
+    print(f"\n  Total problems:           {s['total_problems']}")
+    print(f"  Mean pass rate:           {s['mean_pass_rate']:.4f}")
+    print(f"  Mean score (frac tests):  {s['mean_score']:.4f}")
+    print(f"  Mean unique solution rate: {s['mean_unique_solution_rate']:.4f}")
+    print(f"  Mean output length (chars): {s['mean_output_length']:.0f}")
 
 
 if __name__ == "__main__":

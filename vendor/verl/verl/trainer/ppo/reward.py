@@ -54,6 +54,28 @@ def get_custom_reward_fn(config):
     return wrapped_fn
 
 
+def _get_batch_reward_fn(config):
+    """Try to load compute_scores_batch from the same module as compute_score."""
+    import importlib.util
+    import sys
+
+    reward_fn_config = config.get("custom_reward_function") or {}
+    file_path = reward_fn_config.get("path")
+    if not file_path or not os.path.exists(file_path):
+        return None
+
+    # Module should already be loaded by get_custom_reward_fn
+    module = sys.modules.get("custom_module")
+    if module is None:
+        return None
+
+    if hasattr(module, "compute_scores_batch"):
+        print(f"using test-case-level batch reward function from '{file_path}'")
+        return module.compute_scores_batch
+
+    return None
+
+
 def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
     reward_manager_name = config.reward_model.get("reward_manager", "naive")
     if reward_manager_name == "naive":
@@ -76,13 +98,20 @@ def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
         raise NotImplementedError
 
     compute_score = get_custom_reward_fn(config)
-    return reward_manager_cls(
+    manager = reward_manager_cls(
         tokenizer=tokenizer,
         num_examine=num_examine,
         compute_score=compute_score,
         reward_fn_key=config.data.reward_fn_key,
         **reward_kwargs,
     )
+
+    # Attach batch scoring function if available (test-case-level parallelism)
+    batch_fn = _get_batch_reward_fn(config)
+    if batch_fn is not None:
+        manager._compute_scores_batch = batch_fn
+
+    return manager
 
 
 def compute_reward(data: DataProto, reward_fn):

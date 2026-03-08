@@ -79,17 +79,23 @@ class NaiveRewardManager:
             })
             valid_response_lengths.append(int(valid_response_length))
 
-        # ── Compute rewards in parallel (sandbox execution is subprocess-based) ──
-        def _score(kwargs):
-            return self.compute_score(
-                data_source=kwargs["data_source"],
-                solution_str=kwargs["solution_str"],
-                ground_truth=kwargs["ground_truth"],
-                extra_info=kwargs["extra_info"],
-            )
+        # ── Compute rewards in parallel ──
+        # Try test-case-level parallelism first (much better CPU utilization).
+        # Falls back to completion-level parallelism if batch function unavailable.
+        compute_scores_batch = getattr(self, '_compute_scores_batch', None)
+        if compute_scores_batch is not None:
+            scores = compute_scores_batch(reward_inputs, num_workers=self.num_reward_workers)
+        else:
+            def _score(kwargs):
+                return self.compute_score(
+                    data_source=kwargs["data_source"],
+                    solution_str=kwargs["solution_str"],
+                    ground_truth=kwargs["ground_truth"],
+                    extra_info=kwargs["extra_info"],
+                )
 
-        with ThreadPoolExecutor(max_workers=self.num_reward_workers) as pool:
-            scores = list(pool.map(_score, reward_inputs))
+            with ThreadPoolExecutor(max_workers=self.num_reward_workers) as pool:
+                scores = list(pool.map(_score, reward_inputs))
 
         # ── Collect results ──
         for i, score in enumerate(scores):

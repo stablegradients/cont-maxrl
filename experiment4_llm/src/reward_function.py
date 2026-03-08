@@ -9,9 +9,12 @@ verl reward function interface:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 
-from experiment4_llm.src.sandbox import execute_in_sandbox
+from experiment4_llm.src.sandbox import execute_batch_in_sandbox, execute_in_sandbox
 
 
 def extract_code(solution_str: str) -> str:
@@ -190,3 +193,134 @@ def compute_score_binary(
         solution_str, ground_truth, timeout_per_test, memory_limit_mb
     )
     return 1.0 if result["score"] == 1.0 else 0.0
+
+
+# ---------------------------------------------------------------------------
+# Batch scoring: syntax filter → dedup → parallel batched subprocesses
+# ---------------------------------------------------------------------------
+
+_ZERO = {"score": 0.0, "acc": 0.0}
+
+
+def _run_completion(task: tuple) -> tuple:
+    """Run all tests for one unique (code, ground_truth) pair in one subprocess."""
+    dedup_key, code, inputs, expected_outputs, fn_name, timeout, mem, global_timeout = task
+    n = len(inputs)
+    try:
+        test_outputs = execute_batch_in_sandbox(
+            code=code,
+            inputs=inputs,
+            fn_name=fn_name,
+            timeout_per_test=timeout,
+            memory_limit_mb=mem,
+            global_timeout=global_timeout,
+        )
+        passed = 0
+        for actual, expected in zip(test_outputs, expected_outputs):
+            if actual is not None:
+                exp = str(expected) if not isinstance(expected, str) else expected
+                if _outputs_match(actual.strip(), exp.strip(), fn_name):
+                    passed += 1
+        score = passed / n
+        acc = 1.0 if passed == n else 0.0
+        return (dedup_key, {"score": score, "acc": acc})
+    except Exception:
+        return (dedup_key, dict(_ZERO))
+
+
+def compute_scores_batch(
+    reward_inputs: list[dict],
+    timeout_per_test: int = 1,
+    memory_limit_mb: int = 512,
+    num_workers: int | None = None,
+    global_timeout: int = 15,
+) -> list[dict]:
+    """Compute rewards for all completions with four compounding optimizations.
+
+    1. Syntax pre-check: compile() rejects ~40% of completions at zero cost.
+    2. Code dedup: hash extracted code — identical completions scored once.
+    3. Batched subprocess: one fork per unique completion, all tests inside
+       with signal.alarm per-test timeout + parent global_timeout cap.
+    4. Early-stop: 3 consecutive failures inside subprocess → skip rest.
+
+    Parallelism is completion-level via ThreadPoolExecutor, but each completion
+    is bounded to global_timeout seconds so the tail is capped.
+
+    Args:
+        reward_inputs: list of dicts with "solution_str" and "ground_truth"
+        timeout_per_test: per-test alarm timeout (seconds)
+        memory_limit_mb: memory limit per subprocess
+        num_workers: thread pool size (default from VERL_REWARD_WORKERS)
+        global_timeout: hard wall-clock cap per subprocess (seconds)
+
+    Returns:
+        list of dicts with "score" and "acc", one per input completion
+    """
+    if num_workers is None:
+        num_workers = int(os.environ.get("VERL_REWARD_WORKERS", 256))
+
+    results = [dict(_ZERO) for _ in range(len(reward_inputs))]
+
+    # ── Phase 1: Parse, extract, syntax-check, dedup ──
+    # dedup_key = hash(code + ground_truth) → only run tests once per unique pair
+    dedup_tasks: dict[str, tuple] = {}  # key → task tuple
+    completion_to_key: dict[int, str] = {}  # completion idx → dedup key
+
+    for i, item in enumerate(reward_inputs):
+        ground_truth = item["ground_truth"]
+        try:
+            test_cases = json.loads(ground_truth)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        inputs = test_cases.get("inputs", [])
+        expected_outputs = test_cases.get("outputs", [])
+        fn_name = test_cases.get("fn_name", None)
+
+        if not inputs or not expected_outputs:
+            continue
+
+        num_total = min(len(inputs), len(expected_outputs))
+        code = extract_code(item["solution_str"])
+        if not code:
+            continue
+
+        # Syntax pre-check — zero cost, eliminates broken code
+        try:
+            compile(code, "<test>", "exec")
+        except SyntaxError:
+            continue
+
+        # Dedup by (code, ground_truth) — same code + same tests = same score
+        key = hashlib.md5((code + ground_truth).encode()).hexdigest()
+        completion_to_key[i] = key
+
+        if key not in dedup_tasks:
+            inp_strs = [
+                str(inputs[j]) if not isinstance(inputs[j], str) else inputs[j]
+                for j in range(num_total)
+            ]
+            exp_strs = [
+                str(expected_outputs[j])
+                if not isinstance(expected_outputs[j], str)
+                else expected_outputs[j]
+                for j in range(num_total)
+            ]
+            dedup_tasks[key] = (
+                key, code, inp_strs, exp_strs, fn_name,
+                timeout_per_test, memory_limit_mb, global_timeout,
+            )
+
+    # ── Phase 2: Execute unique completions in parallel ──
+    dedup_results: dict[str, dict] = {}
+
+    if dedup_tasks:
+        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+            for key, score_dict in pool.map(_run_completion, dedup_tasks.values()):
+                dedup_results[key] = score_dict
+
+    # ── Phase 3: Scatter scores back to all completions (including duplicates) ──
+    for i, key in completion_to_key.items():
+        results[i] = dedup_results.get(key, dict(_ZERO))
+
+    return results

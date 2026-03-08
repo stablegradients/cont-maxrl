@@ -4,22 +4,23 @@
 #SBATCH --partition=ghx4
 #SBATCH --gpus-per-node=4
 #SBATCH --time=01:00:00
-#SBATCH --mem=860G
+#SBATCH --mem=0
 #SBATCH --cpus-per-task=288
 #SBATCH --nodes=1
 #SBATCH --output=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.out
 #SBATCH --error=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.err
-set -euo pipefail
 
 # ============================================================
 # Debug: 1.5B model, 4 GPUs, tiny batch, verbose logging
 # Goal: find where the training hangs
 # ============================================================
 
-# Activate conda environment
+# Activate conda environment (before set -u, conda scripts use unset vars)
 module load python/miniforge3_pytorch/2.10.0
 eval "$(conda shell.bash hook)"
 conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
+
+set -euo pipefail
 
 REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
@@ -32,6 +33,12 @@ mkdir -p "${OUTPUT_DIR}"
 export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}"
+
+# NCCL: disable system network plugin (incompatible with conda NCCL)
+# Single-node uses NVLink/shared memory, no libfabric needed
+unset NCCL_NET
+unset NCCL_NET_PLUGIN
+export NCCL_PLUGIN_P2P=0
 
 # Caches
 export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"

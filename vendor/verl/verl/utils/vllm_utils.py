@@ -60,9 +60,11 @@ def patch_vllm_moe_model_weight_loader(model):
     # (False, 'model.layers.0.mlp.experts.w2_weight')          use mlp.experts.weight_loader
 
     # Define MLP attribute mapping for different model types
-    MLP_ATTR_MAPPING = {
-        MixtralForCausalLM: "block_sparse_moe",
-    }
+    MLP_ATTR_MAPPING = {}
+    try:
+        MLP_ATTR_MAPPING[MixtralForCausalLM] = "block_sparse_moe"
+    except NameError:
+        pass
     DEFAULT_MLP_ATTR = "mlp"
 
     if not isinstance(model, tuple(SUPPORTED_MOE_MODELS)):

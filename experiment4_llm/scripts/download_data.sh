@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 # Download and prepare all datasets for verl training format.
 # Output: data/*.parquet
@@ -7,6 +6,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 eval "$(conda shell.bash hook)"
 conda activate cont-maxrl
+
+set -euo pipefail
 
 export HF_HOME="${REPO_ROOT}/.cache/huggingface"
 mkdir -p "${REPO_ROOT}/data"
