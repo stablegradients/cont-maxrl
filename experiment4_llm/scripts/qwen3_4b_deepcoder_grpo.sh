@@ -73,6 +73,7 @@ echo "Output: ${OUTPUT_DIR}"
 
 $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   algorithm.adv_estimator=grpo \
+  algorithm.filter_overlong_responses=True \
   algorithm.use_kl_in_reward=False \
   algorithm.kl_ctrl.type=fixed \
   algorithm.kl_ctrl.kl_coef=0.0 \

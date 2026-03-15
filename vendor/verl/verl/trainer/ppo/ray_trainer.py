@@ -1210,6 +1210,20 @@ class RayPPOTrainer:
                             multi_turn=self.config.actor_rollout_ref.rollout.multi_turn.enable,
                         )
 
+                        # DAPO-style overlong filtering: zero out advantages for
+                        # truncated responses (no EOS, hit max_response_length).
+                        # This prevents the policy from learning "be shorter".
+                        if self.config.algorithm.get("filter_overlong_responses", False):
+                            max_resp_len = batch.batch["responses"].shape[-1]
+                            resp_mask = batch.batch["attention_mask"][:, -max_resp_len:]
+                            resp_lengths = resp_mask.sum(-1)  # (batch_size,)
+                            is_overlong = (resp_lengths == max_resp_len)  # bool mask
+                            overlong_ratio = is_overlong.float().mean().item()
+                            # Zero out advantages for overlong sequences
+                            batch.batch["advantages"][is_overlong] = 0.0
+                            metrics["overlong/ratio"] = overlong_ratio
+                            metrics["overlong/count"] = int(is_overlong.sum().item())
+
                     # update critic
                     if self.use_critic:
                         with _timer("update_critic", timing_raw):
