@@ -335,3 +335,143 @@ def test_extract_code_python3_with_space():
     """```python3 \\n should strip '3' — space is a valid boundary."""
     text = "```python3 \ndef foo():\n    return 42\n```"
     assert extract_code(text) == "def foo():\n    return 42"
+
+
+# ── Qwen3 thinking model support ──
+
+
+def test_extract_code_thinking_with_code_block():
+    """Thinking model output: <think>...</think> followed by code block."""
+    text = "<think>\nLet me solve this step by step...\n</think>\n```python\ndef solve():\n    return 42\n```"
+    assert extract_code(text) == "def solve():\n    return 42"
+
+
+def test_extract_code_thinking_with_raw_code():
+    """Thinking model output without markdown code block."""
+    text = "<think>\nthinking...\n</think>\ndef solve():\n    return 42"
+    assert extract_code(text) == "def solve():\n    return 42"
+
+
+def test_extract_code_thinking_empty_think_block():
+    """Empty thinking block (enable_thinking=False mode)."""
+    text = "<think>\n\n</think>\n```python\ndef solve():\n    return 42\n```"
+    assert extract_code(text) == "def solve():\n    return 42"
+
+
+def test_extract_code_no_think_end_tag():
+    """If </think> never appears, treat entire string as code."""
+    text = "<think>\nthinking that never ends..."
+    result = extract_code(text)
+    # No </think> found, so thinking is not stripped
+    assert "thinking that never ends" in result
+
+
+# ── Special token handling (skip_special_tokens=False) ──
+
+
+def test_extract_code_special_tokens_stripped():
+    """Special tokens like <|im_end|> should be stripped."""
+    text = "```python\ndef solve():\n    return 42\n```<|im_end|><|endoftext|>"
+    assert extract_code(text) == "def solve():\n    return 42"
+
+
+def test_extract_code_special_tokens_with_thinking():
+    """Combined: thinking + code + trailing special tokens."""
+    text = "<think>\nLet me solve this...\n</think>\n```python\ndef solve():\n    return 42\n```<|im_end|>"
+    assert extract_code(text) == "def solve():\n    return 42"
+
+
+def test_extract_code_only_special_tokens():
+    """Only special tokens -> empty string."""
+    text = "<|im_end|><|endoftext|>"
+    assert extract_code(text) == ""
+
+
+def test_extract_code_special_tokens_raw_code():
+    """Raw code (no markdown) with trailing special tokens."""
+    text = "<think>\nthinking...\n</think>\ndef solve():\n    return 42\n<|im_end|>"
+    assert extract_code(text) == "def solve():\n    return 42"
+
+
+# ── compute_score with thinking model output ──
+
+
+def test_score_thinking_model_correct():
+    """Full thinking model output should score correctly."""
+    text = "<think>\nDouble the input\n</think>\n```python\nn = int(input())\nprint(n * 2)\n```"
+    gt = _make_ground_truth(["3\n", "5\n"], ["6\n", "10\n"])
+    result = compute_score(text, gt)
+    assert result["score"] == 1.0
+    assert result["acc"] == 1.0
+
+
+def test_score_thinking_model_with_special_tokens():
+    """Thinking output with special tokens (skip_special_tokens=False)."""
+    text = "<think>\nDouble the input\n</think>\n```python\nn = int(input())\nprint(n * 2)\n```<|im_end|><|endoftext|>"
+    gt = _make_ground_truth(["3\n", "5\n"], ["6\n", "10\n"])
+    result = compute_score(text, gt)
+    assert result["score"] == 1.0
+    assert result["acc"] == 1.0
+
+
+def test_score_thinking_model_partial():
+    """Thinking model with partially correct code."""
+    text = "<think>\nJust print 6\n</think>\n```python\nprint(6)\n```"
+    gt = _make_ground_truth(["3\n", "5\n", "10\n"], ["6\n", "10\n", "20\n"])
+    result = compute_score(text, gt)
+    assert abs(result["score"] - 1 / 3) < 1e-6
+    assert result["acc"] == 0.0
+
+
+# ── Batch scoring ──
+
+
+def test_compute_scores_batch_basic():
+    """Batch scoring should match individual scoring."""
+    from experiment4_llm.src.reward_function import compute_scores_batch
+
+    gt = _make_ground_truth(["3\n", "5\n"], ["6\n", "10\n"])
+    correct = "<think>\nok\n</think>\n```python\nn = int(input())\nprint(n * 2)\n```"
+    wrong = "```python\nprint(999)\n```"
+    syntax_err = "```python\ndef (\n```"
+
+    batch = [
+        {"solution_str": correct, "ground_truth": gt},
+        {"solution_str": wrong, "ground_truth": gt},
+        {"solution_str": syntax_err, "ground_truth": gt},
+    ]
+    results = compute_scores_batch(batch, num_workers=2)
+
+    assert len(results) == 3
+    assert results[0]["score"] == 1.0
+    assert results[0]["acc"] == 1.0
+    assert results[1]["score"] == 0.0
+    assert results[2]["score"] == 0.0
+
+
+def test_compute_scores_batch_dedup():
+    """Duplicate solutions should produce identical scores."""
+    from experiment4_llm.src.reward_function import compute_scores_batch
+
+    gt = _make_ground_truth(["3\n"], ["6\n"])
+    sol = "```python\nn = int(input())\nprint(n * 2)\n```"
+
+    batch = [{"solution_str": sol, "ground_truth": gt}] * 5
+    results = compute_scores_batch(batch, num_workers=2)
+
+    assert len(results) == 5
+    assert all(r["score"] == 1.0 for r in results)
+
+
+def test_compute_scores_batch_with_special_tokens():
+    """Batch scoring handles special tokens in solution_str."""
+    from experiment4_llm.src.reward_function import compute_scores_batch
+
+    gt = _make_ground_truth(["3\n"], ["6\n"])
+    sol = "<think>\nok\n</think>\n```python\nn = int(input())\nprint(n * 2)\n```<|im_end|>"
+
+    results = compute_scores_batch(
+        [{"solution_str": sol, "ground_truth": gt}],
+        num_workers=1,
+    )
+    assert results[0]["score"] == 1.0

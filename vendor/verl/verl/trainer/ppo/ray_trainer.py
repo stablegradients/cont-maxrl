@@ -803,6 +803,10 @@ class RayPPOTrainer:
 
                 global_problem_idx += batch_size
 
+            # Free GPU cache between passes to avoid OOM
+            gc.collect()
+            torch.cuda.empty_cache()
+
         # Truncate to n_target completions per problem
         n_problems = len(problem_ground_truths)
         completions_list = []
