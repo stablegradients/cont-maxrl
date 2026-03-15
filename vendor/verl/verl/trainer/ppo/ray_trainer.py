@@ -789,10 +789,16 @@ class RayPPOTrainer:
                 gen_output = unpad_dataproto(gen_output_padded, pad_size=pad_size)
 
                 # Decode responses and group by problem index
+                # Use skip_special_tokens=False to preserve <think></think> markers
+                # for reasoning models; trim padding via attention_mask
                 response_ids = gen_output.batch["responses"]
+                attention_mask = gen_output.batch["attention_mask"]
+                prompt_length = gen_output.batch["prompts"].shape[-1]
                 for i in range(len(response_ids)):
                     problem_idx = global_problem_idx + (i // n_per_pass)
-                    text = self.tokenizer.decode(response_ids[i], skip_special_tokens=True)
+                    valid_len = int(attention_mask[i, prompt_length:].sum())
+                    valid_ids = response_ids[i, :valid_len]
+                    text = self.tokenizer.decode(valid_ids, skip_special_tokens=False)
                     problem_completions[problem_idx].append(text)
 
                 global_problem_idx += batch_size

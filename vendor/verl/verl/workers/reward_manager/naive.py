@@ -63,8 +63,10 @@ class NaiveRewardManager:
             valid_response_length = data_item.batch["attention_mask"][prompt_length:].sum()
             valid_response_ids = response_ids[:valid_response_length]
 
-            prompt_str = self.tokenizer.decode(valid_prompt_ids, skip_special_tokens=True)
-            response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
+            # skip_special_tokens=False to preserve <think></think> markers
+            # for reasoning models (Qwen3, DeepSeek-R1); extract_code strips them
+            prompt_str = self.tokenizer.decode(valid_prompt_ids, skip_special_tokens=False)
+            response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=False)
 
             ground_truth = data_item.non_tensor_batch["reward_model"]["ground_truth"]
             data_source = data_item.non_tensor_batch[self.reward_fn_key]

@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from experiment4_llm.src.sandbox import execute_batch_in_sandbox, execute_in_sandbox
@@ -21,8 +22,13 @@ def extract_code(solution_str: str) -> str:
     """
     Extract Python code from a model completion.
     Handles markdown code blocks, raw code, and thinking model output.
+    Works with skip_special_tokens=False (preserves <think></think> but
+    may include other special tokens like <|im_end|>, <|endoftext|>).
     """
     solution_str = solution_str.strip()
+
+    # Strip special tokens (from skip_special_tokens=False decode)
+    solution_str = re.sub(r"<\|[^>]+\|>", "", solution_str).strip()
 
     # Strip thinking content for reasoning models (e.g., Qwen3, DeepSeek-R1)
     if "</think>" in solution_str:

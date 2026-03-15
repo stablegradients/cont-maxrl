@@ -83,6 +83,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   data.max_response_length=4096 \
   data.shuffle=True \
   data.filter_overlong_prompts=True \
+  data.enable_thinking=True \
   data.reward_fn_key=data_source \
   actor_rollout_ref.model.path=Qwen/Qwen3-4B \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
@@ -109,10 +110,10 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.n=16 \
   actor_rollout_ref.rollout.temperature=1.0 \
   actor_rollout_ref.rollout.top_p=1.0 \
-  actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
+  actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
   actor_rollout_ref.rollout.dtype=bfloat16 \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-  actor_rollout_ref.rollout.max_num_batched_tokens=8192 \
+  actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
   actor_rollout_ref.rollout.max_num_seqs=1024 \
   actor_rollout_ref.rollout.enforce_eager=True \
   actor_rollout_ref.rollout.free_cache_engine=True \
@@ -127,7 +128,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   custom_reward_function.path="${REPO_ROOT}/experiment4_llm/src/reward_function.py" \
   custom_reward_function.name=compute_score \
   trainer.total_training_steps=2000 \
-  trainer.total_epochs=300 \
+  trainer.total_epochs=15 \
   trainer.project_name=cont-maxrl-code \
   trainer.experiment_name=qwen3_4b_deepcoder_grpo \
   "trainer.logger=['console','wandb']" \
