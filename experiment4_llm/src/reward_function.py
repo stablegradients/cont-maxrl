@@ -20,9 +20,13 @@ from experiment4_llm.src.sandbox import execute_batch_in_sandbox, execute_in_san
 def extract_code(solution_str: str) -> str:
     """
     Extract Python code from a model completion.
-    Handles markdown code blocks and raw code.
+    Handles markdown code blocks, raw code, and thinking model output.
     """
     solution_str = solution_str.strip()
+
+    # Strip thinking content for reasoning models (e.g., Qwen3, DeepSeek-R1)
+    if "</think>" in solution_str:
+        solution_str = solution_str.split("</think>", 1)[1].strip()
 
     # Try to extract from markdown code block
     solution_lower = solution_str.lower()
@@ -274,13 +278,13 @@ def compute_scores_batch(
     num_workers: int | None = None,
     global_timeout: int = 15,
 ) -> list[dict]:
-    """Compute rewards for all completions with four compounding optimizations.
+    """Compute rewards for all completions with three compounding optimizations.
 
     1. Syntax pre-check: compile() rejects ~40% of completions at zero cost.
     2. Code dedup: hash extracted code — identical completions scored once.
     3. Batched subprocess: one fork per unique completion, all tests inside
        with signal.alarm per-test timeout + parent global_timeout cap.
-    4. Early-stop: 3 consecutive failures inside subprocess → skip rest.
+       No early-stop: all tests always run to preserve continuous reward signal.
 
     Parallelism is completion-level via ThreadPoolExecutor, but each completion
     is bounded to global_timeout seconds so the tail is capped.

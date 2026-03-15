@@ -700,17 +700,22 @@ def prepare_deepcoder(
     n_pi = len(records) - n_before_pi
     print(f"  primeintellect: {n_pi} problems")
 
-    # Deduplicate by prompt text
+    # Deduplicate by prompt text AND by ground truth (test cases).
+    # The taco and primeintellect configs can describe the same problem
+    # with different wording, so we dedup by both to be safe.
     seen_prompts = set()
+    seen_ground_truths = set()
     unique_records = []
     for r in records:
-        prompt_key = str(r["prompt"])
-        if prompt_key not in seen_prompts:
+        prompt_key = json.dumps(r["prompt"], sort_keys=True)
+        gt_key = r["reward_model"]["ground_truth"]
+        if prompt_key not in seen_prompts and gt_key not in seen_ground_truths:
             seen_prompts.add(prompt_key)
+            seen_ground_truths.add(gt_key)
             unique_records.append(r)
     n_dedup = len(records) - len(unique_records)
     if n_dedup:
-        print(f"  Removed {n_dedup} duplicate prompts ({len(records)} -> {len(unique_records)})")
+        print(f"  Removed {n_dedup} duplicates by prompt+ground_truth ({len(records)} -> {len(unique_records)})")
     records = unique_records
 
     # Split into train/val

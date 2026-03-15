@@ -14,6 +14,7 @@ data:
   filter_overlong_prompts: False # for large-scale dataset, filtering overlong prompts could be timeconsuming. You cat set the filter_overlong_prompts_workers to use multiprocessing to speed up.
   filter_overlong_prompts_workers: 1
   truncation: error
+  enable_thinking: True  # Qwen3: toggle <think> reasoning in chat template
   image_key: images
   video_key: videos
   custom_cls:
@@ -241,6 +242,14 @@ trainer:
   max_critic_ckpt_to_keep: null
   # The timeout for ray worker group to wait for the register center to be ready
   ray_wait_register_center_timeout: 300
+
+insitu_eval:
+  data_file: null              # path to eval parquet (e.g., livecodebench_test.parquet). null = disabled
+  n_completions: 200           # completions per problem
+  eval_batch_size: 16          # problems per generation batch
+  steps_per_epoch: 180         # training steps per epoch (for epoch number calculation)
+  eval_steps: []               # list of training steps at which to run eval (e.g., [0, 900, 1800, 2000])
+  output_dir: null             # where to save metrics_epochN.json. null = default_local_dir/eval_livecodebench
 
 ray_init:
   num_cpus: null # `None` means using all CPUs, which might cause hang if limited in systems like SLURM. Please set to a number allowed then.

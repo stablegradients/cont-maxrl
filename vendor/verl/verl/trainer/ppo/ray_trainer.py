@@ -300,6 +300,7 @@ class RayPPOTrainer:
         val_reward_fn=None,
         train_dataset: Optional[Dataset] = None,
         val_dataset: Optional[Dataset] = None,
+        eval_dataset: Optional[Dataset] = None,
         collate_fn=None,
         train_sampler: Optional[Sampler] = None,
     ):
@@ -346,7 +347,7 @@ class RayPPOTrainer:
             raise NotImplementedError
 
         self._validate_config()
-        self._create_dataloader(train_dataset, val_dataset, collate_fn, train_sampler)
+        self._create_dataloader(train_dataset, val_dataset, collate_fn, train_sampler, eval_dataset=eval_dataset)
 
     def _validate_config(self):
         config = self.config
@@ -461,9 +462,9 @@ class RayPPOTrainer:
 
         print("[validate_config] All configuration checks passed successfully!")
 
-    def _create_dataloader(self, train_dataset, val_dataset, collate_fn, train_sampler):
+    def _create_dataloader(self, train_dataset, val_dataset, collate_fn, train_sampler, eval_dataset=None):
         """
-        Creates the train and validation dataloaders.
+        Creates the train, validation, and optional eval dataloaders.
         """
         # TODO: we have to make sure the batch size is divisible by the dp size
         from verl.trainer.main_ppo import create_rl_dataset, create_rl_sampler
@@ -502,6 +503,21 @@ class RayPPOTrainer:
             drop_last=False,
             collate_fn=collate_fn,
         )
+
+        # In-situ eval dataloader (e.g., LiveCodeBench)
+        self.eval_dataset = eval_dataset
+        self.eval_dataloader = None
+        if eval_dataset is not None:
+            eval_batch_size = self.config.get("insitu_eval", {}).get("eval_batch_size", 16)
+            self.eval_dataloader = StatefulDataLoader(
+                dataset=eval_dataset,
+                batch_size=eval_batch_size,
+                num_workers=self.config.data.get("dataloader_num_workers", 8),
+                shuffle=False,
+                drop_last=False,
+                collate_fn=collate_fn,
+            )
+            print(f"Size of eval dataloader: {len(self.eval_dataloader)} ({len(eval_dataset)} problems, batch_size={eval_batch_size})")
 
         assert len(self.train_dataloader) >= 1, "Train dataloader is empty!"
         assert len(self.val_dataloader) >= 1, "Validation dataloader is empty!"
@@ -685,6 +701,138 @@ class RayPPOTrainer:
                         metric_sec = "val-aux"
                     pfx = f"{metric_sec}/{data_source}/{var_name}/{metric_name}"
                     metric_dict[pfx] = metric_val
+
+        return metric_dict
+
+    def _insitu_eval(self):
+        """Run full in-situ evaluation (e.g., LiveCodeBench pass@k with 200 completions).
+
+        Uses the existing rollout engine to generate completions in multiple passes,
+        scores them with the batch reward function, and saves metrics_epochN.json.
+        """
+        import math
+        from collections import defaultdict
+
+        eval_config = self.config.get("insitu_eval", None)
+        if eval_config is None or self.eval_dataloader is None:
+            return {}
+
+        steps_per_epoch = eval_config.get("steps_per_epoch", 180)
+        n_target = eval_config.get("n_completions", 200)
+        n_per_pass = self.config.actor_rollout_ref.rollout.val_kwargs.n  # e.g. 16
+        n_passes = math.ceil(n_target / n_per_pass)
+        output_dir = eval_config.get("output_dir",
+                                     os.path.join(self.config.trainer.default_local_dir, "eval_livecodebench"))
+        epoch = round(self.global_steps / steps_per_epoch)
+        n_workers = int(os.environ.get("VERL_REWARD_WORKERS", 128))
+
+        print(f"\n{'='*60}")
+        print(f"In-situ eval: epoch {epoch}, step {self.global_steps}")
+        print(f"  n_target={n_target}, n_per_pass={n_per_pass}, n_passes={n_passes}")
+        print(f"{'='*60}")
+
+        # Accumulate completions per problem: problem_completions[global_problem_idx] = [str, ...]
+        problem_completions = defaultdict(list)
+        # Collect ground_truths per problem (only need once)
+        problem_ground_truths = {}
+
+        for pass_idx in range(n_passes):
+            print(f"  Pass {pass_idx + 1}/{n_passes}...")
+            global_problem_idx = 0
+
+            for eval_data in self.eval_dataloader:
+                eval_batch = DataProto.from_single_dict(eval_data)
+                batch_size = len(eval_batch)
+
+                # Extract ground_truths (only on first pass)
+                if pass_idx == 0:
+                    for j in range(batch_size):
+                        gt = eval_batch[j].non_tensor_batch["reward_model"]["ground_truth"]
+                        problem_ground_truths[global_problem_idx + j] = gt
+
+                # Repeat for n_per_pass completions
+                eval_batch_repeated = eval_batch.repeat(repeat_times=n_per_pass, interleave=True)
+
+                # Pop keys for generation (same as _validate)
+                batch_keys_to_pop = ["input_ids", "attention_mask", "position_ids"]
+                non_tensor_batch_keys_to_pop = ["raw_prompt_ids"]
+                if "multi_modal_inputs" in eval_batch_repeated.non_tensor_batch:
+                    non_tensor_batch_keys_to_pop.extend(["multi_modal_data", "multi_modal_inputs"])
+                if "raw_prompt" in eval_batch_repeated.non_tensor_batch:
+                    non_tensor_batch_keys_to_pop.append("raw_prompt")
+                if "tools_kwargs" in eval_batch_repeated.non_tensor_batch:
+                    non_tensor_batch_keys_to_pop.append("tools_kwargs")
+
+                gen_batch = eval_batch_repeated.pop(
+                    batch_keys=batch_keys_to_pop,
+                    non_tensor_batch_keys=non_tensor_batch_keys_to_pop,
+                )
+
+                gen_batch.meta_info = {
+                    "eos_token_id": self.tokenizer.eos_token_id,
+                    "pad_token_id": self.tokenizer.pad_token_id,
+                    "recompute_log_prob": False,
+                    "do_sample": True,
+                    "validate": True,  # uses val_kwargs temperature/top_p
+                }
+
+                # Pad to be divisible by dp_size
+                gen_batch_padded, pad_size = pad_dataproto_to_divisor(gen_batch, self.actor_rollout_wg.world_size)
+
+                if not self.async_rollout_mode:
+                    gen_output_padded = self.actor_rollout_wg.generate_sequences(gen_batch_padded)
+                else:
+                    self.async_rollout_manager.wake_up()
+                    gen_output_padded = self.async_rollout_manager.generate_sequences(gen_batch_padded)
+                    self.async_rollout_manager.sleep()
+
+                gen_output = unpad_dataproto(gen_output_padded, pad_size=pad_size)
+
+                # Decode responses and group by problem index
+                response_ids = gen_output.batch["responses"]
+                for i in range(len(response_ids)):
+                    problem_idx = global_problem_idx + (i // n_per_pass)
+                    text = self.tokenizer.decode(response_ids[i], skip_special_tokens=True)
+                    problem_completions[problem_idx].append(text)
+
+                global_problem_idx += batch_size
+
+        # Truncate to n_target completions per problem
+        n_problems = len(problem_ground_truths)
+        completions_list = []
+        ground_truths_list = []
+        for i in range(n_problems):
+            completions_list.append(problem_completions[i][:n_target])
+            ground_truths_list.append(problem_ground_truths[i])
+
+        # Score and save metrics
+        try:
+            from experiment4_llm.src.insitu_eval import score_and_save
+            metrics = score_and_save(
+                completions=completions_list,
+                ground_truths=ground_truths_list,
+                epoch=epoch,
+                global_step=self.global_steps,
+                output_dir=output_dir,
+                n_target=n_target,
+                n_workers=n_workers,
+            )
+        except Exception as e:
+            print(f"  In-situ eval scoring failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
+        # Return pass@k as trainer metrics for W&B logging
+        metric_dict = {}
+        pass_at_k = metrics.get("pass_at_k", {})
+        for k, v in pass_at_k.items():
+            if v is not None:
+                metric_dict[f"insitu_eval/pass_at_{k}"] = v
+        summary = metrics.get("summary", {})
+        for key in ["mean_score", "mean_pass_rate", "mean_unique_solution_rate", "mean_output_length"]:
+            if key in summary:
+                metric_dict[f"insitu_eval/{key}"] = summary[key]
 
         return metric_dict
 
@@ -895,6 +1043,14 @@ class RayPPOTrainer:
             if self.config.trainer.get("val_only", False):
                 return
 
+        # In-situ eval at epoch 0 (before training) if configured
+        insitu_eval_config = self.config.get("insitu_eval", None)
+        insitu_eval_steps = set(insitu_eval_config.get("eval_steps", [])) if insitu_eval_config else set()
+        if 0 in insitu_eval_steps and self.eval_dataloader is not None and self.global_steps == 0:
+            eval_metrics = self._insitu_eval()
+            if eval_metrics:
+                logger.log(data=eval_metrics, step=self.global_steps)
+
         # add tqdm
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
 
@@ -1091,6 +1247,13 @@ class RayPPOTrainer:
                     if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
                         with _timer("save_checkpoint", timing_raw):
                             self._save_checkpoint()
+
+                    # In-situ eval at configured steps (e.g., every 5 epochs)
+                    if self.eval_dataloader is not None and self.global_steps in insitu_eval_steps:
+                        with _timer("insitu_eval", timing_raw):
+                            eval_metrics = self._insitu_eval()
+                        if eval_metrics:
+                            metrics.update(eval_metrics)
 
                 # training metrics
                 metrics.update(

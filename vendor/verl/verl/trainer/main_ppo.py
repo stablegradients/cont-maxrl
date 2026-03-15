@@ -165,6 +165,17 @@ class TaskRunner:
         train_dataset = create_rl_dataset(config.data.train_files, config.data, tokenizer, processor)
         val_dataset = create_rl_dataset(config.data.val_files, config.data, tokenizer, processor)
         train_sampler = create_rl_sampler(config.data, train_dataset)
+
+        # In-situ eval dataset (e.g., LiveCodeBench) if configured
+        eval_dataset = None
+        insitu_eval_config = config.get("insitu_eval", None)
+        if insitu_eval_config is not None:
+            eval_data_file = insitu_eval_config.get("data_file", None)
+            if eval_data_file is not None:
+                print(f"Loading in-situ eval dataset from {eval_data_file}")
+                eval_dataset = create_rl_dataset(eval_data_file, config.data, tokenizer, processor)
+                print(f"In-situ eval dataset: {len(eval_dataset)} problems")
+
         trainer = RayPPOTrainer(
             config=config,
             tokenizer=tokenizer,
@@ -176,6 +187,7 @@ class TaskRunner:
             val_reward_fn=val_reward_fn,
             train_dataset=train_dataset,
             val_dataset=val_dataset,
+            eval_dataset=eval_dataset,
             collate_fn=collate_fn,
             train_sampler=train_sampler,
         )

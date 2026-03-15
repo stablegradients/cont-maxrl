@@ -88,7 +88,8 @@ print(json.dumps(_result))
 """
 
 # ── Batch runner: all test cases for one completion in a single process ──
-# Uses signal.alarm for per-test timeout and early-stop on consecutive failures.
+# Uses signal.alarm for per-test timeout. NO early-stop: all tests are always
+# executed to preserve the full continuous reward signal (passed / total).
 # Outputs JSON list of per-test results (string output or null for failure).
 
 _RUNNER_BATCH = """\
@@ -116,9 +117,7 @@ with open(sys.argv[2]) as _f:
 _fn_name = _td.get("fn_name")
 _inputs = _td["inputs"]
 _timeout = _td["timeout"]
-_early_stop = _td.get("early_stop", 3)
 _results = []
-_consec_fail = 0
 
 if _fn_name:
     _ns = {{}}
@@ -132,9 +131,6 @@ if _fn_name:
         print(json.dumps([None] * len(_inputs)))
         sys.exit(0)
     for _inp in _inputs:
-        if _consec_fail >= _early_stop:
-            _results.append(None)
-            continue
         signal.alarm(_timeout)
         try:
             _s = _inp.strip() if isinstance(_inp, str) else str(_inp)
@@ -147,11 +143,9 @@ if _fn_name:
             _r = _fn(*_args)
             signal.alarm(0)
             _results.append(json.dumps(_r))
-            _consec_fail = 0
         except Exception:
             signal.alarm(0)
             _results.append(None)
-            _consec_fail += 1
 else:
     try:
         _compiled = compile(_code, '<solution>', 'exec')
@@ -159,9 +153,6 @@ else:
         print(json.dumps([None] * len(_inputs)))
         sys.exit(0)
     for _inp in _inputs:
-        if _consec_fail >= _early_stop:
-            _results.append(None)
-            continue
         signal.alarm(_timeout)
         _saved = sys.stdout
         _captured = io.StringIO()
@@ -173,12 +164,10 @@ else:
             signal.alarm(0)
             sys.stdout = _saved
             _results.append(_captured.getvalue())
-            _consec_fail = 0
         except Exception:
             signal.alarm(0)
             sys.stdout = _saved
             _results.append(None)
-            _consec_fail += 1
 
 print(json.dumps(_results))
 """
@@ -287,12 +276,12 @@ def execute_batch_in_sandbox(
     timeout_per_test: int = DEFAULT_TIMEOUT,
     memory_limit_mb: int = DEFAULT_MEMORY_MB,
     global_timeout: int = DEFAULT_GLOBAL_TIMEOUT,
-    early_stop: int = 3,
 ) -> list[str | None]:
     """Run ALL test cases for one completion in a single subprocess.
 
-    Uses signal.alarm for per-test timeouts and early-stop on consecutive
-    failures.  The parent enforces a hard global timeout via subprocess.run.
+    Uses signal.alarm for per-test timeouts. No early-stop: all tests are
+    always executed to preserve the full continuous reward signal.
+    The parent enforces a hard global timeout via subprocess.run.
 
     Args:
         code: extracted Python source
@@ -301,7 +290,6 @@ def execute_batch_in_sandbox(
         timeout_per_test: per-test alarm timeout (seconds)
         memory_limit_mb: memory limit for the subprocess
         global_timeout: hard wall-clock cap for the entire subprocess
-        early_stop: stop after this many consecutive failures
 
     Returns:
         List of output strings (one per test), None for failed tests.
@@ -330,7 +318,6 @@ def execute_batch_in_sandbox(
             "inputs": inputs,
             "fn_name": fn_name,
             "timeout": timeout_per_test,
-            "early_stop": early_stop,
         }
         json.dump(test_data, test_file)
         test_file.close()
