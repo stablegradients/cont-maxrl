@@ -55,7 +55,13 @@ def get_custom_reward_fn(config):
 
 
 def _get_batch_reward_fn(config):
-    """Try to load compute_scores_batch from the same module as compute_score."""
+    """Try to load a matching batch reward function from the same module.
+
+    Looks for a batch function matching the configured reward function name:
+      compute_score           -> compute_scores_batch
+      compute_score_binary_train -> compute_scores_batch_binary
+    Falls back to compute_scores_batch if no specific match is found.
+    """
     import importlib.util
     import sys
 
@@ -69,6 +75,17 @@ def _get_batch_reward_fn(config):
     if module is None:
         return None
 
+    function_name = reward_fn_config.get("name", "compute_score")
+
+    # Try name-matched batch function first (e.g. compute_scores_batch_binary)
+    if function_name != "compute_score":
+        suffix = function_name.replace("compute_score_", "")
+        batch_name = f"compute_scores_batch_{suffix}"
+        if hasattr(module, batch_name):
+            print(f"using batch reward function '{batch_name}' from '{file_path}'")
+            return getattr(module, batch_name)
+
+    # Default: compute_scores_batch
     if hasattr(module, "compute_scores_batch"):
         print(f"using test-case-level batch reward function from '{file_path}'")
         return module.compute_scores_batch

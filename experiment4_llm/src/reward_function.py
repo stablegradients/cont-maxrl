@@ -195,6 +195,45 @@ def compute_score_binary(
     return 1.0 if result["score"] == 1.0 else 0.0
 
 
+def compute_score_binary_train(
+    solution_str: str,
+    ground_truth: str,
+    timeout_per_test: int = 1,
+    memory_limit_mb: int = 512,
+    data_source: str | None = None,
+    extra_info: dict | None = None,
+) -> dict:
+    """
+    Binary training reward: 1.0 if ALL test cases pass, 0.0 otherwise.
+
+    Same interface as compute_score (dict return with data_source/extra_info params)
+    so it plugs directly into verl's reward manager.
+    """
+    result = compute_score(
+        solution_str, ground_truth, timeout_per_test, memory_limit_mb,
+        data_source=data_source, extra_info=extra_info,
+    )
+    binary = 1.0 if result["acc"] == 1.0 else 0.0
+    return {"score": binary, "acc": binary}
+
+
+def compute_scores_batch_binary_train(
+    reward_inputs: list[dict],
+    timeout_per_test: int = 1,
+    memory_limit_mb: int = 512,
+    num_workers: int | None = None,
+    global_timeout: int = 15,
+) -> list[dict]:
+    """Batch binary rewards: binarizes the output of compute_scores_batch."""
+    results = compute_scores_batch(
+        reward_inputs, timeout_per_test, memory_limit_mb, num_workers, global_timeout,
+    )
+    for r in results:
+        binary = 1.0 if r["acc"] == 1.0 else 0.0
+        r["score"] = binary
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Batch scoring: syntax filter → dedup → parallel batched subprocesses
 # ---------------------------------------------------------------------------
