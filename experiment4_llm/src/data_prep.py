@@ -76,32 +76,37 @@ def make_record(
     prompt_text: str,
     test_cases: dict,
     max_tests: int = 50,
-    max_gt_chars: int = 1_000_000,
+    max_gt_chars: int = 10_000_000,
 ) -> dict | None:
     """Build the standard verl record dict, capping test cases.
 
-    Returns None if ground_truth exceeds max_gt_chars after capping
-    (skips problems with impractically large test I/O).
+    Adaptively reduces the number of test cases for problems with large I/O
+    to stay under max_gt_chars. Returns None only if even a single test case
+    exceeds the limit.
     """
-    if len(test_cases["inputs"]) > max_tests:
-        test_cases = {**test_cases}
-        test_cases["inputs"] = test_cases["inputs"][:max_tests]
-        test_cases["outputs"] = test_cases["outputs"][:max_tests]
+    extra_keys = {k: v for k, v in test_cases.items() if k not in ("inputs", "outputs")}
 
-    gt_json = json.dumps(test_cases)
-    if len(gt_json) > max_gt_chars:
-        return None
+    # Try progressively fewer tests until ground_truth fits
+    for cap in [max_tests, 20, 10, 5, 3, 1]:
+        capped = {
+            "inputs": test_cases["inputs"][:cap],
+            "outputs": test_cases["outputs"][:cap],
+            **extra_keys,
+        }
+        gt_json = json.dumps(capped)
+        if len(gt_json) <= max_gt_chars:
+            return {
+                "data_source": data_source,
+                "prompt": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt_text},
+                ],
+                "reward_model": {
+                    "ground_truth": gt_json,
+                },
+            }
 
-    return {
-        "data_source": data_source,
-        "prompt": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt_text},
-        ],
-        "reward_model": {
-            "ground_truth": gt_json,
-        },
-    }
+    return None
 
 
 def write_parquet(records: list[dict], output_path: Path) -> None:
@@ -754,13 +759,14 @@ def prepare_evalplus(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    records = []
     skipped = 0
+    per_dataset_records = {}
 
     for dataset_name, get_fn in [("humaneval", get_human_eval_plus),
                                   ("mbpp", get_mbpp_plus)]:
         problems = get_fn()
         print(f"  {dataset_name}+: {len(problems)} problems")
+        records = []
 
         for task_id, problem in problems.items():
             entry_point = problem["entry_point"]
@@ -798,8 +804,13 @@ def prepare_evalplus(
             for args in all_inputs:
                 try:
                     result = fn(*args)
-                    inputs.append(json.dumps(args))
-                    outputs.append(json.dumps(result))
+                    # Convert non-serializable types (e.g. set) to sorted list
+                    if isinstance(result, set):
+                        result = sorted(result)
+                    inp_str = json.dumps(args)
+                    out_str = json.dumps(result)
+                    inputs.append(inp_str)
+                    outputs.append(out_str)
                 except Exception:
                     continue
 
@@ -819,14 +830,17 @@ def prepare_evalplus(
             if record is not None:
                 records.append(record)
 
-    output_path = Path(output_dir) / "evalplus_test.parquet"
-    write_parquet(records, output_path)
+        per_dataset_records[dataset_name] = records
 
-    stats = {"test": len(records)}
-    print(
-        f"  total: {len(records)} problems written to {output_path}"
-        f" (skipped: {skipped})"
-    )
+    # Write separate parquets for each subset
+    stats = {}
+    for dataset_name, records in per_dataset_records.items():
+        output_path = Path(output_dir) / f"evalplus_{dataset_name}_test.parquet"
+        write_parquet(records, output_path)
+        stats[dataset_name] = len(records)
+        print(f"  {dataset_name}+: {len(records)} problems written to {output_path}")
+
+    print(f"  (skipped: {skipped})")
 
     return stats
 

@@ -71,6 +71,8 @@ def generate_completions(
     max_tokens: int = 2048,
     gpu_memory_utilization: float = 0.85,
     tensor_parallel_size: int = 1,
+    enable_thinking: bool = False,
+    max_num_seqs: int = 256,
 ) -> list[list[str]]:
     """
     Generate N completions per problem using vLLM.
@@ -94,6 +96,7 @@ def generate_completions(
         trust_remote_code=True,
         gpu_memory_utilization=gpu_memory_utilization,
         tensor_parallel_size=tensor_parallel_size,
+        max_num_seqs=max_num_seqs,
         dtype="bfloat16",
         enforce_eager=True,
     )
@@ -107,11 +110,15 @@ def generate_completions(
     )
 
     # Format prompts using chat template
+    chat_kwargs = {}
+    if enable_thinking:
+        chat_kwargs["enable_thinking"] = True
     formatted_prompts = []
     for problem in problems:
         prompt_messages = problem["prompt"]
         text = tokenizer.apply_chat_template(
-            prompt_messages, tokenize=False, add_generation_prompt=True
+            prompt_messages, tokenize=False, add_generation_prompt=True,
+            **chat_kwargs,
         )
         formatted_prompts.append(text)
 
@@ -268,7 +275,11 @@ def main():
     parser.add_argument("--top_p", type=float, default=0.95)
     parser.add_argument("--top_k", type=int, default=-1)
     parser.add_argument("--max_tokens", type=int, default=2048)
+    parser.add_argument("--enable_thinking", action="store_true", default=False,
+                        help="Pass enable_thinking=True to chat template (Qwen3 reasoning mode)")
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.85)
+    parser.add_argument("--max_num_seqs", type=int, default=256,
+                        help="Max concurrent sequences in vLLM scheduler (lower = fewer KV cache preemptions)")
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--timeout_per_test", type=int, default=1)
     parser.add_argument("--n_workers", type=int, default=128,
@@ -305,6 +316,8 @@ def main():
             max_tokens=args.max_tokens,
             gpu_memory_utilization=args.gpu_memory_utilization,
             tensor_parallel_size=args.tensor_parallel_size,
+            enable_thinking=args.enable_thinking,
+            max_num_seqs=args.max_num_seqs,
         )
         with open(completions_path, "w") as f:
             json.dump(completions, f)

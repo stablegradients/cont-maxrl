@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=qwen3_1.7b_grpo
+#SBATCH --job-name=qwen3_1.7b_base_grpo
 #SBATCH --account=bgmo-dtai-gh
 #SBATCH --partition=ghx4
 #SBATCH --gpus-per-node=4
@@ -26,7 +26,7 @@ REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 
-OUTPUT_DIR="${REPO_ROOT}/results/qwen3_1.7b_deepcoder_grpo"
+OUTPUT_DIR="${REPO_ROOT}/results/qwen3_1.7b_base_deepcoder_grpo"
 mkdir -p "${OUTPUT_DIR}"
 
 # Conda CUDA (not system CUDA)
@@ -62,12 +62,12 @@ export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 
 # wandb
 export WANDB_ENTITY="stablegradients"
-export WANDB_RUN_GROUP="qwen3_1.7b_deepcoder_grpo"
+export WANDB_RUN_GROUP="qwen3-1.7b-base_deepcoder_grpo_G16_bs256"
 
 # Use SLURM-assigned GPU count, fall back to nvidia-smi for local runs
 N_GPUS=${SLURM_GPUS_ON_NODE:-$(nvidia-smi -L 2>/dev/null | wc -l || echo 4)}
 echo "=== Train: Qwen3-1.7B GRPO on DeepCoder ==="
-echo "GPUs: ${N_GPUS}, Model: Qwen/Qwen3-1.7B"
+echo "GPUs: ${N_GPUS}, Model: Qwen/Qwen3-1.7B-Base"
 echo "Method: GRPO, G=16, max_completion_length=4096"
 echo "Output: ${OUTPUT_DIR}"
 
@@ -86,13 +86,13 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   data.filter_overlong_prompts=True \
   data.enable_thinking=False \
   data.reward_fn_key=data_source \
-  actor_rollout_ref.model.path=Qwen/Qwen3-1.7B \
+  actor_rollout_ref.model.path=Qwen/Qwen3-1.7B-Base \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   actor_rollout_ref.model.trust_remote_code=True \
   actor_rollout_ref.actor.strategy=fsdp \
   actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
   actor_rollout_ref.actor.ppo_mini_batch_size=256 \
-  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=16 \
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.actor.ppo_epochs=1 \
   actor_rollout_ref.actor.use_kl_loss=False \
   actor_rollout_ref.actor.kl_loss_coef=0.0 \
@@ -101,7 +101,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.actor.grad_clip=0.3 \
   actor_rollout_ref.actor.use_torch_compile=False \
   actor_rollout_ref.actor.optim.lr=1e-6 \
-  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.ref.use_torch_compile=False \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.n=16 \
@@ -114,7 +114,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.max_num_seqs=1024 \
   actor_rollout_ref.rollout.enforce_eager=True \
   actor_rollout_ref.rollout.free_cache_engine=True \
-  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=16 \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.rollout.enable_chunked_prefill=False \
   actor_rollout_ref.rollout.val_kwargs.n=16 \
   actor_rollout_ref.rollout.val_kwargs.do_sample=True \
@@ -127,7 +127,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.total_training_steps=1000 \
   trainer.total_epochs=15 \
   trainer.project_name=cont-maxrl-code \
-  trainer.experiment_name=qwen3_1.7b_deepcoder_grpo \
+  trainer.experiment_name=qwen3_1.7b_base_deepcoder_grpo \
   "trainer.logger=['console','wandb']" \
   trainer.default_local_dir="${OUTPUT_DIR}" \
   trainer.n_gpus_per_node=${N_GPUS} \
@@ -143,7 +143,8 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   insitu_eval.steps_per_epoch=83 \
   "insitu_eval.eval_steps=[0,200,400,600,800,1000]" \
   insitu_eval.output_dir="${OUTPUT_DIR}/eval_livecodebench" \
-  insitu_eval.extra_data_files.evalplus="${REPO_ROOT}/data/evalplus_test.parquet" \
+  +insitu_eval.extra_data_files.humaneval_plus="${REPO_ROOT}/data/evalplus_humaneval_test.parquet" \
+  +insitu_eval.extra_data_files.mbpp_plus="${REPO_ROOT}/data/evalplus_mbpp_test.parquet" \
   ray_init.num_cpus=280
 
 echo ""

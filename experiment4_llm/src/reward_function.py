@@ -63,7 +63,7 @@ def extract_code(solution_str: str) -> str:
 def compute_score(
     solution_str: str,
     ground_truth: str,
-    timeout_per_test: int = 1,
+    timeout_per_test: int = 5,
     memory_limit_mb: int = 512,
     data_source: str | None = None,
     extra_info: dict | None = None,
@@ -192,7 +192,7 @@ def _numeric_match(a: str, b: str, rel_tol: float = 1e-4) -> bool:
 def compute_score_binary(
     solution_str: str,
     ground_truth: str,
-    timeout_per_test: int = 1,
+    timeout_per_test: int = 5,
     memory_limit_mb: int = 512,
 ) -> float:
     """
@@ -208,7 +208,7 @@ def compute_score_binary(
 def compute_score_binary_train(
     solution_str: str,
     ground_truth: str,
-    timeout_per_test: int = 1,
+    timeout_per_test: int = 5,
     memory_limit_mb: int = 512,
     data_source: str | None = None,
     extra_info: dict | None = None,
@@ -229,10 +229,10 @@ def compute_score_binary_train(
 
 def compute_scores_batch_binary_train(
     reward_inputs: list[dict],
-    timeout_per_test: int = 1,
+    timeout_per_test: int = 5,
     memory_limit_mb: int = 512,
     num_workers: int | None = None,
-    global_timeout: int = 15,
+    global_timeout: int = 60,
 ) -> list[dict]:
     """Batch binary rewards: binarizes the output of compute_scores_batch."""
     results = compute_scores_batch(
@@ -279,10 +279,10 @@ def _run_completion(task: tuple) -> tuple:
 
 def compute_scores_batch(
     reward_inputs: list[dict],
-    timeout_per_test: int = 1,
+    timeout_per_test: int = 5,
     memory_limit_mb: int = 512,
     num_workers: int | None = None,
-    global_timeout: int = 15,
+    global_timeout: int = 60,
 ) -> list[dict]:
     """Compute rewards for all completions with three compounding optimizations.
 

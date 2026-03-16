@@ -762,11 +762,18 @@ class RayPPOTrainer:
 
         for pass_idx in range(n_passes):
             print(f"  Pass {pass_idx + 1}/{n_passes}...")
+
+            # Collect ALL eval batches into one large batch per pass to minimize
+            # the number of generate_sequences calls (each call has expensive
+            # FSDP weight-sync + vLLM wake/sleep overhead).
+            all_gen_batches = []
+            batch_sizes = []
             global_problem_idx = 0
 
             for eval_data in eval_dataloader:
                 eval_batch = DataProto.from_single_dict(eval_data)
                 batch_size = len(eval_batch)
+                batch_sizes.append(batch_size)
 
                 # Extract ground_truths (only on first pass)
                 if pass_idx == 0:
@@ -791,41 +798,46 @@ class RayPPOTrainer:
                     batch_keys=batch_keys_to_pop,
                     non_tensor_batch_keys=non_tensor_batch_keys_to_pop,
                 )
+                all_gen_batches.append(gen_batch)
+                global_problem_idx += batch_size
 
-                gen_batch.meta_info = {
-                    "eos_token_id": self.tokenizer.eos_token_id,
-                    "pad_token_id": self.tokenizer.pad_token_id,
-                    "recompute_log_prob": False,
-                    "do_sample": True,
-                    "validate": True,  # uses val_kwargs temperature/top_p
-                }
+            # Concatenate all batches into one large batch
+            full_gen_batch = DataProto.concat(all_gen_batches)
+            full_gen_batch.meta_info = {
+                "eos_token_id": self.tokenizer.eos_token_id,
+                "pad_token_id": self.tokenizer.pad_token_id,
+                "recompute_log_prob": False,
+                "do_sample": True,
+                "validate": True,  # uses val_kwargs temperature/top_p
+            }
 
-                # Pad to be divisible by dp_size
-                gen_batch_padded, pad_size = pad_dataproto_to_divisor(gen_batch, self.actor_rollout_wg.world_size)
+            # Single generate_sequences call for entire pass (1 wake/sleep cycle)
+            gen_batch_padded, pad_size = pad_dataproto_to_divisor(full_gen_batch, self.actor_rollout_wg.world_size)
 
-                if not self.async_rollout_mode:
-                    gen_output_padded = self.actor_rollout_wg.generate_sequences(gen_batch_padded)
-                else:
-                    self.async_rollout_manager.wake_up()
-                    gen_output_padded = self.async_rollout_manager.generate_sequences(gen_batch_padded)
-                    self.async_rollout_manager.sleep()
+            if not self.async_rollout_mode:
+                gen_output_padded = self.actor_rollout_wg.generate_sequences(gen_batch_padded)
+            else:
+                self.async_rollout_manager.wake_up()
+                gen_output_padded = self.async_rollout_manager.generate_sequences(gen_batch_padded)
+                self.async_rollout_manager.sleep()
 
-                gen_output = unpad_dataproto(gen_output_padded, pad_size=pad_size)
+            gen_output = unpad_dataproto(gen_output_padded, pad_size=pad_size)
 
-                # Decode responses and group by problem index
-                # Use skip_special_tokens=False to preserve <think></think> markers
-                # for reasoning models; trim padding via attention_mask
-                response_ids = gen_output.batch["responses"]
-                attention_mask = gen_output.batch["attention_mask"]
-                prompt_length = gen_output.batch["prompts"].shape[-1]
-                for i in range(len(response_ids)):
+            # Decode responses and group by problem index
+            response_ids = gen_output.batch["responses"]
+            attention_mask = gen_output.batch["attention_mask"]
+            prompt_length = gen_output.batch["prompts"].shape[-1]
+            global_problem_idx = 0
+            seq_idx = 0
+            for bs in batch_sizes:
+                for i in range(bs * n_per_pass):
                     problem_idx = global_problem_idx + (i // n_per_pass)
-                    valid_len = int(attention_mask[i, prompt_length:].sum())
-                    valid_ids = response_ids[i, :valid_len]
+                    valid_len = int(attention_mask[seq_idx, prompt_length:].sum())
+                    valid_ids = response_ids[seq_idx, :valid_len]
                     text = self.tokenizer.decode(valid_ids, skip_special_tokens=False)
                     problem_completions[problem_idx].append(text)
-
-                global_problem_idx += batch_size
+                    seq_idx += 1
+                global_problem_idx += bs
 
             # Free GPU cache between passes to avoid OOM
             gc.collect()
@@ -1087,7 +1099,9 @@ class RayPPOTrainer:
                 all_eval_metrics.update(self._insitu_eval())
             for name, dl in self.extra_eval_dataloaders.items():
                 extra_out_dir = os.path.join(self.config.trainer.default_local_dir, f"eval_{name}")
-                all_eval_metrics.update(self._insitu_eval(eval_dataloader=dl, eval_name=name, output_dir_override=extra_out_dir))
+                extra_metrics = self._insitu_eval(eval_dataloader=dl, eval_name=name, output_dir_override=extra_out_dir)
+                if extra_metrics:
+                    all_eval_metrics.update(extra_metrics)
             if all_eval_metrics:
                 logger.log(data=all_eval_metrics, step=self.global_steps)
 

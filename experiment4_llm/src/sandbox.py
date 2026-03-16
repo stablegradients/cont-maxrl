@@ -21,9 +21,9 @@ import sys
 import tempfile
 
 
-DEFAULT_TIMEOUT = 1  # seconds per test case
+DEFAULT_TIMEOUT = 5  # seconds per test case (large I/O needs time to parse)
 DEFAULT_MEMORY_MB = 512
-DEFAULT_GLOBAL_TIMEOUT = 15  # hard cap per completion
+DEFAULT_GLOBAL_TIMEOUT = 60  # hard cap per completion (covers many large tests)
 
 # Runner script templates. These are top-level strings (no indentation issues).
 # They read the user code and input from files passed as argv[1] and argv[2].

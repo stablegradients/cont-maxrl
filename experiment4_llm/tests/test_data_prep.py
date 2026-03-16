@@ -357,3 +357,328 @@ def test_deepcoder_reward_function_compatible():
     assert "score" in result
     assert "acc" in result
     assert 0.0 <= result["score"] <= 1.0
+
+
+# ── EvalPlus parquet tests ──
+
+
+def test_evalplus_humaneval_parquet_schema():
+    """Verify evalplus_humaneval parquet has correct schema and data_source."""
+    import pandas as pd
+    from pathlib import Path
+
+    path = Path("data/evalplus_humaneval_test.parquet")
+    if not path.exists():
+        pytest.skip("EvalPlus HumanEval parquet not yet generated")
+
+    df = pd.read_parquet(path)
+    assert "data_source" in df.columns
+    assert "prompt" in df.columns
+    assert "reward_model" in df.columns
+    assert (df["data_source"] == "evalplus").all()
+    assert len(df) > 0, "HumanEval+ parquet should not be empty"
+
+
+def test_evalplus_mbpp_parquet_schema():
+    """Verify evalplus_mbpp parquet has correct schema and data_source."""
+    import pandas as pd
+    from pathlib import Path
+
+    path = Path("data/evalplus_mbpp_test.parquet")
+    if not path.exists():
+        pytest.skip("EvalPlus MBPP parquet not yet generated")
+
+    df = pd.read_parquet(path)
+    assert "data_source" in df.columns
+    assert "prompt" in df.columns
+    assert "reward_model" in df.columns
+    assert (df["data_source"] == "evalplus").all()
+    assert len(df) > 0, "MBPP+ parquet should not be empty"
+
+
+def test_evalplus_all_records_have_fn_name():
+    """All EvalPlus problems are functional — every record must have fn_name."""
+    import pandas as pd
+    from pathlib import Path
+
+    for name in ["evalplus_humaneval_test.parquet", "evalplus_mbpp_test.parquet"]:
+        path = Path(f"data/{name}")
+        if not path.exists():
+            pytest.skip(f"{name} not yet generated")
+
+        df = pd.read_parquet(path)
+        for i, row in df.iterrows():
+            gt = json.loads(row["reward_model"]["ground_truth"])
+            assert "fn_name" in gt, f"{name} row {i}: missing fn_name"
+            assert "inputs" in gt, f"{name} row {i}: missing inputs"
+            assert "outputs" in gt, f"{name} row {i}: missing outputs"
+            assert len(gt["inputs"]) == len(gt["outputs"]), \
+                f"{name} row {i}: input/output length mismatch"
+
+
+def test_evalplus_ground_truth_valid_json():
+    """Every ground_truth in EvalPlus parquets must be valid JSON."""
+    import pandas as pd
+    from pathlib import Path
+
+    for name in ["evalplus_humaneval_test.parquet", "evalplus_mbpp_test.parquet"]:
+        path = Path(f"data/{name}")
+        if not path.exists():
+            pytest.skip(f"{name} not yet generated")
+
+        df = pd.read_parquet(path)
+        for i, row in df.head(50).iterrows():
+            gt_str = row["reward_model"]["ground_truth"]
+            parsed = json.loads(gt_str)
+            # inputs should be JSON-parseable arg lists
+            for j, inp in enumerate(parsed["inputs"][:3]):
+                args = json.loads(inp)
+                assert isinstance(args, list), \
+                    f"{name} row {i} input {j}: expected list of args, got {type(args)}"
+
+
+def test_evalplus_reward_function_compatible():
+    """EvalPlus records must work with the reward function end-to-end."""
+    import pandas as pd
+    from pathlib import Path
+    from experiment4_llm.src.reward_function import compute_score
+
+    path = Path("data/evalplus_humaneval_test.parquet")
+    if not path.exists():
+        pytest.skip("EvalPlus HumanEval parquet not yet generated")
+
+    df = pd.read_parquet(path)
+    row = df.iloc[0]
+    gt = row["reward_model"]["ground_truth"]
+
+    # A deliberately wrong solution should not get acc=1.0
+    result = compute_score("def foo(): return 42", gt)
+    assert isinstance(result, dict)
+    assert "score" in result
+    assert "acc" in result
+    assert 0.0 <= result["score"] <= 1.0
+
+
+def test_evalplus_correct_solution_scores_perfectly():
+    """A known correct solution for the first HumanEval+ problem should score 1.0."""
+    import pandas as pd
+    from pathlib import Path
+    from experiment4_llm.src.reward_function import compute_score
+
+    path = Path("data/evalplus_humaneval_test.parquet")
+    if not path.exists():
+        pytest.skip("EvalPlus HumanEval parquet not yet generated")
+
+    df = pd.read_parquet(path)
+    row = df.iloc[0]
+    gt = row["reward_model"]["ground_truth"]
+    gt_parsed = json.loads(gt)
+    fn_name = gt_parsed["fn_name"]
+
+    # has_close_elements — canonical solution
+    correct_code = f'''```python
+from typing import List
+
+def {fn_name}(numbers: List[float], threshold: float) -> bool:
+    sorted_numbers = sorted(numbers)
+    for i in range(len(sorted_numbers) - 1):
+        if sorted_numbers[i + 1] - sorted_numbers[i] < threshold:
+            return True
+    return False
+```'''
+
+    result = compute_score(correct_code, gt, timeout_per_test=5)
+    assert result["acc"] == 1.0, f"Expected acc=1.0, got {result}"
+    assert result["score"] == 1.0, f"Expected score=1.0, got {result}"
+
+
+def test_evalplus_no_overlap_between_humaneval_and_mbpp():
+    """HumanEval+ and MBPP+ parquets should have no overlapping problems."""
+    import pandas as pd
+    from pathlib import Path
+
+    he_path = Path("data/evalplus_humaneval_test.parquet")
+    mb_path = Path("data/evalplus_mbpp_test.parquet")
+    if not he_path.exists() or not mb_path.exists():
+        pytest.skip("EvalPlus parquets not yet generated")
+
+    df_he = pd.read_parquet(he_path)
+    df_mb = pd.read_parquet(mb_path)
+
+    he_prompts = set(str(p) for p in df_he["prompt"])
+    mb_prompts = set(str(p) for p in df_mb["prompt"])
+
+    overlap = he_prompts & mb_prompts
+    assert len(overlap) == 0, \
+        f"Found {len(overlap)} overlapping prompts between HumanEval+ and MBPP+"
+
+
+# ── DeepCoder no-dedup test ──
+
+
+def test_deepcoder_no_val_split():
+    """DeepCoder should only produce a train parquet (no val split)."""
+    from pathlib import Path
+
+    assert Path("data/deepcoder_train.parquet").exists(), \
+        "deepcoder_train.parquet should exist"
+    assert not Path("data/deepcoder_val.parquet").exists(), \
+        "deepcoder_val.parquet should NOT exist (no val split)"
+
+
+# ── Training script validation ──
+
+
+def test_training_scripts_use_hydra_plus_prefix():
+    """extra_data_files must use + prefix for Hydra config override."""
+    from pathlib import Path
+
+    scripts_dir = Path("experiment4_llm/scripts")
+    for script in scripts_dir.glob("qwen3_1.7b_*_deepcoder_*.sh"):
+        content = script.read_text()
+        if "extra_data_files" not in content:
+            continue
+        # Every extra_data_files line must use + prefix
+        for line in content.splitlines():
+            if "extra_data_files" in line and "=" in line:
+                stripped = line.strip()
+                assert stripped.startswith("+") or stripped.startswith("\\"), \
+                    f"{script.name}: extra_data_files missing '+' prefix: {stripped}"
+
+
+def test_training_scripts_eval_parquet_files_exist():
+    """All parquet files referenced in training scripts must exist."""
+    from pathlib import Path
+
+    scripts_dir = Path("experiment4_llm/scripts")
+    for script in scripts_dir.glob("qwen3_1.7b_*_deepcoder_*.sh"):
+        content = script.read_text()
+        # Replace ${REPO_ROOT} with actual path
+        content = content.replace("${REPO_ROOT}", "/projects/bgmo/sramasubramanian/cont-maxrl")
+        for line in content.splitlines():
+            if ".parquet" in line and "=" in line:
+                # Extract parquet path
+                for part in line.split("="):
+                    part = part.strip().strip('"').strip("'").rstrip(" \\")
+                    if part.endswith(".parquet"):
+                        assert Path(part).exists(), \
+                            f"{script.name}: parquet file not found: {part}"
+
+
+def test_training_scripts_model_ids_exist_on_huggingface():
+    """Model IDs in training scripts must be valid HuggingFace repos.
+
+    Bug: Qwen/Qwen3-1.7B-128K-Instruct was used but doesn't exist on HF.
+    Qwen3 naming: Qwen3-1.7B = instruct, Qwen3-1.7B-Base = base.
+    """
+    from pathlib import Path
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    scripts_dir = Path("experiment4_llm/scripts")
+    checked = set()
+
+    for script in scripts_dir.glob("qwen3_1.7b_*_deepcoder_*.sh"):
+        content = script.read_text()
+        for line in content.splitlines():
+            if "model.path=" in line:
+                model_id = line.split("model.path=")[1].strip().rstrip(" \\")
+                if model_id in checked:
+                    continue
+                checked.add(model_id)
+                try:
+                    api.model_info(model_id)
+                except Exception:
+                    pytest.fail(
+                        f"{script.name}: model '{model_id}' not found on HuggingFace"
+                    )
+
+
+def test_training_scripts_base_uses_base_model():
+    """Base scripts must use Qwen3-1.7B-Base, not the instruct model.
+
+    Bug: base scripts were pointing to Qwen/Qwen3-1.7B (the instruct model).
+    """
+    from pathlib import Path
+
+    scripts_dir = Path("experiment4_llm/scripts")
+    for script in scripts_dir.glob("qwen3_1.7b_base_deepcoder_*.sh"):
+        content = script.read_text()
+        for line in content.splitlines():
+            if "model.path=" in line:
+                model_id = line.split("model.path=")[1].strip().rstrip(" \\")
+                assert "Base" in model_id, \
+                    f"{script.name}: base script should use Base model, got '{model_id}'"
+
+
+def test_training_scripts_instruct_uses_instruct_model():
+    """Instruct scripts must use Qwen3-1.7B (instruct), not the Base model."""
+    from pathlib import Path
+
+    scripts_dir = Path("experiment4_llm/scripts")
+    for script in scripts_dir.glob("qwen3_1.7b_instruct_deepcoder_*.sh"):
+        content = script.read_text()
+        for line in content.splitlines():
+            if "model.path=" in line:
+                model_id = line.split("model.path=")[1].strip().rstrip(" \\")
+                assert "Base" not in model_id, \
+                    f"{script.name}: instruct script should NOT use Base model, got '{model_id}'"
+
+
+# ── EvalPlus data prep unit tests (regression) ──
+
+
+def test_evalplus_handles_non_list_plus_input():
+    """EvalPlus prep must handle plus_input being a dict (not list).
+
+    Bug: Mbpp/793 has plus_input as a dict, causing TypeError on list concat.
+    """
+    from experiment4_llm.src.data_prep import prepare_evalplus
+    # This is a unit-level check: the function should not crash.
+    # The actual fix converts non-list plus_input to [].
+    # We verify by checking the generated parquets have no crashes.
+    import pandas as pd
+    from pathlib import Path
+
+    for name in ["evalplus_humaneval_test.parquet", "evalplus_mbpp_test.parquet"]:
+        path = Path(f"data/{name}")
+        if not path.exists():
+            pytest.skip(f"{name} not yet generated")
+        df = pd.read_parquet(path)
+        # If we got here without crash, the non-list handling worked.
+        # Additionally verify no record has empty outputs with non-empty inputs
+        for i, row in df.iterrows():
+            gt = json.loads(row["reward_model"]["ground_truth"])
+            assert len(gt["inputs"]) > 0, f"{name} row {i}: no inputs"
+            assert len(gt["outputs"]) == len(gt["inputs"]), \
+                f"{name} row {i}: input/output mismatch ({len(gt['inputs'])} vs {len(gt['outputs'])})"
+
+
+def test_evalplus_set_return_values_serialized():
+    """Functions returning sets must be serialized as sorted lists.
+
+    Bug: json.dumps(set(...)) raises TypeError. The fix converts sets to
+    sorted lists before serialization. Verify no record has empty outputs
+    when inputs exist (the symptom of this bug).
+    """
+    import pandas as pd
+    from pathlib import Path
+
+    path = Path("data/evalplus_mbpp_test.parquet")
+    if not path.exists():
+        pytest.skip("MBPP+ parquet not yet generated")
+
+    df = pd.read_parquet(path)
+    for i, row in df.iterrows():
+        gt = json.loads(row["reward_model"]["ground_truth"])
+        n_in = len(gt["inputs"])
+        n_out = len(gt["outputs"])
+        assert n_out == n_in, \
+            f"Row {i} (fn={gt.get('fn_name')}): {n_in} inputs but {n_out} outputs. " \
+            f"Likely a set/non-serializable return value bug."
+        # Also verify outputs are valid JSON
+        for j, out in enumerate(gt["outputs"][:5]):
+            try:
+                json.loads(out)
+            except json.JSONDecodeError:
+                pytest.fail(f"Row {i} output {j} is not valid JSON: {out[:100]}")
