@@ -277,18 +277,16 @@ def test_deepcoder_parquet_schema():
     from pathlib import Path
 
     train_path = Path("data/deepcoder_train.parquet")
-    val_path = Path("data/deepcoder_val.parquet")
 
-    if not train_path.exists() or not val_path.exists():
+    if not train_path.exists():
         pytest.skip("DeepCoder parquet files not yet generated")
 
-    for path in [train_path, val_path]:
-        df = pd.read_parquet(path)
-        assert "data_source" in df.columns
-        assert "prompt" in df.columns
-        assert "reward_model" in df.columns
-        assert (df["data_source"] == "deepcoder").all(), \
-            f"data_source should be 'deepcoder', got {df['data_source'].unique()}"
+    df = pd.read_parquet(train_path)
+    assert "data_source" in df.columns
+    assert "prompt" in df.columns
+    assert "reward_model" in df.columns
+    assert (df["data_source"] == "deepcoder").all(), \
+        f"data_source should be 'deepcoder', got {df['data_source'].unique()}"
 
 
 def test_deepcoder_ground_truth_valid_json():
@@ -318,24 +316,20 @@ def test_deepcoder_no_livecodebench_contamination():
     from pathlib import Path
 
     train_path = Path("data/deepcoder_train.parquet")
-    val_path = Path("data/deepcoder_val.parquet")
     lcb_path = Path("data/livecodebench_test.parquet")
 
-    if not all(p.exists() for p in [train_path, val_path, lcb_path]):
+    if not all(p.exists() for p in [train_path, lcb_path]):
         pytest.skip("Required parquet files not yet generated")
 
     df_train = pd.read_parquet(train_path)
-    df_val = pd.read_parquet(val_path)
     df_lcb = pd.read_parquet(lcb_path)
 
     assert (df_train["data_source"] == "deepcoder").all()
-    assert (df_val["data_source"] == "deepcoder").all()
     assert (df_lcb["data_source"] == "livecodebench").all()
 
     # No deepcoder record should have data_source == "livecodebench"
     # (This is guaranteed by construction, but verify explicitly)
-    dc_prompts = set(str(p) for p in df_train["prompt"]) | \
-                 set(str(p) for p in df_val["prompt"])
+    dc_prompts = set(str(p) for p in df_train["prompt"])
     lcb_prompts = set(str(p) for p in df_lcb["prompt"])
 
     overlap = dc_prompts & lcb_prompts

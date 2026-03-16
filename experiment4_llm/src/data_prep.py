@@ -604,6 +604,7 @@ def prepare_deepcoder(
     hf_cache_dir: str | None = None,
     val_fraction: float = 0.1,
     seed: int = 42,
+    deduplicate: bool = False,
 ) -> dict[str, int]:
     """Download and prepare DeepCoder dataset (minus LCB subset) as parquet.
 
@@ -700,40 +701,36 @@ def prepare_deepcoder(
     n_pi = len(records) - n_before_pi
     print(f"  primeintellect: {n_pi} problems")
 
-    # Deduplicate by prompt text AND by ground truth (test cases).
+    # Optionally deduplicate by prompt text AND by ground truth (test cases).
     # The taco and primeintellect configs can describe the same problem
     # with different wording, so we dedup by both to be safe.
-    seen_prompts = set()
-    seen_ground_truths = set()
-    unique_records = []
-    for r in records:
-        prompt_key = json.dumps(r["prompt"], sort_keys=True)
-        gt_key = r["reward_model"]["ground_truth"]
-        if prompt_key not in seen_prompts and gt_key not in seen_ground_truths:
-            seen_prompts.add(prompt_key)
-            seen_ground_truths.add(gt_key)
-            unique_records.append(r)
-    n_dedup = len(records) - len(unique_records)
-    if n_dedup:
-        print(f"  Removed {n_dedup} duplicates by prompt+ground_truth ({len(records)} -> {len(unique_records)})")
-    records = unique_records
+    # Disabled by default to keep parity with other papers using DeepCoder.
+    if deduplicate:
+        seen_prompts = set()
+        seen_ground_truths = set()
+        unique_records = []
+        for r in records:
+            prompt_key = json.dumps(r["prompt"], sort_keys=True)
+            gt_key = r["reward_model"]["ground_truth"]
+            if prompt_key not in seen_prompts and gt_key not in seen_ground_truths:
+                seen_prompts.add(prompt_key)
+                seen_ground_truths.add(gt_key)
+                unique_records.append(r)
+        n_dedup = len(records) - len(unique_records)
+        if n_dedup:
+            print(f"  Removed {n_dedup} duplicates by prompt+ground_truth ({len(records)} -> {len(unique_records)})")
+        records = unique_records
 
-    # Split into train/val
+    # Write single combined train set (no val split — matches original DeepCoder)
     rng = random.Random(seed)
     rng.shuffle(records)
-    n_val = max(1, int(len(records) * val_fraction))
-    val_records = records[:n_val]
-    train_records = records[n_val:]
 
     train_path = Path(output_dir) / "deepcoder_train.parquet"
-    val_path = Path(output_dir) / "deepcoder_val.parquet"
-    write_parquet(train_records, train_path)
-    write_parquet(val_records, val_path)
+    write_parquet(records, train_path)
 
-    stats = {"train": len(train_records), "val": len(val_records)}
+    stats = {"train": len(records)}
     print(
-        f"  train: {len(train_records)} problems written to {train_path}"
-        f"\n  val: {len(val_records)} problems written to {val_path}"
+        f"  train: {len(records)} problems written to {train_path}"
         f"\n  (skipped: {skipped_tests} too few tests, {skipped_parse} parse errors)"
         f"\n  NOTE: lcbv5 config excluded to avoid LiveCodeBench contamination"
     )
@@ -741,9 +738,102 @@ def prepare_deepcoder(
     return stats
 
 
+# ── EvalPlus (HumanEval+ & MBPP+) ──
+
+
+def prepare_evalplus(
+    output_dir: str,
+    max_tests: int = 50,
+) -> dict[str, int]:
+    """Download and prepare EvalPlus (HumanEval+ & MBPP+) as parquet (eval-only).
+
+    Uses the evalplus package to get problems with base + plus test inputs,
+    runs the canonical solution to compute expected outputs.
+    """
+    from evalplus.data import get_human_eval_plus, get_mbpp_plus
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    records = []
+    skipped = 0
+
+    for dataset_name, get_fn in [("humaneval", get_human_eval_plus),
+                                  ("mbpp", get_mbpp_plus)]:
+        problems = get_fn()
+        print(f"  {dataset_name}+: {len(problems)} problems")
+
+        for task_id, problem in problems.items():
+            entry_point = problem["entry_point"]
+            prompt_code = problem["prompt"]
+            canonical = problem["canonical_solution"]
+
+            # Combine base + plus inputs
+            base = problem.get("base_input", [])
+            plus = problem.get("plus_input", [])
+            if not isinstance(base, list):
+                base = []
+            if not isinstance(plus, list):
+                plus = []
+            all_inputs = base + plus
+            if not all_inputs:
+                skipped += 1
+                continue
+
+            # Run canonical solution to get expected outputs
+            full_code = prompt_code + canonical
+            namespace = {}
+            try:
+                exec(full_code, namespace)
+            except Exception:
+                skipped += 1
+                continue
+
+            fn = namespace.get(entry_point)
+            if fn is None:
+                skipped += 1
+                continue
+
+            inputs = []
+            outputs = []
+            for args in all_inputs:
+                try:
+                    result = fn(*args)
+                    inputs.append(json.dumps(args))
+                    outputs.append(json.dumps(result))
+                except Exception:
+                    continue
+
+            if len(inputs) < 1:
+                skipped += 1
+                continue
+
+            # Format prompt — use the docstring-style prompt from evalplus
+            prompt_text = format_prompt(
+                f"Complete the following Python function:\n\n```python\n{prompt_code.strip()}\n```",
+                fn_name=entry_point,
+                starter_code=None,
+            )
+
+            test_cases = {"inputs": inputs, "outputs": outputs, "fn_name": entry_point}
+            record = make_record("evalplus", prompt_text, test_cases, max_tests)
+            if record is not None:
+                records.append(record)
+
+    output_path = Path(output_dir) / "evalplus_test.parquet"
+    write_parquet(records, output_path)
+
+    stats = {"test": len(records)}
+    print(
+        f"  total: {len(records)} problems written to {output_path}"
+        f" (skipped: {skipped})"
+    )
+
+    return stats
+
+
 # ── CLI ──
 
-ALL_DATASETS = ["apps", "taco", "code_contests", "livecodebench", "deepcoder"]
+ALL_DATASETS = ["apps", "taco", "code_contests", "livecodebench", "deepcoder", "evalplus"]
 
 PREPARE_FNS = {
     "apps": prepare_apps,
@@ -751,6 +841,7 @@ PREPARE_FNS = {
     "code_contests": prepare_code_contests,
     "livecodebench": prepare_livecodebench,
     "deepcoder": prepare_deepcoder,
+    "evalplus": prepare_evalplus,
 }
 
 
@@ -840,6 +931,11 @@ def main():
                 min_tests=args.min_tests,
                 max_tests=args.max_tests,
                 hf_cache_dir=args.hf_cache_dir,
+            )
+        elif ds_name == "evalplus":
+            stats = prepare_evalplus(
+                output_dir=args.output_dir,
+                max_tests=args.max_tests,
             )
         else:
             print(f"Unknown dataset: {ds_name}")

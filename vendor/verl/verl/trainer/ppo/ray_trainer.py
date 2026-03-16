@@ -301,6 +301,7 @@ class RayPPOTrainer:
         train_dataset: Optional[Dataset] = None,
         val_dataset: Optional[Dataset] = None,
         eval_dataset: Optional[Dataset] = None,
+        extra_eval_datasets: Optional[dict] = None,
         collate_fn=None,
         train_sampler: Optional[Sampler] = None,
     ):
@@ -347,7 +348,8 @@ class RayPPOTrainer:
             raise NotImplementedError
 
         self._validate_config()
-        self._create_dataloader(train_dataset, val_dataset, collate_fn, train_sampler, eval_dataset=eval_dataset)
+        self._create_dataloader(train_dataset, val_dataset, collate_fn, train_sampler,
+                                eval_dataset=eval_dataset, extra_eval_datasets=extra_eval_datasets)
 
     def _validate_config(self):
         config = self.config
@@ -462,7 +464,7 @@ class RayPPOTrainer:
 
         print("[validate_config] All configuration checks passed successfully!")
 
-    def _create_dataloader(self, train_dataset, val_dataset, collate_fn, train_sampler, eval_dataset=None):
+    def _create_dataloader(self, train_dataset, val_dataset, collate_fn, train_sampler, eval_dataset=None, extra_eval_datasets=None):
         """
         Creates the train, validation, and optional eval dataloaders.
         """
@@ -518,6 +520,22 @@ class RayPPOTrainer:
                 collate_fn=collate_fn,
             )
             print(f"Size of eval dataloader: {len(self.eval_dataloader)} ({len(eval_dataset)} problems, batch_size={eval_batch_size})")
+
+        # Extra eval dataloaders (e.g., evalplus)
+        self.extra_eval_dataloaders = {}
+        if extra_eval_datasets:
+            eval_batch_size = self.config.get("insitu_eval", {}).get("eval_batch_size", 16)
+            for name, ds in extra_eval_datasets.items():
+                dl = StatefulDataLoader(
+                    dataset=ds,
+                    batch_size=eval_batch_size,
+                    num_workers=self.config.data.get("dataloader_num_workers", 8),
+                    shuffle=False,
+                    drop_last=False,
+                    collate_fn=collate_fn,
+                )
+                self.extra_eval_dataloaders[name] = dl
+                print(f"Size of extra eval dataloader '{name}': {len(dl)} ({len(ds)} problems, batch_size={eval_batch_size})")
 
         assert len(self.train_dataloader) >= 1, "Train dataloader is empty!"
         assert len(self.val_dataloader) >= 1, "Validation dataloader is empty!"
@@ -704,7 +722,7 @@ class RayPPOTrainer:
 
         return metric_dict
 
-    def _insitu_eval(self):
+    def _insitu_eval(self, eval_dataloader=None, eval_name=None, output_dir_override=None):
         """Run full in-situ evaluation (e.g., LiveCodeBench pass@k with 200 completions).
 
         Uses the existing rollout engine to generate completions in multiple passes,
@@ -714,20 +732,26 @@ class RayPPOTrainer:
         from collections import defaultdict
 
         eval_config = self.config.get("insitu_eval", None)
-        if eval_config is None or self.eval_dataloader is None:
+        if eval_config is None:
+            return {}
+
+        if eval_dataloader is None:
+            eval_dataloader = self.eval_dataloader
+        if eval_dataloader is None:
             return {}
 
         steps_per_epoch = eval_config.get("steps_per_epoch", 180)
         n_target = eval_config.get("n_completions", 200)
         n_per_pass = self.config.actor_rollout_ref.rollout.val_kwargs.n  # e.g. 16
         n_passes = math.ceil(n_target / n_per_pass)
-        output_dir = eval_config.get("output_dir",
-                                     os.path.join(self.config.trainer.default_local_dir, "eval_livecodebench"))
+        output_dir = output_dir_override or eval_config.get(
+            "output_dir", os.path.join(self.config.trainer.default_local_dir, "eval_livecodebench"))
         epoch = round(self.global_steps / steps_per_epoch)
         n_workers = int(os.environ.get("VERL_REWARD_WORKERS", 128))
+        label = eval_name or "livecodebench"
 
         print(f"\n{'='*60}")
-        print(f"In-situ eval: epoch {epoch}, step {self.global_steps}")
+        print(f"In-situ eval [{label}]: epoch {epoch}, step {self.global_steps}")
         print(f"  n_target={n_target}, n_per_pass={n_per_pass}, n_passes={n_passes}")
         print(f"{'='*60}")
 
@@ -740,7 +764,7 @@ class RayPPOTrainer:
             print(f"  Pass {pass_idx + 1}/{n_passes}...")
             global_problem_idx = 0
 
-            for eval_data in self.eval_dataloader:
+            for eval_data in eval_dataloader:
                 eval_batch = DataProto.from_single_dict(eval_data)
                 batch_size = len(eval_batch)
 
@@ -835,14 +859,15 @@ class RayPPOTrainer:
 
         # Return pass@k as trainer metrics for W&B logging
         metric_dict = {}
+        prefix = f"insitu_eval/{label}" if label != "livecodebench" else "insitu_eval"
         pass_at_k = metrics.get("pass_at_k", {})
         for k, v in pass_at_k.items():
             if v is not None:
-                metric_dict[f"insitu_eval/pass_at_{k}"] = v
+                metric_dict[f"{prefix}/pass_at_{k}"] = v
         summary = metrics.get("summary", {})
         for key in ["mean_score", "mean_pass_rate", "mean_unique_solution_rate", "mean_output_length"]:
             if key in summary:
-                metric_dict[f"insitu_eval/{key}"] = summary[key]
+                metric_dict[f"{prefix}/{key}"] = summary[key]
 
         return metric_dict
 
@@ -1056,10 +1081,15 @@ class RayPPOTrainer:
         # In-situ eval at epoch 0 (before training) if configured
         insitu_eval_config = self.config.get("insitu_eval", None)
         insitu_eval_steps = set(insitu_eval_config.get("eval_steps", [])) if insitu_eval_config else set()
-        if 0 in insitu_eval_steps and self.eval_dataloader is not None and self.global_steps == 0:
-            eval_metrics = self._insitu_eval()
-            if eval_metrics:
-                logger.log(data=eval_metrics, step=self.global_steps)
+        if 0 in insitu_eval_steps and self.global_steps == 0:
+            all_eval_metrics = {}
+            if self.eval_dataloader is not None:
+                all_eval_metrics.update(self._insitu_eval())
+            for name, dl in self.extra_eval_dataloaders.items():
+                extra_out_dir = os.path.join(self.config.trainer.default_local_dir, f"eval_{name}")
+                all_eval_metrics.update(self._insitu_eval(eval_dataloader=dl, eval_name=name, output_dir_override=extra_out_dir))
+            if all_eval_metrics:
+                logger.log(data=all_eval_metrics, step=self.global_steps)
 
         # add tqdm
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
@@ -1273,11 +1303,18 @@ class RayPPOTrainer:
                             self._save_checkpoint()
 
                     # In-situ eval at configured steps (e.g., every 5 epochs)
-                    if self.eval_dataloader is not None and self.global_steps in insitu_eval_steps:
-                        with _timer("insitu_eval", timing_raw):
-                            eval_metrics = self._insitu_eval()
-                        if eval_metrics:
-                            metrics.update(eval_metrics)
+                    if self.global_steps in insitu_eval_steps:
+                        if self.eval_dataloader is not None:
+                            with _timer("insitu_eval", timing_raw):
+                                eval_metrics = self._insitu_eval()
+                            if eval_metrics:
+                                metrics.update(eval_metrics)
+                        for name, dl in self.extra_eval_dataloaders.items():
+                            with _timer(f"insitu_eval_{name}", timing_raw):
+                                extra_out_dir = os.path.join(self.config.trainer.default_local_dir, f"eval_{name}")
+                                extra_metrics = self._insitu_eval(eval_dataloader=dl, eval_name=name, output_dir_override=extra_out_dir)
+                            if extra_metrics:
+                                metrics.update(extra_metrics)
 
                 # training metrics
                 metrics.update(

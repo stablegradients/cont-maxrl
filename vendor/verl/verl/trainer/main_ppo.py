@@ -166,8 +166,9 @@ class TaskRunner:
         val_dataset = create_rl_dataset(config.data.val_files, config.data, tokenizer, processor)
         train_sampler = create_rl_sampler(config.data, train_dataset)
 
-        # In-situ eval dataset (e.g., LiveCodeBench) if configured
+        # In-situ eval datasets if configured
         eval_dataset = None
+        extra_eval_datasets = {}
         insitu_eval_config = config.get("insitu_eval", None)
         if insitu_eval_config is not None:
             eval_data_file = insitu_eval_config.get("data_file", None)
@@ -175,6 +176,13 @@ class TaskRunner:
                 print(f"Loading in-situ eval dataset from {eval_data_file}")
                 eval_dataset = create_rl_dataset(eval_data_file, config.data, tokenizer, processor)
                 print(f"In-situ eval dataset: {len(eval_dataset)} problems")
+            # Load extra eval datasets (e.g., evalplus)
+            extra_data_files = insitu_eval_config.get("extra_data_files", {})
+            if isinstance(extra_data_files, dict):
+                for name, path in extra_data_files.items():
+                    print(f"Loading extra eval dataset '{name}' from {path}")
+                    extra_eval_datasets[name] = create_rl_dataset(path, config.data, tokenizer, processor)
+                    print(f"  Extra eval dataset '{name}': {len(extra_eval_datasets[name])} problems")
 
         trainer = RayPPOTrainer(
             config=config,
@@ -188,6 +196,7 @@ class TaskRunner:
             train_dataset=train_dataset,
             val_dataset=val_dataset,
             eval_dataset=eval_dataset,
+            extra_eval_datasets=extra_eval_datasets,
             collate_fn=collate_fn,
             train_sampler=train_sampler,
         )
