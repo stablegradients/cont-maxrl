@@ -64,7 +64,7 @@ echo "=== Qwen3-1.7B Thinking Budget Sweep on LiveCodeBench ==="
 echo "Model: ${MODEL} (enable_thinking=True)"
 echo "GPUs: ${N_GPUS_TOTAL}"
 echo "Sweep: max_tokens = ${MAX_TOKENS_LIST[*]}"
-echo "Eval config: 50 completions, T=0.6, top_p=0.95, gpu_mem=0.93"
+echo "Eval config: 10 completions, T=0.6, top_p=0.95, gpu_mem=0.93"
 echo ""
 
 # Create per-GPU tmp dirs
@@ -91,17 +91,18 @@ run_eval_on_gpu() {
     --checkpoint_dir "${MODEL}" \
     --data_file "${DATA_FILE}" \
     --output_dir "${OUTPUT_DIR}" \
-    --n_completions 50 \
+    --n_completions 10 \
     --temperature 0.6 \
     --top_p 0.95 \
     --max_tokens "${MAX_TOKENS}" \
     --enable_thinking \
     --gpu_memory_utilization 0.93 \
-    --max_num_seqs 16 \
+    --max_num_seqs 256 \
+    --max_model_len "${MAX_TOKENS}" \
     --tensor_parallel_size 1 \
     --timeout_per_test 5 \
     --n_workers 64 \
-    --k_values 1 2 5 10 20 50 \
+    --k_values 1 10 \
     > "${LOG_FILE}" 2>&1
 
   echo "  GPU ${GPU_ID}: max_tokens=${MAX_TOKENS} done (see ${LOG_FILE})"
@@ -152,15 +153,15 @@ echo ""
 echo "============================================================"
 echo "Summary: Thinking Budget Sweep (Qwen3-1.7B, LiveCodeBench)"
 echo "============================================================"
-printf "%-15s  %10s  %10s  %10s  %10s  %10s  %10s\n" \
-  "max_tokens" "pass@1" "pass@10" "pass@100" "mean_score" "uniq_rate" "out_len"
-printf "%-15s  %10s  %10s  %10s  %10s  %10s  %10s\n" \
-  "----------" "------" "-------" "--------" "----------" "---------" "-------"
+printf "%-15s  %10s  %10s  %10s  %10s  %10s\n" \
+  "max_tokens" "pass@1" "pass@10" "mean_score" "uniq_rate" "out_len"
+printf "%-15s  %10s  %10s  %10s  %10s  %10s\n" \
+  "----------" "------" "-------" "----------" "---------" "-------"
 
 for MT in "${MAX_TOKENS_LIST[@]}"; do
   RESULT_FILE="${OUTPUT_BASE}/max_tokens_${MT}/eval_results.json"
   if [[ -f "${RESULT_FILE}" ]]; then
-    read -r P1 P10 P100 MS UR OL < <($PYTHON -c "
+    read -r P1 P10 MS UR OL < <($PYTHON -c "
 import json, sys
 d = json.load(open('${RESULT_FILE}'))
 pk = d['pass_at_k']
@@ -168,11 +169,11 @@ s = d.get('summary', {})
 fmt = lambda k: f\"{pk[str(k)]:.4f}\" if str(k) in pk and pk[str(k)] is not None else 'N/A'
 fmtv = lambda v: f\"{v:.4f}\" if v is not None else 'N/A'
 fmti = lambda v: f\"{v:.0f}\" if v is not None else 'N/A'
-print(fmt(1), fmt(10), fmt(100), fmtv(s.get('mean_score')), fmtv(s.get('mean_unique_solution_rate')), fmti(s.get('mean_output_length')))
-" 2>/dev/null || echo "ERR ERR ERR ERR ERR ERR")
-    printf "%-15s  %10s  %10s  %10s  %10s  %10s  %10s\n" "${MT}" "${P1}" "${P10}" "${P100}" "${MS}" "${UR}" "${OL}"
+print(fmt(1), fmt(10), fmtv(s.get('mean_score')), fmtv(s.get('mean_unique_solution_rate')), fmti(s.get('mean_output_length')))
+" 2>/dev/null || echo "ERR ERR ERR ERR ERR")
+    printf "%-15s  %10s  %10s  %10s  %10s  %10s\n" "${MT}" "${P1}" "${P10}" "${MS}" "${UR}" "${OL}"
   else
-    printf "%-15s  %10s  %10s  %10s  %10s  %10s  %10s\n" "${MT}" "MISSING" "MISSING" "MISSING" "MISSING" "MISSING" "MISSING"
+    printf "%-15s  %10s  %10s  %10s  %10s  %10s\n" "${MT}" "MISSING" "MISSING" "MISSING" "MISSING" "MISSING"
   fi
 done
 
@@ -209,7 +210,7 @@ fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
 # Panel 1: pass@k curves for each budget
 ax = axes[0]
-k_values = [1, 2, 5, 10, 20, 50]
+k_values = [1, 10]
 for mt in sorted(data.keys()):
     pk = data[mt]['pass_at_k']
     ks, vals = [], []
