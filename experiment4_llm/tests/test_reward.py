@@ -198,37 +198,33 @@ def test_function_call_with_bool_return():
     assert result["score"] == 1.0
 
 
-# ── Float tolerance (BUG R1-7) ──
+# ── Strict matching (official LCB: exact Decimal, no epsilon) ──
 
 
-def test_score_float_tolerance():
-    """Outputs differing only by float precision should match."""
-    code = "print(f'{1/3:.6f}')"  # prints "0.333333"
-    gt = _make_ground_truth([""], ["0.3333333333"])
-    result = compute_score(code, gt)
-    assert result["score"] == 1.0
+def test_stdio_match_exact_decimal():
+    """Exact Decimal comparison: 0 == 0.0 but 0.333333 != 0.3333333333."""
+    from experiment4_llm.src.reward_function import _stdio_match
+    # Exact Decimal equality
+    assert _stdio_match("0", "0.0")
+    assert _stdio_match("0.0", "0.000000")
+    assert not _stdio_match("0.0", "0.001")
+    # Different precision does NOT match (no epsilon tolerance)
+    assert not _stdio_match("0.333333", "0.3333333333")
 
 
-def test_numeric_match_multiline():
-    """Multi-line numeric output with slight precision differences."""
-    from experiment4_llm.src.reward_function import _numeric_match
-    assert _numeric_match("3.14159\n2.71828", "3.14159265\n2.71828182")
-    assert not _numeric_match("3.14\n2.71", "3.14\n9.99")
+def test_stdio_match_multiline():
+    """Multi-line: exact Decimal per line, no tolerance."""
+    from experiment4_llm.src.reward_function import _stdio_match
+    assert _stdio_match("3.14159\n2.71828", "3.14159\n2.71828")
+    assert not _stdio_match("3.14159\n2.71828", "3.14159265\n2.71828182")
+    assert not _stdio_match("3.14\n2.71", "3.14\n9.99")
 
 
-def test_numeric_match_zero():
-    """0.0 vs 0 should match; 0 vs nonzero should not."""
-    from experiment4_llm.src.reward_function import _numeric_match
-    assert _numeric_match("0", "0.0")
-    assert _numeric_match("0.0", "0.000000")
-    assert not _numeric_match("0.0", "0.001")
-
-
-def test_numeric_match_line_count_mismatch():
+def test_stdio_match_line_count_mismatch():
     """Different number of lines should not match."""
-    from experiment4_llm.src.reward_function import _numeric_match
-    assert not _numeric_match("1.0\n2.0", "1.0")
-    assert not _numeric_match("1.0", "1.0\n2.0")
+    from experiment4_llm.src.reward_function import _stdio_match
+    assert not _stdio_match("1.0\n2.0", "1.0")
+    assert not _stdio_match("1.0", "1.0\n2.0")
 
 
 # ── _outputs_match: independent JSON parsing & TACO unwrapping (BUG R2-1) ──
@@ -250,28 +246,27 @@ def test_outputs_match_one_side_json_other_not():
     assert _outputs_match("[1, 2, 3]", "[1, 2, 3]", fn_name="solve") is True
 
 
-def test_outputs_match_taco_list_wrapping():
-    """TACO wraps single return values in [result]. Should unwrap and compare."""
+def test_outputs_match_call_based_strict():
+    """Call-based: strict JSON == comparison, no TACO unwrapping."""
     from experiment4_llm.src.reward_function import _outputs_match
 
-    # Expected is [42], actual is 42
-    assert _outputs_match("42", "[42]", fn_name="solve") is True
-    # Expected is ["hello"], actual is "hello"
-    assert _outputs_match('"hello"', '["hello"]', fn_name="solve") is True
-    # Expected is [[1,2]], actual is [1,2]
-    assert _outputs_match("[1, 2]", "[[1, 2]]", fn_name="solve") is True
-    # Should NOT unwrap multi-element lists
-    assert _outputs_match("1", "[1, 2]", fn_name="solve") is False
+    # Same JSON values match
+    assert _outputs_match("[1, 2, 3]", "[1, 2, 3]", fn_name="solve") is True
+    assert _outputs_match("42", "42", fn_name="solve") is True
+    # Different structure does NOT match (no TACO unwrapping)
+    assert _outputs_match("42", "[42]", fn_name="solve") is False
+    assert _outputs_match("[1, 2]", "[[1, 2]]", fn_name="solve") is False
 
 
-def test_outputs_match_exact_string_no_fn_name():
-    """Without fn_name, only exact string or numeric match is used."""
+def test_outputs_match_stdio_no_fn_name():
+    """Without fn_name, uses stdio line-by-line comparison with exact Decimal."""
     from experiment4_llm.src.reward_function import _outputs_match
 
     assert _outputs_match("hello", "hello", fn_name=None) is True
     assert _outputs_match("hello", "world", fn_name=None) is False
-    # Numeric match still works without fn_name
-    assert _outputs_match("3.14159", "3.14159265", fn_name=None) is True
+    # Exact Decimal: same value matches, different precision does NOT
+    assert _outputs_match("3.14159", "3.14159", fn_name=None) is True
+    assert _outputs_match("3.14159", "3.14159265", fn_name=None) is False
 
 
 def test_outputs_match_json_semantic_equality():
