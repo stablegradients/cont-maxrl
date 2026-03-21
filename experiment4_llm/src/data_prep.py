@@ -38,8 +38,9 @@ from datasets import load_dataset
 # ── Shared constants ──
 
 SYSTEM_PROMPT = (
-    "You are an expert Python programmer. Solve the given programming problem. "
-    "Output ONLY the Python code solution, no explanations."
+    "You are an expert Python programmer. You will be given a question "
+    "(problem specification) and will generate a correct Python program that "
+    "matches the specification and passes all tests."
 )
 
 APPS_DIFFICULTIES_ALL = ["introductory", "interview", "competition"]
@@ -50,25 +51,32 @@ TACO_DIFFICULTIES_DEFAULT = ["EASY", "MEDIUM", "MEDIUM_HARD"]
 # ── Shared helpers ──
 
 def format_prompt(question: str, fn_name: str | None, starter_code: str | None) -> str:
-    """Format a problem into a prompt string."""
-    parts = [question.strip()]
+    """Format a problem into a prompt string.
 
-    if fn_name:
-        parts.append(
-            f"\nWrite a function called `{fn_name}` that solves this problem."
+    Uses the official LiveCodeBench prompt template so that evaluation
+    results are comparable with published baselines.
+    """
+    if starter_code and starter_code.strip():
+        # Call-based / functional (LeetCode-style): show starter code
+        return (
+            f"### Question:\n{question.strip()}\n\n"
+            f"### Format: You will use the following starter code to write the "
+            f"solution to the problem and enclose your code within delimiters.\n"
+            f"```python\n{starter_code.strip()}\n```\n\n"
+            f"### Answer: (use the provided format with backticks)\n"
         )
     else:
-        parts.append(
-            "\nYour solution should read from stdin and write to stdout."
+        # stdin/stdout (competitive programming)
+        return (
+            f"### Question:\n{question.strip()}\n\n"
+            f"### Format: Read the inputs from stdin solve the problem and write "
+            f"the answer to stdout (do not directly test on the sample inputs). "
+            f"Enclose your code within delimiters as follows. Ensure that when the "
+            f"python program runs, it reads the inputs, runs the algorithm and "
+            f"writes output to STDOUT.\n"
+            f"```python\n# YOUR CODE HERE\n```\n\n"
+            f"### Answer: (use the provided format with backticks)\n"
         )
-
-    if starter_code and starter_code.strip():
-        parts.append(f"\nStarter code:\n```python\n{starter_code.strip()}\n```")
-
-    parts.append(
-        "\nProvide your complete Python solution inside a code block:\n```python\n"
-    )
-    return "\n".join(parts)
 
 
 def make_record(
@@ -576,7 +584,12 @@ def prepare_livecodebench(
         if record is not None:
             records.append(record)
 
-    output_path = Path(output_dir) / "livecodebench_test.parquet"
+    # Use version tag in filename for clarity
+    if version_tag == "release_v5":
+        fname = "livecodebench_test.parquet"
+    else:
+        fname = f"livecodebench_{version_tag}_test.parquet"
+    output_path = Path(output_dir) / fname
     write_parquet(records, output_path)
 
     stats = {"test": len(records)}

@@ -27,7 +27,7 @@ def score_and_save(
     output_dir: str,
     n_target: int = 200,
     k_values: list[int] | None = None,
-    timeout_per_test: int = 1,
+    timeout_per_test: int = 6,
     n_workers: int = 128,
 ) -> dict:
     """Score completions, compute pass@k, and save metrics_epochN.json.
@@ -144,7 +144,7 @@ def score_and_save(
 
     # Save
     os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, f"metrics_epoch{epoch}.json")
+    path = os.path.join(output_dir, f"metrics_step{global_step}.json")
     with open(path, "w") as f:
         json.dump(metrics, f, indent=2)
     print(f"  In-situ eval metrics saved to {path}")

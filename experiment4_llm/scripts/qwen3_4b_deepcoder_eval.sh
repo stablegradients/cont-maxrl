@@ -71,7 +71,7 @@ export VLLM_USE_V1=0
 export TORCH_COMPILE_DISABLE=1
 export TORCHDYNAMO_DISABLE=1
 
-DATA_FILE="${REPO_ROOT}/data/livecodebench_test.parquet"
+DATA_FILE="${REPO_ROOT}/data/livecodebench_v5_test.parquet"
 BASE_MODEL="Qwen/Qwen3-4B"
 N_GPUS_TOTAL=${SLURM_GPUS_ON_NODE:-$(nvidia-smi -L 2>/dev/null | wc -l || echo 4)}
 
@@ -101,7 +101,7 @@ run_eval_on_gpu() {
     --top_p 0.95 \
     --max_tokens 4096 \
     --tensor_parallel_size 1 \
-    --timeout_per_test 1 \
+    --timeout_per_test 6 \
     --n_workers 64 \
     --k_values 1 2 5 10 20 50 100 200 \
     > "${LOG_FILE}" 2>&1

@@ -124,7 +124,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.val_kwargs.do_sample=True \
   actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
   actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
-  actor_rollout_ref.rollout.val_kwargs.top_k=-1 \
+  actor_rollout_ref.rollout.val_kwargs.top_k=20 \
   reward_model.enable=False \
   custom_reward_function.path="${REPO_ROOT}/experiment4_llm/src/reward_function.py" \
   custom_reward_function.name=compute_score \
@@ -139,7 +139,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.save_freq=146 \
   trainer.test_freq=146 \
   trainer.val_before_train=False \
-  insitu_eval.data_file="${REPO_ROOT}/data/livecodebench_test.parquet" \
+  insitu_eval.data_file="${REPO_ROOT}/data/livecodebench_v5_test.parquet" \
   insitu_eval.n_completions=200 \
   insitu_eval.eval_batch_size=16 \
   insitu_eval.steps_per_epoch=146 \

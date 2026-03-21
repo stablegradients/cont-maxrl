@@ -137,7 +137,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.resume_mode=auto \
   trainer.max_actor_ckpt_to_keep=1 \
   trainer.val_before_train=False \
-  insitu_eval.data_file="${REPO_ROOT}/data/livecodebench_test.parquet" \
+  insitu_eval.data_file="${REPO_ROOT}/data/livecodebench_v5_test.parquet" \
   insitu_eval.n_completions=200 \
   insitu_eval.eval_batch_size=16 \
   insitu_eval.steps_per_epoch=83 \

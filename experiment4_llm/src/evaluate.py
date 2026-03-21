@@ -68,12 +68,14 @@ def generate_completions(
     temperature: float = 0.8,
     top_p: float = 0.95,
     top_k: int = -1,
+    presence_penalty: float = 0.0,
     max_tokens: int = 2048,
     gpu_memory_utilization: float = 0.85,
     tensor_parallel_size: int = 1,
     enable_thinking: bool = False,
     max_num_seqs: int = 256,
     max_model_len: int | None = None,
+    system_prompt: str | None = None,
 ) -> list[list[str]]:
     """
     Generate N completions per problem using vLLM.
@@ -110,6 +112,7 @@ def generate_completions(
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
+        presence_penalty=presence_penalty,
         max_tokens=max_tokens,
     )
 
@@ -119,7 +122,14 @@ def generate_completions(
         chat_kwargs["enable_thinking"] = True
     formatted_prompts = []
     for problem in problems:
-        prompt_messages = problem["prompt"]
+        prompt_messages = list(problem["prompt"])
+        if system_prompt is not None:
+            # Override system message
+            prompt_messages = [
+                {"role": "system", "content": system_prompt}
+                if msg.get("role") == "system" else msg
+                for msg in prompt_messages
+            ]
         text = tokenizer.apply_chat_template(
             prompt_messages, tokenize=False, add_generation_prompt=True,
             **chat_kwargs,
@@ -141,7 +151,7 @@ def evaluate_completions(
     completions: list[list[str]],
     problems: list[dict],
     k_values: list[int] | None = None,
-    timeout_per_test: int = 1,
+    timeout_per_test: int = 6,
     n_workers: int = 128,
 ) -> dict:
     """
@@ -278,6 +288,7 @@ def main():
     parser.add_argument("--temperature", type=float, default=0.6)
     parser.add_argument("--top_p", type=float, default=0.95)
     parser.add_argument("--top_k", type=int, default=-1)
+    parser.add_argument("--presence_penalty", type=float, default=0.0)
     parser.add_argument("--max_tokens", type=int, default=2048)
     parser.add_argument("--enable_thinking", action="store_true", default=False,
                         help="Pass enable_thinking=True to chat template (Qwen3 reasoning mode)")
@@ -286,8 +297,10 @@ def main():
                         help="Max concurrent sequences in vLLM scheduler (lower = fewer KV cache preemptions)")
     parser.add_argument("--max_model_len", type=int, default=None,
                         help="Override model's default max context length (lower = more concurrent sequences)")
+    parser.add_argument("--system_prompt", type=str, default=None,
+                        help="Override the system prompt baked into the dataset")
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
-    parser.add_argument("--timeout_per_test", type=int, default=1)
+    parser.add_argument("--timeout_per_test", type=int, default=6)
     parser.add_argument("--n_workers", type=int, default=128,
                         help="Number of parallel threads for reward evaluation")
     parser.add_argument(
@@ -319,12 +332,14 @@ def main():
             temperature=args.temperature,
             top_p=args.top_p,
             top_k=args.top_k,
+            presence_penalty=args.presence_penalty,
             max_tokens=args.max_tokens,
             gpu_memory_utilization=args.gpu_memory_utilization,
             tensor_parallel_size=args.tensor_parallel_size,
             enable_thinking=args.enable_thinking,
             max_num_seqs=args.max_num_seqs,
             max_model_len=args.max_model_len,
+            system_prompt=args.system_prompt,
         )
         with open(completions_path, "w") as f:
             json.dump(completions, f)

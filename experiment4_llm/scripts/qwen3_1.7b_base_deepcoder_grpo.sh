@@ -137,11 +137,11 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.resume_mode=auto \
   trainer.max_actor_ckpt_to_keep=1 \
   trainer.val_before_train=False \
-  insitu_eval.data_file="${REPO_ROOT}/data/livecodebench_test.parquet" \
+  insitu_eval.data_file="${REPO_ROOT}/data/livecodebench_v5_test.parquet" \
   insitu_eval.n_completions=200 \
   insitu_eval.eval_batch_size=16 \
   insitu_eval.steps_per_epoch=83 \
-  "insitu_eval.eval_steps=[0,200,400,600,800,1000]" \
+  "insitu_eval.eval_steps=[0,83,166,249,332,415,498,581,664,747,830,913,996]" \
   insitu_eval.output_dir="${OUTPUT_DIR}/eval_livecodebench" \
   +insitu_eval.extra_data_files.humaneval_plus="${REPO_ROOT}/data/evalplus_humaneval_test.parquet" \
   +insitu_eval.extra_data_files.mbpp_plus="${REPO_ROOT}/data/evalplus_mbpp_test.parquet" \

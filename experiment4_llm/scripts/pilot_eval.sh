@@ -97,7 +97,7 @@ run_eval_on_gpu() {
     --temperature 0.8 \
     --max_tokens 1024 \
     --tensor_parallel_size 1 \
-    --timeout_per_test 1 \
+    --timeout_per_test 6 \
     --n_workers 64 \
     --k_values 1 2 5 10 20 50 100 200 \
     > "${LOG_FILE}" 2>&1

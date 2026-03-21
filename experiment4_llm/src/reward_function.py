@@ -21,6 +21,11 @@ from experiment4_llm.src.sandbox import execute_batch_in_sandbox, execute_in_san
 def extract_code(solution_str: str) -> str:
     """
     Extract Python code from a model completion.
+
+    Follows the official LiveCodeBench extraction convention: when multiple
+    code blocks are present, use the **last** complete block (the model may
+    refine its answer).
+
     Handles markdown code blocks, raw code, and thinking model output.
     Works with skip_special_tokens=False (preserves <think></think> but
     may include other special tokens like <|im_end|>, <|endoftext|>).
@@ -34,36 +39,28 @@ def extract_code(solution_str: str) -> str:
     if "</think>" in solution_str:
         solution_str = solution_str.split("</think>", 1)[1].strip()
 
-    # Try to extract from markdown code block
-    solution_lower = solution_str.lower()
-    if "```python" in solution_lower:
-        # Find the position case-insensitively, then extract from original
-        idx = solution_lower.index("```python")
-        after = solution_str[idx + len("```python"):]
-        # Skip optional "3" after "python"
-        if after.startswith("3") and (len(after) == 1 or after[1] in "\n\r \t"):
-            after = after[1:]
-        code = after.split("```")[0]
-        return code.strip()
+    # Find all ``` delimiters and extract the LAST complete code block
+    # (matches official LiveCodeBench extraction)
+    lines = solution_str.split("\n")
+    backtick_indices = [i for i, line in enumerate(lines) if "```" in line]
 
-    if "```" in solution_str:
-        parts = solution_str.split("```")
-        if len(parts) >= 3:
-            code = parts[1]
-            # Remove optional language identifier on first line
-            lines = code.split("\n")
-            if lines and lines[0].strip().lower() in ("python", "python3", "py", ""):
-                lines = lines[1:]
-            return "\n".join(lines).strip()
+    if len(backtick_indices) >= 2:
+        # Take the last pair of backtick lines
+        start_idx = backtick_indices[-2]
+        end_idx = backtick_indices[-1]
+        code_lines = lines[start_idx + 1 : end_idx]
+        # Remove language identifier on the opening ``` line if present
+        # (the start_idx line itself may have ```python — skip it via +1)
+        return "\n".join(code_lines).strip()
 
-    # No code block markers -- treat entire string as code
+    # No complete code block — treat entire string as code
     return solution_str
 
 
 def compute_score(
     solution_str: str,
     ground_truth: str,
-    timeout_per_test: int = 5,
+    timeout_per_test: int = 6,
     memory_limit_mb: int = 512,
     data_source: str | None = None,
     extra_info: dict | None = None,
@@ -132,67 +129,68 @@ def compute_score(
 def _outputs_match(actual: str, expected: str, fn_name: str | None) -> bool:
     """Compare actual and expected outputs.
 
-    For stdin/stdout problems: exact string match, with numeric fallback.
-    For fn_name problems: JSON-based semantic comparison (handles list
-    wrapping differences in TACO/APPS datasets).
+    Matches the official LiveCodeBench evaluation logic:
+    - Call-based (fn_name): direct Python == on parsed values, tuple→list only.
+    - Stdin/stdout: line-by-line stripped comparison, Decimal fallback (exact,
+      no epsilon tolerance).
     """
-    # Exact string match (works for both stdin/stdout and fn_name)
+    # Exact string match (works for both)
     if actual == expected:
         return True
 
-    # Numeric fallback: handle floating-point formatting differences
-    if _numeric_match(actual, expected):
-        return True
-
-    # For fn_name problems: compare parsed JSON values
     if fn_name is not None:
+        # ── Call-based: parse JSON, compare Python objects ──
+        # Official LCB: prediction == gt_out, with tuple→list coercion
         try:
             actual_val = json.loads(actual)
         except (json.JSONDecodeError, TypeError):
-            actual_val = actual
+            return False
         try:
             expected_val = json.loads(expected)
         except (json.JSONDecodeError, TypeError):
-            expected_val = expected
-        if actual_val == expected_val:
-            return True
-        # Handle TACO convention: expected may wrap return value in [result]
-        if isinstance(expected_val, list) and len(expected_val) == 1:
-            if actual_val == expected_val[0]:
-                return True
+            return False
+        # Coerce tuples to lists (official LCB does this)
+        if isinstance(actual_val, tuple):
+            actual_val = list(actual_val)
+        return actual_val == expected_val
+    else:
+        # ── Stdin/stdout: line-by-line stripped, Decimal fallback ──
+        # Official LCB: exact string per line, then exact Decimal comparison
+        return _stdio_match(actual, expected)
 
-    return False
 
+def _stdio_match(actual: str, expected: str) -> bool:
+    """Line-by-line comparison matching official LCB grade_stdio logic.
 
-def _numeric_match(a: str, b: str, rel_tol: float = 1e-4) -> bool:
-    """Check if two output strings represent the same number(s).
-
-    Handles single numbers and multi-line numeric outputs.
+    Uses exact Decimal equality (no epsilon tolerance) as fallback.
     """
-    a_lines = a.strip().splitlines()
-    b_lines = b.strip().splitlines()
+    from decimal import Decimal, InvalidOperation
+
+    a_lines = [line.strip() for line in actual.strip().split("\n")]
+    b_lines = [line.strip() for line in expected.strip().split("\n")]
+
     if len(a_lines) != len(b_lines):
         return False
+
     for al, bl in zip(a_lines, b_lines):
-        al, bl = al.strip(), bl.strip()
         if al == bl:
             continue
+        # Exact Decimal comparison (no tolerance, matches official LCB)
         try:
-            af, bf = float(al), float(bl)
-            if bf == 0.0:
-                if af != 0.0:
-                    return False
-            elif abs(af - bf) / max(abs(bf), 1e-15) > rel_tol:
-                return False
-        except ValueError:
+            da = [Decimal(x) for x in al.split()]
+            db = [Decimal(x) for x in bl.split()]
+        except (InvalidOperation, ValueError):
             return False
+        if da != db:
+            return False
+
     return True
 
 
 def compute_score_binary(
     solution_str: str,
     ground_truth: str,
-    timeout_per_test: int = 5,
+    timeout_per_test: int = 6,
     memory_limit_mb: int = 512,
 ) -> float:
     """
@@ -208,7 +206,7 @@ def compute_score_binary(
 def compute_score_binary_train(
     solution_str: str,
     ground_truth: str,
-    timeout_per_test: int = 5,
+    timeout_per_test: int = 6,
     memory_limit_mb: int = 512,
     data_source: str | None = None,
     extra_info: dict | None = None,
@@ -229,7 +227,7 @@ def compute_score_binary_train(
 
 def compute_scores_batch_binary_train(
     reward_inputs: list[dict],
-    timeout_per_test: int = 5,
+    timeout_per_test: int = 6,
     memory_limit_mb: int = 512,
     num_workers: int | None = None,
     global_timeout: int = 60,
@@ -279,7 +277,7 @@ def _run_completion(task: tuple) -> tuple:
 
 def compute_scores_batch(
     reward_inputs: list[dict],
-    timeout_per_test: int = 5,
+    timeout_per_test: int = 6,
     memory_limit_mb: int = 512,
     num_workers: int | None = None,
     global_timeout: int = 60,

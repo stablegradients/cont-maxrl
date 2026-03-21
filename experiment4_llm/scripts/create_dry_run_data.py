@@ -48,8 +48,9 @@ PROBLEMS = [
 ]
 
 SYSTEM_PROMPT = (
-    "You are an expert Python programmer. Solve the given programming problem. "
-    "Output ONLY the Python code solution, no explanations."
+    "You are an expert Python programmer. You will be given a question "
+    "(problem specification) and will generate a correct Python program that "
+    "matches the specification and passes all tests."
 )
 
 

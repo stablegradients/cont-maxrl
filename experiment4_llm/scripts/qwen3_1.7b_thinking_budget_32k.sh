@@ -52,7 +52,7 @@ export TORCH_COMPILE_DISABLE=1
 export TORCHDYNAMO_DISABLE=1
 
 MODEL="Qwen/Qwen3-1.7B"
-DATA_FILE="${REPO_ROOT}/data/livecodebench_test.parquet"
+DATA_FILE="${REPO_ROOT}/data/livecodebench_v5_test.parquet"
 OUTPUT_BASE="${REPO_ROOT}/results/qwen3_1.7b_thinking_budget_sweep"
 MAX_TOKENS=32768
 OUTPUT_DIR="${OUTPUT_BASE}/max_tokens_${MAX_TOKENS}"
@@ -86,7 +86,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/evaluate.py" \
   --max_num_seqs 96 \
   --max_model_len "${MAX_TOKENS}" \
   --tensor_parallel_size 4 \
-  --timeout_per_test 5 \
+  --timeout_per_test 6 \
   --n_workers 64 \
   --k_values 1 10 \
   2>&1 | tee "${OUTPUT_DIR}/eval.log"

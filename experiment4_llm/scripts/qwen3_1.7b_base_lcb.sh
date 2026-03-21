@@ -13,7 +13,7 @@
 # ============================================================
 # Qwen3-1.7B-Base on LiveCodeBench v5
 # Base (pretrained) model — plain text prompts, no chat template
-# Greedy (pass@1) + Sampling T=0.6 (pass@10)
+# Greedy (pass@1) + Sampling T=0.7 top_k=20 (pass@10)
 # ============================================================
 
 module load python/miniforge3_pytorch/2.10.0
@@ -44,8 +44,8 @@ export VLLM_USE_V1=0
 export TORCH_COMPILE_DISABLE=1
 export TORCHDYNAMO_DISABLE=1
 
-echo "=== Qwen3-1.7B-Base on LiveCodeBench v5 ==="
-echo "Greedy (pass@1) + Sampling T=0.6 n=10 (pass@10)"
+echo "=== Qwen3-1.7B-Base on LiveCodeBench (876 problems) ==="
+echo "Greedy (pass@1) + Sampling T=0.7 top_k=20 n=10 (pass@10)"
 echo ""
 
 $PYTHON -u << 'PYEOF'
@@ -60,7 +60,7 @@ from experiment4_llm.src.evaluate import load_problems, evaluate_completions
 
 MODEL = "Qwen/Qwen3-1.7B-Base"
 REPO_ROOT = os.environ["REPO_ROOT"]
-DATA_FILE = f"{REPO_ROOT}/data/livecodebench_test.parquet"
+DATA_FILE = f"{REPO_ROOT}/data/livecodebench_v5_test.parquet"
 OUTPUT_BASE = Path(REPO_ROOT) / "results" / "qwen3_1.7b_base_lcb"
 MAX_TOKENS = 1024
 N_WORKERS = 256
@@ -126,7 +126,7 @@ else:
         completions=completions,
         problems=problems,
         k_values=[1],
-        timeout_per_test=5,
+        timeout_per_test=6,
         n_workers=N_WORKERS,
     )
     with open(greedy_dir / "eval_results.json", "w") as f:
@@ -140,7 +140,7 @@ else:
     print(f"  Mean output length (chars): {s['mean_output_length']:.0f}")
 
 # ==================================================================
-# 2. Sampling T=0.6, n=10 (pass@1, pass@10)
+# 2. Sampling T=0.7, n=10 (pass@1, pass@10)
 # ==================================================================
 sampling_dir = OUTPUT_BASE / "sampling"
 sampling_dir.mkdir(parents=True, exist_ok=True)
@@ -149,7 +149,7 @@ completions_path = sampling_dir / "completions.json"
 if (sampling_dir / "eval_results.json").exists():
     print("\n>>> Sampling: already done, skipping.")
 else:
-    print("\n>>> Sampling (T=0.6, n=10)")
+    print("\n>>> Sampling (T=0.7, top_k=20, n=10)")
     if completions_path.exists():
         print(f"  Loading cached completions from {completions_path}")
         with open(completions_path) as f:
@@ -157,8 +157,9 @@ else:
     else:
         sampling_params = SamplingParams(
             n=10,
-            temperature=0.6,
-            top_p=0.95,
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
             max_tokens=MAX_TOKENS,
             stop=STOP_TOKENS,
         )
@@ -173,7 +174,7 @@ else:
         completions=completions,
         problems=problems,
         k_values=[1, 10],
-        timeout_per_test=5,
+        timeout_per_test=6,
         n_workers=N_WORKERS,
     )
     with open(sampling_dir / "eval_results.json", "w") as f:

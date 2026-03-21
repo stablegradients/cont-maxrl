@@ -21,9 +21,23 @@ import sys
 import tempfile
 
 
-DEFAULT_TIMEOUT = 5  # seconds per test case (large I/O needs time to parse)
+DEFAULT_TIMEOUT = 6  # seconds per test case (matches official LCB default)
 DEFAULT_MEMORY_MB = 512
 DEFAULT_GLOBAL_TIMEOUT = 60  # hard cap per completion (covers many large tests)
+
+# Import string prepended to call-based code (matches official LCB testing_util.py)
+_IMPORT_STRING = (
+    "from string import *\nfrom re import *\nfrom datetime import *\n"
+    "from collections import *\nfrom heapq import *\nfrom bisect import *\n"
+    "from copy import *\nfrom math import *\nfrom random import *\n"
+    "from statistics import *\nfrom itertools import *\nfrom functools import *\n"
+    "from operator import *\nfrom io import *\nfrom sys import *\n"
+    "from json import *\nfrom builtins import *\nfrom typing import *\n"
+    "import string\nimport re\nimport datetime\nimport collections\n"
+    "import heapq\nimport bisect\nimport copy\nimport math\nimport random\n"
+    "import statistics\nimport itertools\nimport functools\nimport operator\n"
+    "import io\nimport sys\nimport json\nsys.setrecursionlimit(50000)\n"
+)
 
 # Runner script templates. These are top-level strings (no indentation issues).
 # They read the user code and input from files passed as argv[1] and argv[2].
@@ -31,7 +45,9 @@ DEFAULT_GLOBAL_TIMEOUT = 60  # hard cap per completion (covers many large tests)
 _RUNNER_STDIN = """\
 import sys
 import io
+import ast
 import resource
+from unittest.mock import patch, mock_open
 
 mem_bytes = {mem_mb} * 1024 * 1024
 try:
@@ -44,8 +60,26 @@ with open(sys.argv[1]) as _f:
 with open(sys.argv[2]) as _f:
     _input_str = _f.read()
 
-sys.stdin = io.StringIO(_input_str)
-exec(compile(_user_code, '<solution>', 'exec'))
+# Strip if __name__ == '__main__' guard (matches official LCB)
+try:
+    _tree = ast.parse(_user_code)
+    _last = _tree.body[-1] if _tree.body else None
+    if isinstance(_last, ast.If) and ast.unparse(_last.test).strip() == "__name__ == '__main__'":
+        _user_code = ast.unparse(_tree.body[:-1]) + "\\n" + ast.unparse(_last.body)
+except Exception:
+    pass
+
+_inputs_iter = iter(_input_str.split("\\n"))
+
+@patch('builtins.open', mock_open(read_data=_input_str))
+@patch('sys.stdin', io.StringIO(_input_str))
+@patch('sys.stdin.readline', lambda *a: next(_inputs_iter))
+@patch('sys.stdin.readlines', lambda *a: _input_str.split("\\n"))
+@patch('sys.stdin.read', lambda *a: _input_str)
+def _run():
+    exec(compile(_user_code, '<solution>', 'exec'))
+
+_run()
 """
 
 _RUNNER_FUNCTION = """\
@@ -68,9 +102,13 @@ with open(sys.argv[2]) as _f:
 _fn_name = sys.argv[3]
 
 _namespace = {{}}
-exec(compile(_user_code, '<solution>', 'exec'), _namespace)
+exec(compile({import_string_repr} + "\\n\\n" + _user_code, '<solution>', 'exec'), _namespace)
 
+# Look up the function: try standalone first, then class Solution method
 _fn = _namespace.get(_fn_name)
+if _fn is None and 'Solution' in _namespace:
+    _sol = _namespace['Solution']()
+    _fn = getattr(_sol, _fn_name, None)
 if _fn is None:
     print("FUNCTION_NOT_FOUND", file=sys.stderr)
     sys.exit(1)
@@ -84,6 +122,9 @@ except (json.JSONDecodeError, ValueError):
     _args = [_input_data] if _input_data else []
 
 _result = _fn(*_args)
+# Coerce tuples to lists (matches official LCB)
+if isinstance(_result, tuple):
+    _result = list(_result)
 print(json.dumps(_result))
 """
 
@@ -93,7 +134,8 @@ print(json.dumps(_result))
 # Outputs JSON list of per-test results (string output or null for failure).
 
 _RUNNER_BATCH = """\
-import sys, io, json, signal, resource
+import sys, io, json, signal, resource, ast
+from unittest.mock import patch, mock_open
 
 mem_bytes = {mem_mb} * 1024 * 1024
 try:
@@ -109,6 +151,9 @@ def _alarm(signum, frame):
 
 signal.signal(signal.SIGALRM, _alarm)
 
+# Import string matching official LCB
+_IMPORT_STR = {import_string_repr}
+
 with open(sys.argv[1]) as _f:
     _code = _f.read()
 with open(sys.argv[2]) as _f:
@@ -122,11 +167,14 @@ _results = []
 if _fn_name:
     _ns = {{}}
     try:
-        exec(compile(_code, '<solution>', 'exec'), _ns)
+        exec(compile(_IMPORT_STR + "\\n\\n" + _code, '<solution>', 'exec'), _ns)
     except Exception:
         print(json.dumps([None] * len(_inputs)))
         sys.exit(0)
     _fn = _ns.get(_fn_name)
+    if _fn is None and 'Solution' in _ns:
+        _sol = _ns['Solution']()
+        _fn = getattr(_sol, _fn_name, None)
     if _fn is None:
         print(json.dumps([None] * len(_inputs)))
         sys.exit(0)
@@ -142,11 +190,21 @@ if _fn_name:
                 _args = [_s] if _s else []
             _r = _fn(*_args)
             signal.alarm(0)
+            if isinstance(_r, tuple):
+                _r = list(_r)
             _results.append(json.dumps(_r))
         except Exception:
             signal.alarm(0)
             _results.append(None)
 else:
+    # Strip if __name__ == '__main__' guard (matches official LCB)
+    try:
+        _tree = ast.parse(_code)
+        _last = _tree.body[-1] if _tree.body else None
+        if isinstance(_last, ast.If) and ast.unparse(_last.test).strip() == "__name__ == '__main__'":
+            _code = ast.unparse(_tree.body[:-1]) + "\\n" + ast.unparse(_last.body)
+    except Exception:
+        pass
     try:
         _compiled = compile(_code, '<solution>', 'exec')
     except SyntaxError:
@@ -159,8 +217,10 @@ else:
         sys.stdout = _captured
         try:
             _s = _inp if isinstance(_inp, str) else str(_inp)
-            sys.stdin = io.StringIO(_s)
-            exec(_compiled, {{}})
+            _inp_iter = iter(_s.split("\\n"))
+            with patch('builtins.open', mock_open(read_data=_s)):
+                sys.stdin = io.StringIO(_s)
+                exec(_compiled, {{}})
             signal.alarm(0)
             sys.stdout = _saved
             _results.append(_captured.getvalue())
@@ -221,7 +281,10 @@ def execute_in_sandbox(
         input_file.close()
 
         if fn_name is not None:
-            runner_script = _RUNNER_FUNCTION.format(mem_mb=memory_limit_mb)
+            runner_script = _RUNNER_FUNCTION.format(
+                mem_mb=memory_limit_mb,
+                import_string_repr=repr(_IMPORT_STRING),
+            )
             cmd = [
                 sys.executable, runner_file.name,
                 code_file.name, input_file.name, fn_name,
@@ -322,7 +385,10 @@ def execute_batch_in_sandbox(
         json.dump(test_data, test_file)
         test_file.close()
 
-        runner_file.write(_RUNNER_BATCH.format(mem_mb=memory_limit_mb))
+        runner_file.write(_RUNNER_BATCH.format(
+            mem_mb=memory_limit_mb,
+            import_string_repr=repr(_IMPORT_STRING),
+        ))
         runner_file.close()
 
         result = subprocess.run(

@@ -108,7 +108,7 @@ def generate_and_evaluate(dataset_name, problems, tokenizer, llm, temperature, n
         task_ids = []
         for task_id, problem in problems.items():
             messages = [
-                {"role": "system", "content": "You are an expert Python programmer. Complete the given function. Output ONLY the complete Python function, no explanations."},
+                {"role": "system", "content": "You are an expert Python programmer. Complete the given function."},
                 {"role": "user", "content": problem["prompt"]},
             ]
             text = tokenizer.apply_chat_template(
@@ -122,6 +122,7 @@ def generate_and_evaluate(dataset_name, problems, tokenizer, llm, temperature, n
             n=n_samples,
             temperature=temperature,
             top_p=0.95 if temperature > 0 else 1.0,
+            top_k=20 if temperature > 0 else -1,
             max_tokens=MAX_TOKENS,
         )
 
