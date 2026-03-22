@@ -55,9 +55,9 @@ OUTPUT_BASE="${REPO_ROOT}/results/qwen3_4b_thinking_lcb"
 # Official LCB system prompt
 SYSTEM_PROMPT="You are an expert Python programmer. You will be given a question (problem specification) and will generate a correct Python program that matches the specification and passes all tests."
 
-echo "=== Qwen3-4B Thinking on LCB (official prompt, 876 problems) ==="
+echo "=== Qwen3-4B Thinking on LCB v5 (163 problems) ==="
 echo "Model: ${MODEL} (enable_thinking=True)"
-echo "Dataset: release_v5 (876 problems)"
+echo "Dataset: v5-only (163 problems)"
 echo "Config: T=0.6, top_p=0.95, top_k=20, max_tokens=32768"
 echo ""
 
