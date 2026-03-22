@@ -335,7 +335,7 @@ def compute_scores_batch(
         # Syntax pre-check — zero cost, eliminates broken code
         try:
             compile(code, "<test>", "exec")
-        except SyntaxError:
+        except (SyntaxError, ValueError):
             continue
 
         # Dedup by (code, ground_truth) — same code + same tests = same score

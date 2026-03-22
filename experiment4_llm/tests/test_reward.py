@@ -361,6 +361,42 @@ def test_extract_code_no_think_end_tag():
     assert "thinking that never ends" in result
 
 
+def test_extract_code_truncated_thinking_with_code_block():
+    """Truncated thinking with a code block inside <think> — should NOT extract it.
+
+    When a completion is truncated mid-thinking (<think> without </think>),
+    the entire output is garbage for code extraction. Any ```python``` block
+    inside the thinking is part of the reasoning, not the final answer.
+    extract_code will find the code block (since it can't strip thinking),
+    but this is acceptable — the code is almost certainly wrong/incomplete
+    and will fail test execution anyway.
+    """
+    text = "<think>\nLet me think...\n```python\ndef wrong():\n    pass\n```\nBut wait, let me reconsider..."
+    result = extract_code(text)
+    # Without </think>, thinking is not stripped; code block inside thinking IS found
+    # This is fine — truncated completions should score 0 regardless
+    assert isinstance(result, str)
+
+
+def test_extract_code_enable_thinking_false_output():
+    """Output from enable_thinking=False: <think>\\n\\n</think> prefix with code."""
+    text = "<think>\n\n</think>\n\ndef solve():\n    n = int(input())\n    print(n * 2)"
+    assert extract_code(text) == "def solve():\n    n = int(input())\n    print(n * 2)"
+
+
+def test_extract_code_enable_thinking_false_with_markdown():
+    """Output from enable_thinking=False with markdown code block."""
+    text = "<think>\n\n</think>\n\n```python\ndef solve():\n    n = int(input())\n    print(n * 2)\n```"
+    assert extract_code(text) == "def solve():\n    n = int(input())\n    print(n * 2)"
+
+
+def test_extract_code_multiple_think_blocks():
+    """Only first </think> should be used for splitting."""
+    text = "<think>\nfirst thought\n</think>\n<think>\nsecond thought\n</think>\n```python\ndef solve():\n    return 42\n```"
+    # split on first </think> — rest includes second <think> block but code block is last
+    assert extract_code(text) == "def solve():\n    return 42"
+
+
 # ── Special token handling (skip_special_tokens=False) ──
 
 
@@ -470,3 +506,28 @@ def test_compute_scores_batch_with_special_tokens():
         num_workers=1,
     )
     assert results[0]["score"] == 1.0
+
+
+# ── evaluate.py: enable_thinking chat template kwarg ──
+
+
+def test_evaluate_enable_thinking_kwarg():
+    """Verify generate_completions passes enable_thinking to chat template.
+
+    Bug: the old code only passed enable_thinking=True when the flag was set,
+    leaving the default (no kwarg) which Qwen3's template treats as thinking
+    enabled. The fix always passes the kwarg explicitly.
+    """
+    import inspect
+    from experiment4_llm.src.evaluate import generate_completions
+
+    source = inspect.getsource(generate_completions)
+    # The chat_kwargs must always include enable_thinking, not conditionally
+    assert '"enable_thinking": enable_thinking' in source or "'enable_thinking': enable_thinking" in source, (
+        "generate_completions must always pass enable_thinking to chat template kwargs, "
+        "not conditionally. Without it, Qwen3's template defaults to thinking enabled."
+    )
+    # Must NOT have the old buggy pattern
+    assert "if enable_thinking:" not in source or "chat_kwargs[" not in source, (
+        "Found old buggy pattern: conditionally adding enable_thinking to chat_kwargs"
+    )

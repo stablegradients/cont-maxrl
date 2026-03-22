@@ -126,6 +126,15 @@ def score_and_save(
     total_completions = sum(r["n"] for r in per_problem_results)
     all_scores = [s for sl in problem_scores_list.values() for s in sl]
 
+    # Number of problems with at least one passing solution
+    n_problems_solved = sum(1 for r in per_problem_results if r["c"] > 0)
+
+    # Global unique code rate: unique extracted codes / total completions
+    all_codes = []
+    for i in range(n_problems):
+        all_codes.extend(extract_code(c) for c in completions[i][:n_target])
+    unique_code_rate_global = len(set(all_codes)) / max(len(all_codes), 1)
+
     metrics = {
         "epoch": epoch,
         "global_step": global_step,
@@ -135,10 +144,12 @@ def score_and_save(
             "total_problems": n_problems,
             "total_completions": total_completions,
             "total_passing": total_passing,
+            "n_problems_solved": n_problems_solved,
             "mean_pass_rate": total_passing / max(total_completions, 1),
             "mean_score": sum(all_scores) / max(len(all_scores), 1),
             "mean_unique_solution_rate": sum(problem_unique_rates.values()) / max(len(problem_unique_rates), 1),
             "mean_output_length": sum(problem_mean_lengths.values()) / max(len(problem_mean_lengths), 1),
+            "unique_code_rate_global": unique_code_rate_global,
         },
     }
 

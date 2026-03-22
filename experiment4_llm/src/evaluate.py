@@ -117,9 +117,7 @@ def generate_completions(
     )
 
     # Format prompts using chat template
-    chat_kwargs = {}
-    if enable_thinking:
-        chat_kwargs["enable_thinking"] = True
+    chat_kwargs = {"enable_thinking": enable_thinking}
     formatted_prompts = []
     for problem in problems:
         prompt_messages = list(problem["prompt"])

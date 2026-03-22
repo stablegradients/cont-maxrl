@@ -877,7 +877,8 @@ class RayPPOTrainer:
             if v is not None:
                 metric_dict[f"{prefix}/pass_at_{k}"] = v
         summary = metrics.get("summary", {})
-        for key in ["mean_score", "mean_pass_rate", "mean_unique_solution_rate", "mean_output_length"]:
+        for key in ["mean_score", "mean_pass_rate", "mean_unique_solution_rate", "mean_output_length",
+                     "n_problems_solved", "unique_code_rate_global"]:
             if key in summary:
                 metric_dict[f"{prefix}/{key}"] = summary[key]
 
@@ -1338,8 +1339,18 @@ class RayPPOTrainer:
                     }
                 )
                 # collect metrics
-                metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
+                data_metrics = compute_data_metrics(batch=batch, use_critic=self.use_critic)
+                metrics.update(data_metrics)
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
+
+                # score distribution histogram for wandb
+                try:
+                    import wandb
+                    if wandb.run is not None:
+                        sequence_score = batch.batch["token_level_scores"].sum(-1).detach().cpu().numpy()
+                        metrics["critic/score/histogram"] = wandb.Histogram(sequence_score.tolist())
+                except Exception:
+                    pass
                 # TODO: implement actual tflpo and theoretical tflpo
                 n_gpus = self.resource_pool_manager.get_n_gpus()
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
