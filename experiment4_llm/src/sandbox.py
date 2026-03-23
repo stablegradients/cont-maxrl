@@ -419,3 +419,32 @@ def execute_batch_in_sandbox(
                 os.unlink(f.name)
             except OSError:
                 pass
+
+
+def pool_execute_completion(task: tuple) -> tuple:
+    """Execute all tests for one completion — multiprocessing pool worker.
+
+    Runs in a forkserver-spawned process (small VSZ) so subprocess.run()
+    forks from a lightweight process, avoiding virtual memory overcommit
+    on large-memory training nodes.
+
+    Args:
+        task: (dedup_key, code, inputs, fn_name, timeout_per_test,
+               memory_limit_mb, global_timeout)
+
+    Returns:
+        (dedup_key, outputs) where outputs is list[str | None] per test.
+    """
+    dedup_key, code, inputs, fn_name, timeout, mem, global_timeout = task
+    try:
+        outputs = execute_batch_in_sandbox(
+            code=code,
+            inputs=inputs,
+            fn_name=fn_name,
+            timeout_per_test=timeout,
+            memory_limit_mb=mem,
+            global_timeout=global_timeout,
+        )
+        return (dedup_key, outputs)
+    except Exception:
+        return (dedup_key, [None] * len(inputs))

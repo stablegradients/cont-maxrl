@@ -12,11 +12,11 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import multiprocessing
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor
 
-from experiment4_llm.src.sandbox import execute_batch_in_sandbox, execute_in_sandbox
+from experiment4_llm.src.sandbox import execute_batch_in_sandbox, execute_in_sandbox, pool_execute_completion
 
 
 def extract_code(solution_str: str) -> str:
@@ -250,30 +250,26 @@ def compute_scores_batch_binary_train(
 _ZERO = {"score": 0.0, "acc": 0.0}
 
 
-def _run_completion(task: tuple) -> tuple:
-    """Run all tests for one unique (code, ground_truth) pair in one subprocess."""
-    dedup_key, code, inputs, expected_outputs, fn_name, timeout, mem, global_timeout = task
-    n = len(inputs)
-    try:
-        test_outputs = execute_batch_in_sandbox(
-            code=code,
-            inputs=inputs,
-            fn_name=fn_name,
-            timeout_per_test=timeout,
-            memory_limit_mb=mem,
-            global_timeout=global_timeout,
-        )
-        passed = 0
-        for actual, expected in zip(test_outputs, expected_outputs):
-            if actual is not None:
-                exp = str(expected) if not isinstance(expected, str) else expected
-                if _outputs_match(actual.strip(), exp.strip(), fn_name):
-                    passed += 1
-        score = passed / n
-        acc = 1.0 if passed == n else 0.0
-        return (dedup_key, {"score": score, "acc": acc})
-    except Exception:
-        return (dedup_key, dict(_ZERO))
+_forkserver_pool = None
+_forkserver_pool_size = 0
+
+
+def _get_forkserver_pool(num_workers):
+    """Get or create a forkserver-based multiprocessing pool.
+
+    Workers fork from a lightweight server process (~10 MB VSZ), not the
+    main training process (~400 GB VSZ), avoiding virtual memory overcommit
+    failures on large-memory nodes (Committed_AS >> CommitLimit).
+    """
+    global _forkserver_pool, _forkserver_pool_size
+    if _forkserver_pool is None or _forkserver_pool_size != num_workers:
+        if _forkserver_pool is not None:
+            _forkserver_pool.terminate()
+            _forkserver_pool.join()
+        ctx = multiprocessing.get_context("forkserver")
+        _forkserver_pool = ctx.Pool(processes=num_workers, maxtasksperchild=50)
+        _forkserver_pool_size = num_workers
+    return _forkserver_pool
 
 
 def compute_scores_batch(
@@ -360,16 +356,34 @@ def compute_scores_batch(
                 timeout_per_test, memory_limit_mb, global_timeout,
             )
 
-    # ── Phase 2: Execute unique completions in parallel ──
+    # ── Phase 2: Execute unique completions in forkserver pool ──
+    # Workers fork from a lightweight forkserver process (not the 400GB+
+    # training process), avoiding virtual memory overcommit failures.
     dedup_results: dict[str, dict] = {}
 
     if dedup_tasks:
-        with ThreadPoolExecutor(max_workers=num_workers) as pool:
-            for key, score_dict in pool.map(_run_completion, dedup_tasks.values()):
-                dedup_results[key] = score_dict
+        pool = _get_forkserver_pool(num_workers)
+        # Build pool tasks (exclude expected_outputs; matching done in parent)
+        pool_tasks = []
+        task_meta = {}  # key → (expected_outputs, fn_name)
+        for key, task in dedup_tasks.items():
+            _, code, inp_strs, exp_strs, fn_name, timeout, mem, gtimeout = task
+            pool_tasks.append((key, code, inp_strs, fn_name, timeout, mem, gtimeout))
+            task_meta[key] = (exp_strs, fn_name)
 
-    # Prevent memory accumulation across training steps (avoids eventual
-    # MemoryError → SIGSEGV in CPython's MemoryError_dealloc on GH200).
+        for dedup_key, outputs in pool.map(pool_execute_completion, pool_tasks):
+            exp_strs, fn_name = task_meta[dedup_key]
+            n = len(exp_strs)
+            passed = 0
+            for actual, expected in zip(outputs, exp_strs):
+                if actual is not None:
+                    exp = str(expected) if not isinstance(expected, str) else expected
+                    if _outputs_match(actual.strip(), exp.strip(), fn_name):
+                        passed += 1
+            score = passed / n
+            acc = 1.0 if passed == n else 0.0
+            dedup_results[dedup_key] = {"score": score, "acc": acc}
+
     gc.collect()
 
     # ── Phase 3: Scatter scores back to all completions (including duplicates) ──
