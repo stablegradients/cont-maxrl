@@ -52,6 +52,7 @@ export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
 export VERL_REWARD_WORKERS=256
 export VLLM_USE_V1=0
+export RAY_OBJECT_STORE_MEMORY=32000000000
 export RAY_TMPDIR="/tmp/ray_${USER}"
 export TMPDIR="/tmp/${USER}_verl_tmp"
 mkdir -p "${TORCH_HOME}" "${VLLM_CACHE_ROOT}" "${RAY_TMPDIR}" "${TMPDIR}"
@@ -124,7 +125,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.default_local_dir="${OUTPUT_DIR}" \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
-  trainer.save_freq=83 \
+  trainer.save_freq=20 \
   trainer.test_freq=83 \
   trainer.resume_mode=auto \
   trainer.max_actor_ckpt_to_keep=1 \
@@ -133,7 +134,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   insitu_eval.n_completions=200 \
   insitu_eval.eval_batch_size=16 \
   insitu_eval.steps_per_epoch=83 \
-  "insitu_eval.eval_steps=[0,83,166,249,332,415,498,581,664,747,830,913,996]" \
+  "insitu_eval.eval_steps=[83,166,249,332,415,498,581,664,747,830,913,996]" \
   insitu_eval.output_dir="${OUTPUT_DIR}/eval_livecodebench" \
   +insitu_eval.extra_data_files.humaneval_plus="${REPO_ROOT}/data/evalplus_humaneval_test.parquet" \
   +insitu_eval.extra_data_files.mbpp_plus="${REPO_ROOT}/data/evalplus_mbpp_test.parquet" \

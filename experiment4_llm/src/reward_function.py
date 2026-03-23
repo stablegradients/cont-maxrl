@@ -9,6 +9,7 @@ verl reward function interface:
 """
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import os
@@ -290,8 +291,9 @@ def compute_scores_batch(
        with signal.alarm per-test timeout + parent global_timeout cap.
        No early-stop: all tests always run to preserve continuous reward signal.
 
-    Parallelism is completion-level via ThreadPoolExecutor, but each completion
-    is bounded to global_timeout seconds so the tail is capped.
+    Parallelism is completion-level via a pre-forked multiprocessing.Pool
+    (avoids fork()-ing the large training process). Each completion is bounded
+    to global_timeout seconds so the tail is capped.
 
     Args:
         reward_inputs: list of dicts with "solution_str" and "ground_truth"
@@ -365,6 +367,10 @@ def compute_scores_batch(
         with ThreadPoolExecutor(max_workers=num_workers) as pool:
             for key, score_dict in pool.map(_run_completion, dedup_tasks.values()):
                 dedup_results[key] = score_dict
+
+    # Prevent memory accumulation across training steps (avoids eventual
+    # MemoryError → SIGSEGV in CPython's MemoryError_dealloc on GH200).
+    gc.collect()
 
     # ── Phase 3: Scatter scores back to all completions (including duplicates) ──
     for i, key in completion_to_key.items():
