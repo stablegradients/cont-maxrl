@@ -72,7 +72,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   algorithm.kl_ctrl.kl_coef=0.0 \
   data.train_files="${REPO_ROOT}/data/deepcoder_train.parquet" \
   data.val_files="${REPO_ROOT}/data/deepcoder_train.parquet" \
-  data.train_batch_size=128 \
+  data.train_batch_size=256 \
   data.max_prompt_length=1024 \
   data.max_response_length=4096 \
   data.shuffle=True \
@@ -84,7 +84,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.model.trust_remote_code=True \
   actor_rollout_ref.actor.strategy=fsdp \
   actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
-  actor_rollout_ref.actor.ppo_mini_batch_size=128 \
+  actor_rollout_ref.actor.ppo_mini_batch_size=256 \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.actor.ppo_epochs=1 \
   actor_rollout_ref.actor.use_kl_loss=False \
@@ -118,7 +118,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   reward_model.launch_reward_fn_async=True \
   custom_reward_function.path="${REPO_ROOT}/experiment4_llm/src/reward_function.py" \
   custom_reward_function.name=compute_score \
-  trainer.total_training_steps=2000 \
+  trainer.total_training_steps=1000 \
   trainer.total_epochs=15 \
   trainer.project_name=cont-maxrl-code \
   trainer.experiment_name="qwen3_1.7b_base_deepcoder_maxrl_g64_s${SEED}" \
@@ -127,15 +127,15 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
   trainer.save_freq=20 \
-  trainer.test_freq=166 \
+  trainer.test_freq=83 \
   trainer.resume_mode=auto \
   trainer.max_actor_ckpt_to_keep=1 \
   trainer.val_before_train=False \
   insitu_eval.data_file="${REPO_ROOT}/data/livecodebench_v5_test.parquet" \
   insitu_eval.n_completions=200 \
   insitu_eval.eval_batch_size=16 \
-  insitu_eval.steps_per_epoch=166 \
-  "insitu_eval.eval_steps=[166,332,498,664,830,996,1162,1328,1494,1660,1826,1992]" \
+  insitu_eval.steps_per_epoch=83 \
+  "insitu_eval.eval_steps=[83,166,249,332,415,498,581,664,747,830,913,996]" \
   insitu_eval.output_dir="${OUTPUT_DIR}/eval_livecodebench" \
   +insitu_eval.extra_data_files.humaneval_plus="${REPO_ROOT}/data/evalplus_humaneval_test.parquet" \
   +insitu_eval.extra_data_files.mbpp_plus="${REPO_ROOT}/data/evalplus_mbpp_test.parquet" \
