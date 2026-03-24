@@ -81,50 +81,50 @@ def compute_score(
             "score": float in [0, 1] (fraction of test cases passed)
             "acc": 1.0 if all tests passed, 0.0 otherwise
     """
-    # Parse ground truth
     try:
+        # Parse ground truth
         test_cases = json.loads(ground_truth)
-    except (json.JSONDecodeError, TypeError):
+
+        inputs = test_cases.get("inputs", [])
+        expected_outputs = test_cases.get("outputs", [])
+        fn_name = test_cases.get("fn_name", None)
+
+        if not inputs or not expected_outputs:
+            return {"score": 0.0, "acc": 0.0}
+
+        num_total = min(len(inputs), len(expected_outputs))
+        if num_total == 0:
+            return {"score": 0.0, "acc": 0.0}
+
+        # Extract code from model output
+        code = extract_code(solution_str)
+        if not code:
+            return {"score": 0.0, "acc": 0.0}
+
+        num_passed = 0
+
+        for i in range(num_total):
+            inp = str(inputs[i]) if not isinstance(inputs[i], str) else inputs[i]
+            expected = str(expected_outputs[i]) if not isinstance(expected_outputs[i], str) else expected_outputs[i]
+
+            try:
+                actual = execute_in_sandbox(
+                    code=code,
+                    input_data=inp,
+                    fn_name=fn_name,
+                    timeout_seconds=timeout_per_test,
+                    memory_limit_mb=memory_limit_mb,
+                )
+                if _outputs_match(actual.strip(), expected.strip(), fn_name):
+                    num_passed += 1
+            except Exception:
+                pass  # Failed test case -- counts as not passed
+
+        score = num_passed / num_total
+        acc = 1.0 if num_passed == num_total else 0.0
+        return {"score": score, "acc": acc}
+    except Exception:
         return {"score": 0.0, "acc": 0.0}
-
-    inputs = test_cases.get("inputs", [])
-    expected_outputs = test_cases.get("outputs", [])
-    fn_name = test_cases.get("fn_name", None)
-
-    if not inputs or not expected_outputs:
-        return {"score": 0.0, "acc": 0.0}
-
-    num_total = min(len(inputs), len(expected_outputs))
-    if num_total == 0:
-        return {"score": 0.0, "acc": 0.0}
-
-    # Extract code from model output
-    code = extract_code(solution_str)
-    if not code:
-        return {"score": 0.0, "acc": 0.0}
-
-    num_passed = 0
-
-    for i in range(num_total):
-        inp = str(inputs[i]) if not isinstance(inputs[i], str) else inputs[i]
-        expected = str(expected_outputs[i]) if not isinstance(expected_outputs[i], str) else expected_outputs[i]
-
-        try:
-            actual = execute_in_sandbox(
-                code=code,
-                input_data=inp,
-                fn_name=fn_name,
-                timeout_seconds=timeout_per_test,
-                memory_limit_mb=memory_limit_mb,
-            )
-            if _outputs_match(actual.strip(), expected.strip(), fn_name):
-                num_passed += 1
-        except (TimeoutError, MemoryError, RuntimeError, SyntaxError, Exception):
-            pass  # Failed test case -- counts as not passed
-
-    score = num_passed / num_total
-    acc = 1.0 if num_passed == num_total else 0.0
-    return {"score": score, "acc": acc}
 
 
 def _outputs_match(actual: str, expected: str, fn_name: str | None) -> bool:
@@ -302,8 +302,24 @@ def compute_scores_batch(
     if num_workers is None:
         num_workers = int(os.environ.get("VERL_REWARD_WORKERS", 256))
 
-    results = [dict(_ZERO) for _ in range(len(reward_inputs))]
+    n_inputs = len(reward_inputs)
+    results = [dict(_ZERO) for _ in range(n_inputs)]
 
+    try:
+        return _compute_scores_batch_inner(
+            reward_inputs, results, num_workers,
+            timeout_per_test, memory_limit_mb, global_timeout,
+        )
+    except Exception:
+        # Last resort: if anything crashes, return zeros for all completions
+        # rather than killing the training run
+        return [dict(_ZERO) for _ in range(n_inputs)]
+
+
+def _compute_scores_batch_inner(
+    reward_inputs, results, num_workers,
+    timeout_per_test, memory_limit_mb, global_timeout,
+):
     # ── Phase 1: Parse, extract, syntax-check, dedup ──
     # dedup_key = hash(code + ground_truth) → only run tests once per unique pair
     dedup_tasks: dict[str, tuple] = {}  # key → task tuple
@@ -331,7 +347,7 @@ def compute_scores_batch(
         # Syntax pre-check — zero cost, eliminates broken code
         try:
             compile(code, "<test>", "exec")
-        except (SyntaxError, ValueError, RecursionError):
+        except Exception:
             continue
 
         # Dedup by (code, ground_truth) — same code + same tests = same score
@@ -371,15 +387,21 @@ def compute_scores_batch(
 
         futures = [pool.submit(pool_execute_completion, t) for t in pool_tasks]
         for future in futures:
-            dedup_key, outputs = future.result()
+            try:
+                dedup_key, outputs = future.result()
+            except Exception:
+                continue
             exp_strs, fn_name = task_meta[dedup_key]
             n = len(exp_strs)
             passed = 0
             for actual, expected in zip(outputs, exp_strs):
                 if actual is not None:
-                    exp = str(expected) if not isinstance(expected, str) else expected
-                    if _outputs_match(actual.strip(), exp.strip(), fn_name):
-                        passed += 1
+                    try:
+                        exp = str(expected) if not isinstance(expected, str) else expected
+                        if _outputs_match(actual.strip(), exp.strip(), fn_name):
+                            passed += 1
+                    except Exception:
+                        pass
             score = passed / n
             acc = 1.0 if passed == n else 0.0
             dedup_results[dedup_key] = {"score": score, "acc": acc}

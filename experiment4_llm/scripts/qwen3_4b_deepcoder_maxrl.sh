@@ -49,7 +49,7 @@ export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"
 export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
 # Maximize parallel reward computation (subprocess-based sandbox)
-export VERL_REWARD_WORKERS=256
+export VERL_REWARD_WORKERS=64
 # verl requires vLLM v0 engine (v1 doesn't implement free_cache_engine)
 export VLLM_USE_V1=0
 # Ray and tmp on local disk (avoids NFS socket/cleanup issues)
