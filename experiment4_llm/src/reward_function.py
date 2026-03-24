@@ -12,9 +12,9 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
-import multiprocessing
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from experiment4_llm.src.sandbox import execute_batch_in_sandbox, execute_in_sandbox, pool_execute_completion
 
@@ -250,26 +250,24 @@ def compute_scores_batch_binary_train(
 _ZERO = {"score": 0.0, "acc": 0.0}
 
 
-_forkserver_pool = None
-_forkserver_pool_size = 0
+_thread_pool = None
+_thread_pool_size = 0
 
 
-def _get_forkserver_pool(num_workers):
-    """Get or create a forkserver-based multiprocessing pool.
+def _get_thread_pool(num_workers):
+    """Get or create a ThreadPoolExecutor for parallel reward computation.
 
-    Workers fork from a lightweight server process (~10 MB VSZ), not the
-    main training process (~400 GB VSZ), avoiding virtual memory overcommit
-    failures on large-memory nodes (Committed_AS >> CommitLimit).
+    Threads share the parent process's address space — zero additional
+    Committed_AS. Each thread calls subprocess.run() which fork()s from
+    the async Ray worker (~50MB VSZ), well under the overcommit threshold.
     """
-    global _forkserver_pool, _forkserver_pool_size
-    if _forkserver_pool is None or _forkserver_pool_size != num_workers:
-        if _forkserver_pool is not None:
-            _forkserver_pool.terminate()
-            _forkserver_pool.join()
-        ctx = multiprocessing.get_context("forkserver")
-        _forkserver_pool = ctx.Pool(processes=num_workers, maxtasksperchild=50)
-        _forkserver_pool_size = num_workers
-    return _forkserver_pool
+    global _thread_pool, _thread_pool_size
+    if _thread_pool is None or _thread_pool_size != num_workers:
+        if _thread_pool is not None:
+            _thread_pool.shutdown(wait=False)
+        _thread_pool = ThreadPoolExecutor(max_workers=num_workers)
+        _thread_pool_size = num_workers
+    return _thread_pool
 
 
 def compute_scores_batch(
@@ -356,22 +354,24 @@ def compute_scores_batch(
                 timeout_per_test, memory_limit_mb, global_timeout,
             )
 
-    # ── Phase 2: Execute unique completions in forkserver pool ──
-    # Workers fork from a lightweight forkserver process (not the 400GB+
-    # training process), avoiding virtual memory overcommit failures.
+    # ── Phase 2: Execute unique completions in thread pool ──
+    # Threads share the async worker's address space (zero additional
+    # Committed_AS). Each thread's subprocess.run() fork()s from the
+    # small async Ray worker (~50MB VSZ), not the 300GB training process.
     dedup_results: dict[str, dict] = {}
 
     if dedup_tasks:
-        pool = _get_forkserver_pool(num_workers)
-        # Build pool tasks (exclude expected_outputs; matching done in parent)
+        pool = _get_thread_pool(num_workers)
         pool_tasks = []
-        task_meta = {}  # key → (expected_outputs, fn_name)
+        task_meta = {}
         for key, task in dedup_tasks.items():
             _, code, inp_strs, exp_strs, fn_name, timeout, mem, gtimeout = task
             pool_tasks.append((key, code, inp_strs, fn_name, timeout, mem, gtimeout))
             task_meta[key] = (exp_strs, fn_name)
 
-        for dedup_key, outputs in pool.map(pool_execute_completion, pool_tasks):
+        futures = [pool.submit(pool_execute_completion, t) for t in pool_tasks]
+        for future in futures:
+            dedup_key, outputs = future.result()
             exp_strs, fn_name = task_meta[dedup_key]
             n = len(exp_strs)
             passed = 0
