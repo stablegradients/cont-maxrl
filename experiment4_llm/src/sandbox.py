@@ -1,13 +1,6 @@
 """
 Subprocess-based code execution sandbox for evaluating generated Python code.
 
-Uses os.posix_spawn() instead of subprocess.run() to avoid fork() from
-large-VSZ training processes. fork() triggers the kernel's overcommit
-heuristic (overcommit_memory=0), which non-deterministically refuses
-memory allocation and causes SIGSEGV in MemoryError_dealloc on aarch64.
-posix_spawn() creates a new process directly without cloning the parent's
-virtual address space.
-
 Security:
 - 10-second timeout per test case (HARD limit)
 - 512 MB memory limit via resource.setrlimit
@@ -23,10 +16,9 @@ from __future__ import annotations
 
 import json
 import os
-import signal
+import subprocess
 import sys
 import tempfile
-import time
 
 
 DEFAULT_TIMEOUT = 6  # seconds per test case (matches official LCB default)
@@ -241,62 +233,6 @@ print(json.dumps(_results))
 """
 
 
-def _spawn_run(cmd: list[str], env: dict, timeout: float,
-               stdout_path: str, stderr_path: str) -> tuple[int, str, str]:
-    """Run a command via os.posix_spawn() — NO fork().
-
-    Uses posix_spawn file_actions to redirect stdout/stderr to files,
-    then polls os.waitpid() with a timeout. On timeout, sends SIGKILL.
-
-    Returns:
-        (returncode, stdout_text, stderr_text)
-
-    Raises:
-        TimeoutError if the process exceeds the timeout.
-    """
-    file_actions = [
-        (os.POSIX_SPAWN_OPEN, 1, stdout_path,
-         os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644),
-        (os.POSIX_SPAWN_OPEN, 2, stderr_path,
-         os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644),
-    ]
-
-    pid = os.posix_spawn(cmd[0], cmd, env, file_actions=file_actions)
-
-    deadline = time.monotonic() + timeout
-    while True:
-        result_pid, status = os.waitpid(pid, os.WNOHANG)
-        if result_pid != 0:
-            if os.WIFEXITED(status):
-                returncode = os.WEXITSTATUS(status)
-            elif os.WIFSIGNALED(status):
-                returncode = -os.WTERMSIG(status)
-            else:
-                returncode = -1
-            break
-        if time.monotonic() > deadline:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
-            os.waitpid(pid, 0)  # reap zombie
-            raise TimeoutError(f"Process exceeded {timeout}s timeout")
-        time.sleep(0.005)
-
-    try:
-        with open(stdout_path, "r") as f:
-            stdout_text = f.read()
-    except OSError:
-        stdout_text = ""
-    try:
-        with open(stderr_path, "r") as f:
-            stderr_text = f.read()
-    except OSError:
-        stderr_text = ""
-
-    return returncode, stdout_text, stderr_text
-
-
 def execute_in_sandbox(
     code: str,
     input_data: str,
@@ -306,8 +242,6 @@ def execute_in_sandbox(
 ) -> str:
     """
     Execute generated code against a single test case in a sandboxed subprocess.
-
-    Uses os.posix_spawn() to avoid fork() from large training processes.
 
     Args:
         code: the generated Python code
@@ -338,14 +272,6 @@ def execute_in_sandbox(
     runner_file = tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", dir=tmp_dir, delete=False
     )
-    stdout_file = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".out", dir=tmp_dir, delete=False
-    )
-    stderr_file = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".err", dir=tmp_dir, delete=False
-    )
-    stdout_file.close()
-    stderr_file.close()
 
     try:
         code_file.write(code)
@@ -373,30 +299,33 @@ def execute_in_sandbox(
         runner_file.write(runner_script)
         runner_file.close()
 
-        env = {
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", "/tmp"),
-            "TMPDIR": tmp_dir,
-        }
-
-        returncode, stdout, stderr = _spawn_run(
-            cmd, env, timeout_seconds, stdout_file.name, stderr_file.name,
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            cwd=tmp_dir,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": os.environ.get("HOME", "/tmp"),
+                "TMPDIR": tmp_dir,
+            },
         )
 
-        if returncode != 0:
-            stderr = stderr.strip()
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
             if "SyntaxError" in stderr:
                 raise SyntaxError(stderr)
             if "MemoryError" in stderr or "Cannot allocate memory" in stderr:
                 raise MemoryError(stderr)
-            raise RuntimeError(f"Exit code {returncode}: {stderr[:500]}")
+            raise RuntimeError(f"Exit code {result.returncode}: {stderr[:500]}")
 
-        return stdout
+        return result.stdout
 
-    except TimeoutError:
+    except subprocess.TimeoutExpired:
         raise TimeoutError(f"Execution exceeded {timeout_seconds}s timeout")
     finally:
-        for f in [code_file, input_file, runner_file, stdout_file, stderr_file]:
+        for f in [code_file, input_file, runner_file]:
             try:
                 os.unlink(f.name)
             except OSError:
@@ -413,9 +342,9 @@ def execute_batch_in_sandbox(
 ) -> list[str | None]:
     """Run ALL test cases for one completion in a single subprocess.
 
-    Uses os.posix_spawn() to avoid fork() from large training processes.
     Uses signal.alarm for per-test timeouts. No early-stop: all tests are
     always executed to preserve the full continuous reward signal.
+    The parent enforces a hard global timeout via subprocess.run.
 
     Args:
         code: extracted Python source
@@ -443,14 +372,6 @@ def execute_batch_in_sandbox(
     runner_file = tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", dir=tmp_dir, delete=False
     )
-    stdout_file = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".out", dir=tmp_dir, delete=False
-    )
-    stderr_file = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".err", dir=tmp_dir, delete=False
-    )
-    stdout_file.close()
-    stderr_file.close()
 
     try:
         code_file.write(code)
@@ -470,28 +391,30 @@ def execute_batch_in_sandbox(
         ))
         runner_file.close()
 
-        env = {
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", "/tmp"),
-            "TMPDIR": tmp_dir,
-        }
-
-        returncode, stdout, stderr = _spawn_run(
+        result = subprocess.run(
             [sys.executable, runner_file.name, code_file.name, test_file.name],
-            env, global_timeout, stdout_file.name, stderr_file.name,
+            capture_output=True,
+            text=True,
+            timeout=global_timeout,
+            cwd=tmp_dir,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": os.environ.get("HOME", "/tmp"),
+                "TMPDIR": tmp_dir,
+            },
         )
 
-        if returncode != 0:
+        if result.returncode != 0:
             return [None] * len(inputs)
 
-        return json.loads(stdout)
+        return json.loads(result.stdout)
 
-    except TimeoutError:
+    except subprocess.TimeoutExpired:
         return [None] * len(inputs)
     except (json.JSONDecodeError, Exception):
         return [None] * len(inputs)
     finally:
-        for f in [code_file, test_file, runner_file, stdout_file, stderr_file]:
+        for f in [code_file, test_file, runner_file]:
             try:
                 os.unlink(f.name)
             except OSError:
@@ -499,7 +422,11 @@ def execute_batch_in_sandbox(
 
 
 def pool_execute_completion(task: tuple) -> tuple:
-    """Execute all tests for one completion — thread pool worker.
+    """Execute all tests for one completion — multiprocessing pool worker.
+
+    Runs in a forkserver-spawned process (small VSZ) so subprocess.run()
+    forks from a lightweight process, avoiding virtual memory overcommit
+    on large-memory training nodes.
 
     Args:
         task: (dedup_key, code, inputs, fn_name, timeout_per_test,

@@ -115,6 +115,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.val_kwargs.top_p=0.8 \
   actor_rollout_ref.rollout.val_kwargs.top_k=20 \
   reward_model.enable=False \
+  reward_model.launch_reward_fn_async=True \
   custom_reward_function.path="${REPO_ROOT}/experiment4_llm/src/reward_function.py" \
   custom_reward_function.name=compute_score \
   trainer.total_training_steps=2000 \
