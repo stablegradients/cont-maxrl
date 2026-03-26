@@ -304,7 +304,7 @@ $PYTHON "${{REPO_ROOT}}/experiment4_llm/src/train.py" \\
   trainer.n_gpus_per_node=${{N_GPUS}} \\
   trainer.nnodes=1 \\
   trainer.save_freq={SAVE_FREQ} \\
-  trainer.test_freq=20 \\
+  trainer.test_freq=-1 \\
   trainer.val_before_train=False \\
   ray_init.num_cpus={RAY_NUM_CPUS}
 

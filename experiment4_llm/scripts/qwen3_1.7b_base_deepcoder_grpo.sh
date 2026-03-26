@@ -134,7 +134,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
   trainer.save_freq=83 \
-  trainer.test_freq=83 \
+  trainer.test_freq=-1 \
   trainer.resume_mode=auto \
   trainer.max_actor_ckpt_to_keep=1 \
   trainer.val_before_train=False \

@@ -178,7 +178,7 @@ class TaskRunner:
                 print(f"In-situ eval dataset: {len(eval_dataset)} problems")
             # Load extra eval datasets (e.g., evalplus)
             extra_data_files = insitu_eval_config.get("extra_data_files", {})
-            if isinstance(extra_data_files, dict):
+            if extra_data_files:
                 for name, path in extra_data_files.items():
                     print(f"Loading extra eval dataset '{name}' from {path}")
                     extra_eval_datasets[name] = create_rl_dataset(path, config.data, tokenizer, processor)
