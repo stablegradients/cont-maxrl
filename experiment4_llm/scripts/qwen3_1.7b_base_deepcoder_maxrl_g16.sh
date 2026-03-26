@@ -109,7 +109,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.free_cache_engine=True \
   actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.rollout.enable_chunked_prefill=False \
-  actor_rollout_ref.rollout.val_kwargs.n=16 \
+  actor_rollout_ref.rollout.val_kwargs.n=64 \
   actor_rollout_ref.rollout.val_kwargs.do_sample=True \
   actor_rollout_ref.rollout.val_kwargs.temperature=0.7 \
   actor_rollout_ref.rollout.val_kwargs.top_p=0.8 \
@@ -133,7 +133,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.val_before_train=False \
   insitu_eval.data_file="${REPO_ROOT}/data/livecodebench_v5_test.parquet" \
   insitu_eval.n_completions=200 \
-  insitu_eval.eval_batch_size=16 \
+  insitu_eval.eval_batch_size=32 \
   insitu_eval.steps_per_epoch=83 \
   "insitu_eval.eval_steps=[83,166,249,332,415,498,581,664,747,830,913,996]" \
   insitu_eval.output_dir="${OUTPUT_DIR}/eval_livecodebench" \
