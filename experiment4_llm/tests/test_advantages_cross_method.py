@@ -34,26 +34,72 @@ def test_maxrl_norm_vs_unnorm_relationship():
             f"norm: {norm[:4]}, expected: {expected_norm[:4]}"
 
 
+def test_rloo_vs_reinforce_relationship():
+    """RLOO = G/(G-1) * REINFORCE_baseline."""
+    from experiment4_llm.src.advantages import rloo_advantage, reinforce_baseline_advantage
+    rewards = torch.tensor([0.1, 0.3, 0.5, 0.7, 0.9])
+    G = rewards.numel()
+    rloo = rloo_advantage(rewards)
+    reinforce = reinforce_baseline_advantage(rewards)
+    expected = (G / (G - 1)) * reinforce
+    assert torch.allclose(rloo, expected, atol=1e-6)
+
+
+def test_rloo_matches_verl_builtin():
+    """Our rloo_advantage produces identical scalar advantages to verl's compute_rloo_outcome_advantage."""
+    import numpy as np
+    from experiment4_llm.src.advantages import rloo_advantage
+    from verl.trainer.ppo.core_algos import compute_rloo_outcome_advantage
+
+    # Simulate a group: 1 prompt, G=8 completions
+    G = 8
+    seq_len = 20
+    rewards_1d = torch.rand(G)
+
+    # Our function
+    our_adv = rloo_advantage(rewards_1d)
+
+    # verl's function: needs token_level_rewards [G, seq_len], response_mask, index
+    token_rewards = torch.zeros(G, seq_len)
+    response_mask = torch.zeros(G, seq_len)
+    for i in range(G):
+        # Place scalar reward at last response token (position seq_len-1)
+        token_rewards[i, seq_len - 1] = rewards_1d[i]
+        response_mask[i, :] = 1.0  # all tokens are response tokens
+    index = np.array([0] * G)  # all same prompt
+
+    verl_adv, _ = compute_rloo_outcome_advantage(token_rewards, response_mask, index)
+    # verl broadcasts to [G, seq_len]; extract scalar per sequence
+    verl_scalar = verl_adv[:, seq_len - 1]  # advantage at the reward token
+
+    assert torch.allclose(our_adv, verl_scalar, atol=1e-5), \
+        f"Mismatch: ours={our_adv[:4]}, verl={verl_scalar[:4]}"
+
+
 def test_all_methods_agree_on_ordering():
     """All methods should rank completions in the same order."""
     from experiment4_llm.src.advantages import (
         maxrl_unnormalized_advantage,
         maxrl_normalized_advantage,
         reinforce_baseline_advantage,
+        rloo_advantage,
     )
 
     rewards = torch.rand(16)
     adv_unnorm = maxrl_unnormalized_advantage(rewards)
     adv_norm = maxrl_normalized_advantage(rewards)
     adv_reinforce = reinforce_baseline_advantage(rewards)
+    adv_rloo = rloo_advantage(rewards)
 
     order_unnorm = torch.argsort(adv_unnorm)
     order_norm = torch.argsort(adv_norm)
     order_reinforce = torch.argsort(adv_reinforce)
+    order_rloo = torch.argsort(adv_rloo)
 
     assert torch.equal(order_unnorm, order_norm), "unnorm vs norm ordering differs"
     assert torch.equal(order_unnorm, order_reinforce), \
         "unnorm vs reinforce ordering differs"
+    assert torch.equal(order_unnorm, order_rloo), "unnorm vs rloo ordering differs"
 
 
 def test_maxrl_vs_grpo_top_weight_ratio():

@@ -122,6 +122,33 @@ def test_maxrl_norm_unit_variance():
 # ── Edge Cases ──
 
 
+def test_rloo_advantage_basic():
+    """RLOO advantage = G/(G-1) * (r_i - mean(r))."""
+    from experiment4_llm.src.advantages import rloo_advantage
+    rewards = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    adv = rloo_advantage(rewards)
+    G = 4
+    mean = rewards.mean()  # 2.5
+    expected = (G / (G - 1)) * (rewards - mean)
+    assert torch.allclose(adv, expected, atol=1e-6)
+
+
+def test_rloo_advantage_mean_zero():
+    """RLOO advantages sum to zero across the group."""
+    from experiment4_llm.src.advantages import rloo_advantage
+    rewards = torch.rand(16)
+    adv = rloo_advantage(rewards)
+    assert abs(adv.sum().item()) < 1e-5
+
+
+def test_rloo_advantage_single_sample():
+    """With G=1, no leave-one-out is possible; return zeros."""
+    from experiment4_llm.src.advantages import rloo_advantage
+    rewards = torch.tensor([3.14])
+    adv = rloo_advantage(rewards)
+    assert torch.allclose(adv, torch.zeros(1))
+
+
 @pytest.mark.parametrize("fn_name", [
     "maxrl_unnormalized_advantage",
     "maxrl_normalized_advantage",

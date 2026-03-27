@@ -105,3 +105,19 @@ def reinforce_baseline_advantage(rewards: torch.Tensor) -> torch.Tensor:
     A_i = r_i - mean(r)
     """
     return rewards - rewards.mean()
+
+
+def rloo_advantage(rewards: torch.Tensor) -> torch.Tensor:
+    """
+    RLOO: leave-one-out baseline (Ahmadian et al. 2024, Kool et al. 2019).
+
+    A_i = r_i - (1/(G-1)) * sum_{j != i} r_j
+        = G/(G-1) * (r_i - mean(r))
+
+    For G=1, returns zeros (no leave-one-out possible).
+    """
+    G = rewards.numel()
+    if G <= 1:
+        return torch.zeros_like(rewards)
+    mean = rewards.mean()
+    return (G / (G - 1)) * (rewards - mean)
