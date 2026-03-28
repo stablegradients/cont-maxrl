@@ -114,10 +114,13 @@ def rloo_advantage(rewards: torch.Tensor) -> torch.Tensor:
     A_i = r_i - (1/(G-1)) * sum_{j != i} r_j
         = G/(G-1) * (r_i - mean(r))
 
+    Scale by G so the 1/G in the policy gradient loss doesn't shrink the
+    gradient (same correction as maxrl_unnormalized_advantage line 73).
+
     For G=1, returns zeros (no leave-one-out possible).
     """
     G = rewards.numel()
     if G <= 1:
         return torch.zeros_like(rewards)
     mean = rewards.mean()
-    return (G / (G - 1)) * (rewards - mean)
+    return (G / (G - 1)) * (rewards - mean) * G

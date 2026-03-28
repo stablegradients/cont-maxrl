@@ -35,18 +35,22 @@ def test_maxrl_norm_vs_unnorm_relationship():
 
 
 def test_rloo_vs_reinforce_relationship():
-    """RLOO = G/(G-1) * REINFORCE_baseline."""
+    """RLOO = G^2/(G-1) * REINFORCE_baseline (includes * G for PPO loss scaling)."""
     from experiment4_llm.src.advantages import rloo_advantage, reinforce_baseline_advantage
     rewards = torch.tensor([0.1, 0.3, 0.5, 0.7, 0.9])
     G = rewards.numel()
     rloo = rloo_advantage(rewards)
     reinforce = reinforce_baseline_advantage(rewards)
-    expected = (G / (G - 1)) * reinforce
+    expected = (G / (G - 1)) * reinforce * G
     assert torch.allclose(rloo, expected, atol=1e-6)
 
 
-def test_rloo_matches_verl_builtin():
-    """Our rloo_advantage produces identical scalar advantages to verl's compute_rloo_outcome_advantage."""
+def test_rloo_matches_verl_builtin_times_G():
+    """Our rloo_advantage = G * verl's compute_rloo_outcome_advantage.
+
+    The factor of G compensates for PPO's token-mean loss (same as GOS line 73).
+    verl's built-in RLOO lacks this correction, so we intentionally override it.
+    """
     import numpy as np
     from experiment4_llm.src.advantages import rloo_advantage
     from verl.trainer.ppo.core_algos import compute_rloo_outcome_advantage
@@ -56,10 +60,10 @@ def test_rloo_matches_verl_builtin():
     seq_len = 20
     rewards_1d = torch.rand(G)
 
-    # Our function
+    # Our function (with * G)
     our_adv = rloo_advantage(rewards_1d)
 
-    # verl's function: needs token_level_rewards [G, seq_len], response_mask, index
+    # verl's function (without * G): needs token_level_rewards [G, seq_len], response_mask, index
     token_rewards = torch.zeros(G, seq_len)
     response_mask = torch.zeros(G, seq_len)
     for i in range(G):
@@ -72,8 +76,8 @@ def test_rloo_matches_verl_builtin():
     # verl broadcasts to [G, seq_len]; extract scalar per sequence
     verl_scalar = verl_adv[:, seq_len - 1]  # advantage at the reward token
 
-    assert torch.allclose(our_adv, verl_scalar, atol=1e-5), \
-        f"Mismatch: ours={our_adv[:4]}, verl={verl_scalar[:4]}"
+    assert torch.allclose(our_adv, verl_scalar * G, atol=1e-5), \
+        f"Mismatch: ours={our_adv[:4]}, G*verl={verl_scalar[:4] * G}"
 
 
 def test_all_methods_agree_on_ordering():

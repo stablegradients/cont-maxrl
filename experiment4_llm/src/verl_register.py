@@ -97,5 +97,5 @@ CUSTOM_ESTIMATORS = {
     "maxrl_unnorm": _make_verl_advantage_fn(_maxrl_unnorm_1d),
     "maxrl_norm": _make_verl_advantage_fn(_maxrl_norm_1d),
     "reinforce_baseline": _make_verl_advantage_fn(_reinforce_baseline_1d),
-    "rloo_local": _make_verl_advantage_fn(_rloo_1d),
+    "rloo": _make_verl_advantage_fn(_rloo_1d),
 }
