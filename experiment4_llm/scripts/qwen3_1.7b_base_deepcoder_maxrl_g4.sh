@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=q3_1.7b_maxrl_g4
-#SBATCH --account=bgmo-dtai-gh
+#SBATCH --account=bgts-dtai-gh
 #SBATCH --partition=ghx4
 #SBATCH --gpus-per-node=4
 #SBATCH --time=47:00:00
 #SBATCH --mem=0
 #SBATCH --cpus-per-task=288
 #SBATCH --nodes=1
-#SBATCH --output=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.out
-#SBATCH --error=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.err
+#SBATCH --output=/projects/bgts/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.out
+#SBATCH --error=/projects/bgts/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.err
 
 # ============================================================
-# Qwen3-1.7B (Base) | DeepCoder | MaxRL (continuous) | G=4
+# Qwen3-1.7B (Base) | DeepCoder | MaxRL (gap-over-survivors) | G=4 | bgts
 # Continuous reward (fraction of test cases passed)
-# Usage: sbatch qwen3_1.7b_base_deepcoder_maxrl_g4.sh [SEED]
+# Self-chaining: resubmits with --dependency=afterany
+# Usage: sbatch qwen3_1.7b_base_deepcoder_maxrl_g4.sh [SEED] [CHAIN_LEFT]
 # ============================================================
 
-SEED=${1:-42}
+SEED=${1:-0}
+CHAIN_LEFT=${2:-4}
 
 module load python/miniforge3_pytorch/2.10.0
 eval "$(conda shell.bash hook)"
@@ -24,11 +26,15 @@ conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
 
 set -euo pipefail
 
+# Trap SIGTERM (SLURM wall-time kill) so self-chaining still fires
+trap 'echo "Caught SIGTERM (wall-time limit) — proceeding to self-chain"' TERM
+
 REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
+STORAGE_ROOT="/projects/bgts/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 
-OUTPUT_DIR="${REPO_ROOT}/results/qwen3_1.7b_base_deepcoder_maxrl_g4_s${SEED}"
+OUTPUT_DIR="${STORAGE_ROOT}/results/qwen3_1.7b_deepcoder_maxrl_g4_s${SEED}"
 mkdir -p "${OUTPUT_DIR}"
 
 # Conda CUDA (not system CUDA)
@@ -36,7 +42,7 @@ export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 export PATH="${CUDA_HOME}/bin:${PATH}"
 export LD_LIBRARY_PATH="${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}"
 
-# NCCL: disable system network plugin (incompatible with conda NCCL)
+# NCCL: disable system network plugin (incompatible with conda NCCL, single-node)
 unset NCCL_NET
 unset NCCL_NET_PLUGIN
 export NCCL_PLUGIN_P2P=0
@@ -47,7 +53,7 @@ export WANDB_ENTITY="stablegradients"
 export WANDB_RUN_GROUP="qwen3-1.7b-base_deepcoder_maxrl_G4"
 
 # Caches
-export HF_HOME="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface"
+export HF_HOME="${REPO_ROOT}/.cache/huggingface"
 export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
 export VERL_REWARD_WORKERS=64
@@ -60,9 +66,11 @@ mkdir -p "${TORCH_HOME}" "${VLLM_CACHE_ROOT}" "${RAY_TMPDIR}" "${TMPDIR}"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 
 N_GPUS=${SLURM_GPUS_ON_NODE:-$(nvidia-smi -L 2>/dev/null | wc -l || echo 4)}
-echo "=== Train: Qwen3-1.7B Base | MaxRL | G=4 | seed=${SEED} ==="
+echo "=== Train: Qwen3-1.7B Base | MaxRL | G=4 | seed=${SEED} | chain_left=${CHAIN_LEFT} ==="
 echo "GPUs: ${N_GPUS}, Output: ${OUTPUT_DIR}"
 
+# Disable errexit so SIGTERM/non-zero exit doesnt skip chaining
+set +e
 $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   +data.seed=${SEED} \
   algorithm.adv_estimator=maxrl_unnorm \
@@ -85,7 +93,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.actor.strategy=fsdp \
   actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
   actor_rollout_ref.actor.ppo_mini_batch_size=256 \
-  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.actor.ppo_epochs=1 \
   actor_rollout_ref.actor.use_kl_loss=False \
   actor_rollout_ref.actor.kl_loss_coef=0.0 \
@@ -111,9 +119,9 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.enable_chunked_prefill=False \
   actor_rollout_ref.rollout.val_kwargs.n=64 \
   actor_rollout_ref.rollout.val_kwargs.do_sample=True \
-  actor_rollout_ref.rollout.val_kwargs.temperature=0.7 \
-  actor_rollout_ref.rollout.val_kwargs.top_p=0.8 \
-  actor_rollout_ref.rollout.val_kwargs.top_k=20 \
+  actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
+  actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
+  actor_rollout_ref.rollout.val_kwargs.top_k=-1 \
   reward_model.enable=False \
   reward_model.launch_reward_fn_async=True \
   custom_reward_function.path="${REPO_ROOT}/experiment4_llm/src/reward_function.py" \
@@ -121,15 +129,14 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   trainer.total_training_steps=1000 \
   trainer.total_epochs=15 \
   trainer.project_name=cont-maxrl-code \
-  trainer.experiment_name="qwen3_1.7b_base_deepcoder_maxrl_g4_s${SEED}" \
+  trainer.experiment_name="qwen3_1.7b_deepcoder_maxrl_g4_s${SEED}" \
   "trainer.logger=['console','wandb']" \
   trainer.default_local_dir="${OUTPUT_DIR}" \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
-  trainer.save_freq=20 \
+  trainer.save_freq=83 \
   trainer.test_freq=-1 \
   trainer.resume_mode=auto \
-  trainer.max_actor_ckpt_to_keep=1 \
   trainer.val_before_train=False \
   insitu_eval.data_file="${REPO_ROOT}/data/livecodebench_v5_test.parquet" \
   insitu_eval.n_completions=200 \
@@ -141,5 +148,21 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   +insitu_eval.extra_data_files.mbpp_plus="${REPO_ROOT}/data/evalplus_mbpp_test.parquet" \
   ray_init.num_cpus=280
 
+TRAIN_EXIT=$?
+set -e
+
 echo ""
-echo "=== Training complete: MaxRL G=4 seed=${SEED} ==="
+echo "=== Training segment complete: MaxRL G=4 seed=${SEED} (exit=${TRAIN_EXIT}) ==="
+
+# ============================================================
+# Self-chaining: submit next segment if chains remain
+# ============================================================
+NEXT_CHAIN=$((CHAIN_LEFT - 1))
+if [[ ${NEXT_CHAIN} -gt 0 ]]; then
+    NEXT_JOB=$(sbatch --dependency=afterany:${SLURM_JOB_ID} \
+        "${REPO_ROOT}/experiment4_llm/scripts/qwen3_1.7b_base_deepcoder_maxrl_g4.sh" \
+        "${SEED}" "${NEXT_CHAIN}")
+    echo "Chained next job: ${NEXT_JOB} (chains_left=${NEXT_CHAIN})"
+else
+    echo "No more chains (next_chain=${NEXT_CHAIN}, train_exit=${TRAIN_EXIT})"
+fi

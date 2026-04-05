@@ -249,6 +249,7 @@ class vLLMRollout(BaseRollout):
                 "top_p": self.config.val_kwargs.top_p,
                 "temperature": self.config.val_kwargs.temperature,
                 "n": 1,  # if validate, already repeat in ray_trainer
+                "seed": self.config.val_kwargs.get("seed", 42),
             }
 
         # users can customize different sampling_params at different run
