@@ -70,8 +70,8 @@ class TestMazeGenerator:
             grid = gen.generate()
             grids.add(grid.tobytes())
         # Larger grids have much more combinatorial space
-        assert len(grids) > 9_000, (
-            f"Expected >9000 distinct grids from 10K seeds, got {len(grids)}"
+        assert len(grids) > 9_950, (
+            f"Expected >9950 distinct grids from 10K seeds, got {len(grids)}"
         )
 
     def test_deterministic_generation(self):
@@ -167,12 +167,10 @@ class TestMazeEnv:
         assert not done
 
     def test_from_sequence_invalid(self):
-        """from_sequence should raise on invalid input."""
-        with pytest.raises(ValueError):
-            MazeEnv.from_sequence("GARBAGE INPUT")
-
-        with pytest.raises(ValueError):
-            MazeEnv.from_sequence("GRID_START\n1 0\nGRID_END\n")
+        """from_sequence should return None on invalid input."""
+        assert MazeEnv.from_sequence("GARBAGE INPUT") is None
+        assert MazeEnv.from_sequence("GRID_START\n1 0\nGRID_END\n") is None
+        assert MazeEnv.from_sequence("") is None
 
     def test_reset(self):
         env, gen = self._make_env()

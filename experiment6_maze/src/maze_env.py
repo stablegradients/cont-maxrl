@@ -253,40 +253,42 @@ class MazeEnv:
         return False
 
     @classmethod
-    def from_sequence(cls, text_sequence: str) -> "MazeEnv":
-        """Parse a ground-truth text sequence back into a MazeEnv."""
-        lines = text_sequence.strip().split("\n")
+    def from_sequence(cls, text_sequence: str) -> Optional["MazeEnv"]:
+        """Parse a ground-truth text sequence back into a MazeEnv.
 
-        # Find GRID_START / GRID_END
+        Returns None if the text is malformed or missing required fields.
+        """
         try:
+            lines = text_sequence.strip().split("\n")
+
             gs_idx = lines.index("GRID_START")
             ge_idx = lines.index("GRID_END")
-        except ValueError as exc:
-            raise ValueError("Missing GRID_START or GRID_END") from exc
 
-        grid_lines = lines[gs_idx + 1 : ge_idx]
-        grid = np.array(
-            [[int(x) for x in row.split()] for row in grid_lines], dtype=np.int8
-        )
+            grid_lines = lines[gs_idx + 1 : ge_idx]
+            grid = np.array(
+                [[int(x) for x in row.split()] for row in grid_lines], dtype=np.int8
+            )
 
-        start: Optional[tuple[int, int]] = None
-        goal: Optional[tuple[int, int]] = None
-        size: Optional[int] = None
+            start: Optional[tuple[int, int]] = None
+            goal: Optional[tuple[int, int]] = None
+            size: Optional[int] = None
 
-        for line in lines[ge_idx + 1 :]:
-            if line.startswith("START "):
-                parts = line.split()
-                start = (int(parts[1]), int(parts[2]))
-            elif line.startswith("GOAL "):
-                parts = line.split()
-                goal = (int(parts[1]), int(parts[2]))
-            elif line.startswith("SIZE "):
-                size = int(line.split()[1])
+            for line in lines[ge_idx + 1 :]:
+                if line.startswith("START "):
+                    parts = line.split()
+                    start = (int(parts[1]), int(parts[2]))
+                elif line.startswith("GOAL "):
+                    parts = line.split()
+                    goal = (int(parts[1]), int(parts[2]))
+                elif line.startswith("SIZE "):
+                    size = int(line.split()[1])
 
-        if start is None or goal is None or size is None:
-            raise ValueError("Missing START, GOAL, or SIZE in text sequence")
+            if start is None or goal is None or size is None:
+                return None
 
-        return cls(grid=grid, start=start, goal=goal, size=size)
+            return cls(grid=grid, start=start, goal=goal, size=size)
+        except (ValueError, IndexError):
+            return None
 
 
 # ---------------------------------------------------------------------------
