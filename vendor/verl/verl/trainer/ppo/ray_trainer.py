@@ -92,6 +92,7 @@ class AdvantageEstimator(str, Enum):
     MAXRL_UNNORM = "maxrl_unnorm"
     MAXRL_NORM = "maxrl_norm"
     REINFORCE_BASELINE = "reinforce_baseline"
+    BINARY_MAXRL = "binary_maxrl"
 
 
 @dataclass
@@ -249,6 +250,7 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         AdvantageEstimator.MAXRL_NORM,
         AdvantageEstimator.REINFORCE_BASELINE,
         AdvantageEstimator.RLOO,
+        AdvantageEstimator.BINARY_MAXRL,
     ):
         from experiment4_llm.src.verl_register import CUSTOM_ESTIMATORS
         estimator_name = adv_estimator.value if hasattr(adv_estimator, 'value') else str(adv_estimator)
@@ -335,6 +337,7 @@ class RayPPOTrainer:
             AdvantageEstimator.MAXRL_UNNORM,
             AdvantageEstimator.MAXRL_NORM,
             AdvantageEstimator.REINFORCE_BASELINE,
+            AdvantageEstimator.BINARY_MAXRL,
         ]:
             self.use_critic = False
         else:
@@ -741,7 +744,7 @@ class RayPPOTrainer:
             "output_dir", os.path.join(self.config.trainer.default_local_dir, "eval_livecodebench"))
         epoch = round(self.global_steps / steps_per_epoch)
         n_workers = int(os.environ.get("VERL_REWARD_WORKERS", 128))
-        label = eval_name or "livecodebench"
+        label = eval_name or "livecodebench_v5"
 
         print(f"\n{'='*60}")
         print(f"In-situ eval [{label}]: epoch {epoch}, step {self.global_steps}")
@@ -864,7 +867,7 @@ class RayPPOTrainer:
 
         # Return pass@k as trainer metrics for W&B logging
         metric_dict = {}
-        prefix = f"insitu_eval/{label}" if label != "livecodebench" else "insitu_eval"
+        prefix = f"insitu_eval/{label}"
         pass_at_k = metrics.get("pass_at_k", {})
         for k, v in pass_at_k.items():
             if v is not None:

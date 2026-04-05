@@ -124,3 +124,28 @@ def rloo_advantage(rewards: torch.Tensor) -> torch.Tensor:
         return torch.zeros_like(rewards)
     mean = rewards.mean()
     return (G / (G - 1)) * (rewards - mean) * G
+
+
+def binary_maxrl_advantage(rewards: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """Binary MaxRL estimator from Tajwar et al. 2026 (arXiv:2602.02710).
+
+    Formula: A_i = (r_i - mean(r)) / mean(r)
+
+    On binary rewards r_i in {0,1} with C successes out of G:
+      success (r_i=1): (1 - C/G) / (C/G) = (G-C)/C
+      failure (r_i=0): -(C/G) / (C/G)    = -1
+
+    This is algebraically identical to GOS (maxrl_unnormalized_advantage)
+    on binary rewards. This identity is the binary-recovery proposition
+    in the paper.
+
+    Included as a baseline (Tajwar et al.), not as our method. GOS
+    (maxrl_unnormalized_advantage) is the paper's contribution.
+    """
+    G = rewards.numel()
+    if G <= 1:
+        return torch.zeros_like(rewards)
+    mean = rewards.mean()
+    if mean < eps:
+        return torch.zeros_like(rewards)
+    return (rewards - mean) / mean

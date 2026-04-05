@@ -23,6 +23,7 @@ from experiment4_llm.src.advantages import (
     maxrl_normalized_advantage as _maxrl_norm_1d,
     reinforce_baseline_advantage as _reinforce_baseline_1d,
     rloo_advantage as _rloo_1d,
+    binary_maxrl_advantage as _binary_maxrl_1d,
 )
 
 
@@ -98,4 +99,5 @@ CUSTOM_ESTIMATORS = {
     "maxrl_norm": _make_verl_advantage_fn(_maxrl_norm_1d),
     "reinforce_baseline": _make_verl_advantage_fn(_reinforce_baseline_1d),
     "rloo": _make_verl_advantage_fn(_rloo_1d),
+    "binary_maxrl": _make_verl_advantage_fn(_binary_maxrl_1d),
 }
