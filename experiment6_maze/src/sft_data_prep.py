@@ -75,7 +75,7 @@ def main():
         seed_start=args.train_seed_start,
         size=args.size,
     )
-    train_path = Path(args.output_dir) / "maze_sft_train.jsonl"
+    train_path = Path(args.output_dir) / "sft_train.jsonl"
     write_jsonl(train_records, train_path)
     print(f"  Written {len(train_records)} records to {train_path}")
 
@@ -86,7 +86,7 @@ def main():
         seed_start=args.val_seed_start,
         size=args.size,
     )
-    val_path = Path(args.output_dir) / "maze_sft_val.jsonl"
+    val_path = Path(args.output_dir) / "sft_val.jsonl"
     write_jsonl(val_records, val_path)
     print(f"  Written {len(val_records)} records to {val_path}")
 

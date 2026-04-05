@@ -85,7 +85,7 @@ def main():
         l_max=args.l_max,
         algorithm=args.algorithm,
     )
-    train_path = Path(args.output_dir) / "maze_train.parquet"
+    train_path = Path(args.output_dir) / "train.parquet"
     train_df.to_parquet(train_path)
     print(f"  Written {len(train_df)} records to {train_path}")
 
@@ -98,7 +98,7 @@ def main():
         l_max=args.l_max,
         algorithm=args.algorithm,
     )
-    val_path = Path(args.output_dir) / "maze_val.parquet"
+    val_path = Path(args.output_dir) / "val.parquet"
     val_df.to_parquet(val_path)
     print(f"  Written {len(val_df)} records to {val_path}")
 
