@@ -12,11 +12,11 @@ $PYTHON -m experiment6_maze.src.data_prep \
   --l_max 64 \
   --output_dir "${REPO_ROOT}/data/maze_17x17"
 
-echo "=== Generating SFT data (100K train + 512 val) ==="
+echo "=== Generating SFT data (1M train + 256 val) ==="
 $PYTHON -m experiment6_maze.src.sft_data_prep \
   --size 17 \
-  --n_train 100000 --n_val 512 \
-  --train_seed_start 100000 --val_seed_start 200000 \
+  --n_train 1000000 --n_val 256 \
+  --train_seed_start 0 --val_seed_start 1100000 \
   --output_dir "${REPO_ROOT}/data/maze_17x17"
 
 echo "=== Done ==="

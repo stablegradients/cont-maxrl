@@ -25,14 +25,11 @@ ACTION_NAMES: dict[tuple[int, int], str] = {v: k for k, v in ACTIONS.items()}
 # System prompt (used when formatting maze prompts for LLMs)
 # ---------------------------------------------------------------------------
 
+# System prompt for LLM-based models (e.g., SmolLM2). Not used with custom tokenizer.
 MAZE_SYSTEM_PROMPT = (
-    "You are a maze-solving assistant. "
-    "Given a maze grid, start position, and goal position, "
-    "output the sequence of actions (UP, DOWN, LEFT, RIGHT) "
-    "to navigate from start to goal, ending with DONE. "
-    "Walls are marked as 1 and passages as 0. "
-    "You cannot move through walls or outside the grid boundary. "
-    "Find the shortest path if possible."
+    "Solve the maze. Navigate from S to G. "
+    "Output actions (UP DOWN LEFT RIGHT) ending with DONE. "
+    "Legend: # wall, . path, S start, G goal."
 )
 
 # ---------------------------------------------------------------------------
@@ -140,26 +137,32 @@ class MazeGenerator:
     # -- serialization -------------------------------------------------------
 
     def to_prompt_string(self) -> str:
-        """Human-readable prompt representation of the maze."""
+        """Token-based grid representation matching the MaxRL paper format.
+
+        Each cell is one word-level token: WALL, PATH, START, GOAL.
+        Rows separated by NEWLINE. Ends with GRID_END PATH_START.
+        With the 32-token word-level tokenizer, each token = 1 token ID.
+        17x17 grid = 306 tokens (289 cells + 17 NEWLINEs).
+        """
         grid = self._grid
         if grid is None:
             grid = self.generate()
 
-        walls: list[tuple[int, int]] = []
+        tokens: list[str] = ["GRID_START"]
         for r in range(self.size):
             for c in range(self.size):
-                if grid[r, c] == 1:
-                    walls.append((r, c))
-
-        lines = [
-            f"WALLS: {walls}",
-            f"START: {self.start}",
-            f"GOAL: {self.goal}",
-            f"GRID_SIZE: {self.size}",
-            f"STATE: {self.start}",
-            "OUTPUT FORMAT: UP/DOWN/LEFT/RIGHT actions separated by spaces, ending with DONE",
-        ]
-        return "\n".join(lines)
+                if (r, c) == self.start:
+                    tokens.append("START")
+                elif (r, c) == self.goal:
+                    tokens.append("GOAL")
+                elif grid[r, c] == 1:
+                    tokens.append("WALL")
+                else:
+                    tokens.append("PATH")
+            tokens.append("NEWLINE")
+        tokens.append("GRID_END")
+        tokens.append("PATH_START")
+        return " ".join(tokens)
 
     def to_text_sequence(self) -> str:
         """Serialize grid + optimal path as a ground-truth text sequence.

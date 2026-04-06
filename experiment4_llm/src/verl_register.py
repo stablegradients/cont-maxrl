@@ -101,3 +101,64 @@ CUSTOM_ESTIMATORS = {
     "rloo": _make_verl_advantage_fn(_rloo_1d),
     "binary_maxrl": _make_verl_advantage_fn(_binary_maxrl_1d),
 }
+
+
+# ---------------------------------------------------------------------------
+# DG wrapper: per-token gates, needs old_log_probs (different signature
+# from per-group estimators in CUSTOM_ESTIMATORS).
+# ---------------------------------------------------------------------------
+
+def _make_dg_verl_fn(eta: float = 1.0, surprisal_clip: float = 20.0):
+    """
+    DG has per-token gates, so it doesn't use the _make_verl_advantage_fn
+    per-group abstraction. Builds [B*N, T] advantages directly.
+    """
+    from experiment4_llm.src.advantages import dg_advantage_per_token
+
+    def verl_dg_fn(
+        token_level_rewards: torch.Tensor,   # [B*N, T]
+        response_mask: torch.Tensor,          # [B*N, T]
+        index: np.ndarray,                    # [B*N]
+        old_log_probs: torch.Tensor,          # [B*N, T]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+
+        with torch.no_grad():
+            # Scalar reward per sequence: [B*N]
+            scores = (token_level_rewards * response_mask).sum(dim=-1)
+
+            # Output buffer: [B*N, T]
+            advantages = torch.zeros_like(token_level_rewards)
+
+            # Group by prompt index
+            id2indices: dict = defaultdict(list)
+            bsz = scores.shape[0]
+            for i in range(bsz):
+                id2indices[index[i]].append(i)
+
+            for uid, global_indices in id2indices.items():
+                idx_t = torch.tensor(
+                    global_indices, dtype=torch.long, device=scores.device
+                )
+                group_rewards = scores[idx_t]                       # [G]
+                group_lp = old_log_probs[idx_t]                     # [G, T]
+                group_mask = response_mask[idx_t]                   # [G, T]
+
+                group_adv = dg_advantage_per_token(
+                    rewards=group_rewards,
+                    old_log_probs=group_lp,
+                    response_mask=group_mask,
+                    eta=eta,
+                    surprisal_clip=surprisal_clip,
+                    scale_by_G=True,
+                )                                                    # [G, T]
+                advantages[idx_t] = group_adv
+
+            returns = advantages
+
+        return advantages, returns
+
+    return verl_dg_fn
+
+
+# Exposed factory; ray_trainer.py calls this at dispatch with hardcoded η=1.0.
+DG_FACTORY = _make_dg_verl_fn

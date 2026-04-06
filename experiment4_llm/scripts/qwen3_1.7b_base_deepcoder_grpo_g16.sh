@@ -26,9 +26,6 @@ conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
 
 set -euo pipefail
 
-# Trap SIGTERM (SLURM wall-time kill) so self-chaining still fires
-trap 'echo "Caught SIGTERM (wall-time limit) — proceeding to self-chain"' TERM
-
 REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
 STORAGE_ROOT="/projects/bgtu/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
@@ -69,7 +66,19 @@ N_GPUS=${SLURM_GPUS_ON_NODE:-$(nvidia-smi -L 2>/dev/null | wc -l || echo 4)}
 echo "=== Train: Qwen3-1.7B Base | GRPO | G=16 | seed=${SEED} | chain_left=${CHAIN_LEFT} ==="
 echo "GPUs: ${N_GPUS}, Output: ${OUTPUT_DIR}"
 
-# Disable errexit so SIGTERM/non-zero exit doesnt skip chaining
+# ============================================================
+# Upfront chaining: submit next link NOW so it survives SIGKILL
+# ============================================================
+NEXT_CHAIN=$((CHAIN_LEFT - 1))
+if [[ ${NEXT_CHAIN} -gt 0 ]]; then
+    NEXT_JOB=$(sbatch --dependency=afterany:${SLURM_JOB_ID} \
+        "${REPO_ROOT}/experiment4_llm/scripts/qwen3_1.7b_base_deepcoder_grpo_g16.sh" \
+        "${SEED}" "${NEXT_CHAIN}")
+    echo "Upfront-chained next job: ${NEXT_JOB} (chains_left=${NEXT_CHAIN})"
+else
+    echo "Last chain link (chain_left=${CHAIN_LEFT})"
+fi
+
 set +e
 $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   +data.seed=${SEED} \
@@ -153,16 +162,3 @@ set -e
 
 echo ""
 echo "=== Training segment complete: GRPO G=16 seed=${SEED} (exit=${TRAIN_EXIT}) ==="
-
-# ============================================================
-# Self-chaining: submit next segment if chains remain
-# ============================================================
-NEXT_CHAIN=$((CHAIN_LEFT - 1))
-if [[ ${NEXT_CHAIN} -gt 0 ]]; then
-    NEXT_JOB=$(sbatch --dependency=afterany:${SLURM_JOB_ID} \
-        "${REPO_ROOT}/experiment4_llm/scripts/qwen3_1.7b_base_deepcoder_grpo_g16.sh" \
-        "${SEED}" "${NEXT_CHAIN}")
-    echo "Chained next job: ${NEXT_JOB} (chains_left=${NEXT_CHAIN})"
-else
-    echo "No more chains (next_chain=${NEXT_CHAIN}, train_exit=${TRAIN_EXIT})"
-fi

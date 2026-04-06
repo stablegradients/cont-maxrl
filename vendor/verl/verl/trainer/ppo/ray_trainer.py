@@ -93,6 +93,7 @@ class AdvantageEstimator(str, Enum):
     MAXRL_NORM = "maxrl_norm"
     REINFORCE_BASELINE = "reinforce_baseline"
     BINARY_MAXRL = "binary_maxrl"
+    DG = "dg"
 
 
 @dataclass
@@ -245,6 +246,18 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
 
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
+    elif adv_estimator == AdvantageEstimator.DG:
+        from experiment4_llm.src.verl_register import DG_FACTORY
+        # Paper defaults; not exposed to config for v1.
+        fn = DG_FACTORY(eta=1.0, surprisal_clip=20.0)
+        advantages, returns = fn(
+            token_level_rewards=data.batch["token_level_rewards"],
+            response_mask=data.batch["response_mask"],
+            index=data.non_tensor_batch["uid"],
+            old_log_probs=data.batch["old_log_probs"],
+        )
+        data.batch["advantages"] = advantages
+        data.batch["returns"] = returns
     elif adv_estimator in (
         AdvantageEstimator.MAXRL_UNNORM,
         AdvantageEstimator.MAXRL_NORM,
@@ -338,6 +351,7 @@ class RayPPOTrainer:
             AdvantageEstimator.MAXRL_NORM,
             AdvantageEstimator.REINFORCE_BASELINE,
             AdvantageEstimator.BINARY_MAXRL,
+            AdvantageEstimator.DG,
         ]:
             self.use_critic = False
         else:

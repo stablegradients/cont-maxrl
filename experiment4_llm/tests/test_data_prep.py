@@ -682,3 +682,246 @@ def test_evalplus_set_return_values_serialized():
                 json.loads(out)
             except json.JSONDecodeError:
                 pytest.fail(f"Row {i} output {j} is not valid JSON: {out[:100]}")
+
+
+# ── EvalPlus prompt template bug (functional vs stdin/stdout) ──
+
+
+def test_format_prompt_with_starter_code_uses_functional_template():
+    """When starter_code is provided, format_prompt must use the call-based template.
+
+    Bug: EvalPlus prep was passing starter_code=None, causing all functional
+    problems (HumanEval+/MBPP+) to get the stdin/stdout template instead of
+    the call-based template with "You will use the following starter code...".
+    """
+    from experiment4_llm.src.data_prep import format_prompt
+
+    starter = "def has_close_elements(numbers: List[float], threshold: float) -> bool:"
+    prompt = format_prompt("Complete the function.", fn_name="has_close_elements", starter_code=starter)
+
+    assert "starter code" in prompt.lower(), \
+        "Functional template must contain 'starter code'"
+    assert starter.strip() in prompt, \
+        "Starter code must appear in the prompt"
+    assert "stdin" not in prompt.lower(), \
+        "Functional template must NOT contain stdin/stdout instructions"
+
+
+def test_format_prompt_without_starter_code_uses_stdio_template():
+    """When starter_code is None/empty, format_prompt must use stdin/stdout template."""
+    from experiment4_llm.src.data_prep import format_prompt
+
+    prompt = format_prompt("Read N integers and print their sum.", fn_name=None, starter_code=None)
+
+    assert "stdin" in prompt.lower(), \
+        "stdio template must mention stdin"
+    assert "stdout" in prompt.lower(), \
+        "stdio template must mention stdout"
+    assert "starter code" not in prompt.lower(), \
+        "stdio template must NOT mention starter code"
+
+
+def test_format_prompt_empty_starter_code_uses_stdio_template():
+    """Empty string starter_code should fall through to stdin/stdout template."""
+    from experiment4_llm.src.data_prep import format_prompt
+
+    prompt = format_prompt("Some problem.", fn_name=None, starter_code="   ")
+
+    assert "stdin" in prompt.lower(), \
+        "Whitespace-only starter_code should use stdio template"
+
+
+def test_deepcoder_fn_name_problems_use_call_based_prompt():
+    """DeepCoder problems with fn_name must use call-based prompt template.
+
+    Regression test: DeepCoder taco problems with fn_name had a prompt/scoring
+    mismatch — prompt used stdin/stdout template but scorer tried call-based
+    execution. Fix: synthesize starter_code stub from fn_name so format_prompt
+    uses the call-based template.
+    """
+    import pandas as pd
+    from pathlib import Path
+
+    path = Path("data/deepcoder_train.parquet")
+    if not path.exists():
+        pytest.skip("deepcoder_train.parquet not yet generated")
+
+    df = pd.read_parquet(path)
+    fn_name_count = 0
+    for i, row in df.iterrows():
+        gt = json.loads(row["reward_model"]["ground_truth"])
+        fn_name = gt.get("fn_name")
+        if fn_name:
+            fn_name_count += 1
+            prompt_text = row["prompt"][1]["content"]
+            assert "starter code" in prompt_text.lower(), (
+                f"Row {i}: fn_name={fn_name!r} but prompt uses stdin/stdout template. "
+                f"Call-based problems must use the starter code template."
+            )
+            assert fn_name in prompt_text, (
+                f"Row {i}: fn_name={fn_name!r} not found in prompt text. "
+                f"Model needs to see the function name to define it."
+            )
+            assert "stdin" not in prompt_text.lower(), (
+                f"Row {i}: fn_name={fn_name!r} but prompt mentions stdin. "
+                f"Call-based problems should not mention stdin."
+            )
+
+    # Sanity: fn_name problems should exist (not accidentally excluded)
+    assert fn_name_count > 0, "No fn_name problems found — they should be kept, not excluded"
+
+
+def test_evalplus_prompts_use_functional_template():
+    """All EvalPlus parquet records must use the functional/call-based prompt template.
+
+    Regression test for the bug where starter_code=None caused all EvalPlus
+    problems to get the wrong (stdin/stdout) template.
+    """
+    import pandas as pd
+    from pathlib import Path
+
+    for name in ["evalplus_humaneval_test.parquet", "evalplus_mbpp_test.parquet"]:
+        path = Path(f"data/{name}")
+        if not path.exists():
+            pytest.skip(f"{name} not yet generated")
+
+        df = pd.read_parquet(path)
+        for i, row in df.head(20).iterrows():
+            # prompt is [system_msg, user_msg] — check the user message
+            prompt_text = row["prompt"][1]["content"]
+            assert "starter code" in prompt_text.lower(), \
+                f"{name} row {i}: prompt uses stdin/stdout template instead of functional. " \
+                f"Prompt starts with: {prompt_text[:100]!r}"
+            assert "stdin" not in prompt_text.lower(), \
+                f"{name} row {i}: functional prompt should not mention stdin"
+
+
+# ── Multi-node script validation ──
+
+
+def test_multinode_scripts_use_hostname_dash_capital_I():
+    """Multi-node scripts must use 'hostname -I' (all addresses), not 'hostname -i'.
+
+    Bug: hostname -i returned IPv6 link-local (fe80::...) on Delta GH nodes,
+    which Ray cannot parse. hostname -I returns all IPs, then we filter for IPv4.
+    """
+    from pathlib import Path
+
+    scripts_dir = Path("experiment4_llm/scripts")
+    multinode_scripts = list(scripts_dir.glob("*8b*g16*.sh")) + \
+                       [scripts_dir / "test_multinode.sh"]
+
+    checked = 0
+    for script in multinode_scripts:
+        if not script.exists():
+            continue
+        content = script.read_text()
+        if "HEAD_IP" not in content:
+            continue
+        checked += 1
+
+        # Must use hostname -I (capital I), not hostname -i (lowercase)
+        assert "hostname -I" in content, \
+            f"{script.name}: must use 'hostname -I' (capital I) for IPv4 filtering"
+        # Must NOT have bare hostname -i (only as part of -I)
+        for line in content.splitlines():
+            line_stripped = line.strip()
+            # Skip comments
+            if line_stripped.startswith("#"):
+                continue
+            if "hostname -i" in line_stripped and "hostname -I" not in line_stripped:
+                pytest.fail(
+                    f"{script.name}: uses 'hostname -i' which can return IPv6. "
+                    f"Use 'hostname -I' with IPv4 filter instead. Line: {line_stripped}"
+                )
+
+        # Must have IPv4 filter (grep for dotted-quad pattern)
+        assert "grep" in content and "^[0-9]" in content, \
+            f"{script.name}: must filter hostname -I output for IPv4 addresses"
+
+    assert checked > 0, "No multi-node scripts found to check"
+
+
+def test_multinode_scripts_ray_status_no_srun():
+    """ray status must run directly, NOT via srun, to avoid slot exhaustion.
+
+    Bug: Ray head and worker srun processes consumed all SLURM task slots.
+    Running 'ray status' (or any other command) via srun caused it to hang
+    with 'Job step creation temporarily disabled'.
+    """
+    from pathlib import Path
+
+    scripts_dir = Path("experiment4_llm/scripts")
+    multinode_scripts = list(scripts_dir.glob("*8b*g16*.sh")) + \
+                       [scripts_dir / "test_multinode.sh"]
+
+    checked = 0
+    for script in multinode_scripts:
+        if not script.exists():
+            continue
+        content = script.read_text()
+        if "ray status" not in content:
+            continue
+        checked += 1
+
+        # Find all lines containing "ray status"
+        for line in content.splitlines():
+            if "ray status" in line and not line.strip().startswith("#"):
+                assert "srun" not in line, \
+                    f"{script.name}: 'ray status' must NOT be run via srun " \
+                    f"(srun slots are consumed by Ray head/workers). Line: {line.strip()}"
+
+    assert checked > 0, "No multi-node scripts with 'ray status' found"
+
+
+def test_multinode_scripts_head_ip_has_guard():
+    """Multi-node scripts must guard against empty HEAD_IP (failed IPv4 resolution)."""
+    from pathlib import Path
+
+    scripts_dir = Path("experiment4_llm/scripts")
+    multinode_scripts = list(scripts_dir.glob("*8b*g16*.sh")) + \
+                       [scripts_dir / "test_multinode.sh"]
+
+    checked = 0
+    for script in multinode_scripts:
+        if not script.exists():
+            continue
+        content = script.read_text()
+        if "HEAD_IP" not in content:
+            continue
+        checked += 1
+
+        # Must check for empty HEAD_IP before using it
+        assert '-z "${HEAD_IP}"' in content or '-z "$HEAD_IP"' in content, \
+            f"{script.name}: must check for empty HEAD_IP (failed IPv4 resolution)"
+
+    assert checked > 0, "No multi-node scripts found to check"
+
+
+def test_insitu_eval_wandb_prefix_includes_dataset_name():
+    """All insitu eval metrics must include dataset name in W&B key prefix.
+
+    Regression test: LCB metrics were logged as 'insitu_eval/pass_at_1'
+    without dataset name, making them indistinguishable from a generic metric.
+    All datasets should use 'insitu_eval/{dataset}/metric' format.
+    """
+    from pathlib import Path
+
+    ray_trainer_path = Path("vendor/verl/verl/trainer/ppo/ray_trainer.py")
+    if not ray_trainer_path.exists():
+        pytest.skip("ray_trainer.py not found")
+
+    content = ray_trainer_path.read_text()
+
+    # The old buggy pattern: special-case livecodebench to omit dataset name
+    assert 'if label != "livecodebench"' not in content, \
+        "ray_trainer.py still has special-case that omits dataset name " \
+        "prefix for livecodebench in W&B metric keys"
+
+    # The correct pattern should always include label
+    assert 'f"insitu_eval/{label}"' in content, \
+        "ray_trainer.py should use f'insitu_eval/{label}' for all eval datasets"
+
+    # Default label should be livecodebench_v5, not livecodebench
+    assert 'livecodebench_v5' in content, \
+        "Default eval label should be 'livecodebench_v5' to match the dataset version"

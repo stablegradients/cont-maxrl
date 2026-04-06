@@ -1,7 +1,5 @@
 """Tier 2 tests for maze RL + SFT data preparation."""
 
-import json
-
 import pytest
 
 from experiment6_maze.src.data_prep import build_record, generate_dataset
@@ -25,8 +23,7 @@ class TestParquetRecordRoundtrip:
     def test_parquet_record_roundtrip(self):
         for seed in range(100):
             record = build_record(seed, size=17, l_max=64)
-            reward_model = json.loads(record["reward_model"])
-            ground_truth = reward_model["ground_truth"]
+            ground_truth = record["reward_model"]["ground_truth"]
 
             env = MazeEnv.from_sequence(ground_truth)
             assert env is not None, f"seed={seed}: from_sequence returned None"
@@ -39,7 +36,7 @@ class TestExtraInfoPresent:
 
     def test_extra_info_present(self):
         record = build_record(42, size=17, l_max=64)
-        extra_info = json.loads(record["extra_info"])
+        extra_info = record["extra_info"]
 
         assert extra_info["l_max"] == 64
         assert extra_info["optimal_len"] > 0
@@ -54,12 +51,12 @@ class TestDataSource:
         assert record["data_source"] == "maze_17x17"
 
 
-class TestPromptIsValidJson:
-    """prompt must be valid JSON with 2 messages: system + user roles."""
+class TestPromptIsChatMessages:
+    """prompt must be a list of 2 message dicts: system + user roles."""
 
-    def test_prompt_is_valid_json(self):
+    def test_prompt_is_chat_messages(self):
         record = build_record(0, size=17, l_max=64)
-        messages = json.loads(record["prompt"])
+        messages = record["prompt"]
 
         assert isinstance(messages, list)
         assert len(messages) == 2
@@ -131,8 +128,7 @@ class TestPromptFormatMatchesRL:
             rl_record = build_record(seed, size=17, l_max=64)
             sft_record = build_sft_record(seed, size=17)
 
-            rl_messages = json.loads(rl_record["prompt"])
-            rl_user_content = rl_messages[1]["content"]
+            rl_user_content = rl_record["prompt"][1]["content"]
 
             # SFT prompt = MAZE_SYSTEM_PROMPT + "\n\n" + user_content
             sft_user_content = sft_record["prompt"][len(MAZE_SYSTEM_PROMPT) + 2:]

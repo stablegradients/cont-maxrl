@@ -149,3 +149,58 @@ def binary_maxrl_advantage(rewards: torch.Tensor, eps: float = 1e-6) -> torch.Te
     if mean < eps:
         return torch.zeros_like(rewards)
     return (rewards - mean) / mean
+
+
+def dg_advantage_per_token(
+    rewards: torch.Tensor,           # [G] per-rollout scalar reward
+    old_log_probs: torch.Tensor,     # [G, T] per-token log π_old
+    response_mask: torch.Tensor,     # [G, T]
+    eta: float = 1.0,
+    surprisal_clip: float = 20.0,
+    scale_by_G: bool = True,
+) -> torch.Tensor:
+    """
+    Delightful Policy Gradient per-token advantage (Osband 2026, arXiv:2603.14608).
+
+    U_tau  = r_tau - mean(r_group)                       # REINFORCE baseline, [G]
+    ell_t  = clip(-log pi_old(a_t), 0, surprisal_clip)   # surprisal, [G, T]
+    w_t    = sigmoid(U_tau * ell_t / eta)                # delight gate, [G, T]
+    coef_t = (w_t * U_tau) * G                           # effective coef, [G, T]
+
+    The G scaling matches maxrl_unnormalized_advantage / rloo_advantage: it
+    counteracts the 1/N averaging in verl's token-mean policy loss so gradient
+    magnitude is comparable across {GRPO, GOS G=16, DG} at fixed group size G.
+
+    Args:
+        rewards: [G] scalar reward per rollout
+        old_log_probs: [G, T] log pi_old(a_t) at each response token
+        response_mask: [G, T] 1 for response tokens, 0 for pads
+        eta: gate temperature (paper uses 1.0)
+        surprisal_clip: max |log pi| before clipping, in nats
+        scale_by_G: multiply by G to match repo scaling convention
+
+    Returns:
+        advantages: [G, T], already masked (pads are 0)
+    """
+    G, T = old_log_probs.shape
+    if G <= 1:
+        return torch.zeros(G, T, dtype=rewards.dtype, device=rewards.device)
+
+    # Per-rollout advantage: mean-centered, no std. [G]
+    U = rewards - rewards.mean()
+
+    # Surprisal from OLD log-probs, clipped. [G, T]
+    # -log pi in [0, +inf); clip at 20 nats => pi >= ~2e-9.
+    ell = (-old_log_probs).clamp(min=0.0, max=surprisal_clip)
+    ell = ell * response_mask  # zero out pad positions
+
+    # Delight and gate, per-token. [G, T]
+    U_bcast = U.unsqueeze(-1)          # [G, 1]
+    chi = U_bcast * ell                 # [G, T]
+    w = torch.sigmoid(chi / eta)        # [G, T], in (0, 1)
+
+    coef = w * U_bcast                  # [G, T]
+    if scale_by_G:
+        coef = coef * G
+
+    return coef * response_mask

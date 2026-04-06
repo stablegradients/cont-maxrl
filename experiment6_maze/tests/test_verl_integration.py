@@ -1,6 +1,4 @@
 """Tier 4: verl integration tests — dispatch, shapes, extra_info plumbing."""
-import json
-
 import numpy as np
 import torch
 import pytest
@@ -51,8 +49,8 @@ class TestVerlDispatch:
 class TestRewardIntegration:
     def test_compute_score_with_real_record(self):
         record = build_record(seed=0, size=17, l_max=64)
-        gt_str = json.loads(record["reward_model"])["ground_truth"]
-        ei = json.loads(record["extra_info"])
+        gt_str = record["reward_model"]["ground_truth"]
+        ei = record["extra_info"]
         gen = MazeGenerator(size=17, seed=0)
         gen.generate()
         optimal = " ".join(gen.optimal_path_actions()) + " DONE"
@@ -63,7 +61,7 @@ class TestRewardIntegration:
 
     def test_compute_score_binary_with_real_record(self):
         record = build_record(seed=0, size=17, l_max=64)
-        gt_str = json.loads(record["reward_model"])["ground_truth"]
+        gt_str = record["reward_model"]["ground_truth"]
         gen = MazeGenerator(size=17, seed=0)
         gen.generate()
         optimal = " ".join(gen.optimal_path_actions()) + " DONE"

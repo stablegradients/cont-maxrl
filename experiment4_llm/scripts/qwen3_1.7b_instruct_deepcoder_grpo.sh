@@ -118,9 +118,9 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.rollout.enable_chunked_prefill=False \
   actor_rollout_ref.rollout.val_kwargs.n=64 \
   actor_rollout_ref.rollout.val_kwargs.do_sample=True \
-  actor_rollout_ref.rollout.val_kwargs.temperature=0.7 \
-  actor_rollout_ref.rollout.val_kwargs.top_p=0.8 \
-  actor_rollout_ref.rollout.val_kwargs.top_k=20 \
+  actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
+  actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
+  actor_rollout_ref.rollout.val_kwargs.top_k=-1 \
   reward_model.enable=False \
   reward_model.launch_reward_fn_async=True \
   custom_reward_function.path="${REPO_ROOT}/experiment4_llm/src/reward_function.py" \

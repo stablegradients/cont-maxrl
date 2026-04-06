@@ -278,3 +278,79 @@ def test_maxrl_deterministic():
     adv1 = maxrl_unnormalized_advantage(rewards.clone())
     adv2 = maxrl_unnormalized_advantage(rewards.clone())
     assert torch.equal(adv1, adv2)
+
+
+def test_dg_advantage_per_token_basic():
+    """DG gate: suppresses rare+negative U (blunders), amplifies rare+positive U (breakthroughs)."""
+    from experiment4_llm.src.advantages import dg_advantage_per_token
+
+    G, T = 4, 8
+    rewards = torch.tensor([1.0, 0.5, 0.0, 0.0])
+    # U = rewards - mean = [0.625, 0.125, -0.375, -0.375]
+    # Rollout 0: rare (high surprisal) + positive U -> breakthrough, gate open
+    # Rollout 2: rare (high surprisal) + negative U -> blunder, gate closed
+    # Rollouts 1, 3: common (low surprisal) -> gate ~= 0.5
+    old_log_probs = torch.zeros(G, T)
+    old_log_probs[0] = -5.0
+    old_log_probs[1] = -0.5
+    old_log_probs[2] = -5.0
+    old_log_probs[3] = -0.5
+    mask = torch.ones(G, T)
+
+    adv = dg_advantage_per_token(
+        rewards, old_log_probs, mask, eta=1.0, scale_by_G=True
+    )
+    assert adv.shape == (G, T)
+
+    # Breakthrough: sigmoid(0.625 * 5 / 1) * 0.625 * G = sigmoid(3.125) * 2.5
+    # ~= 0.958 * 2.5 ~= 2.395
+    assert adv[0, 0].item() > 2.0
+
+    # Blunder: sigmoid(-0.375 * 5) * -0.375 * G = sigmoid(-1.875) * -1.5
+    # ~= 0.133 * -1.5 ~= -0.2
+    assert abs(adv[2, 0].item()) < 0.5
+
+    # Common + positive U, low surprisal: gate ~ sigmoid(~0) ~ 0.5
+    # coef ~= 0.5 * 0.125 * 4 = 0.25
+    baseline_mag = abs(rewards[1].item() - rewards.mean().item()) * G  # 0.5
+    assert 0.3 * baseline_mag < abs(adv[1, 0].item()) < 0.7 * baseline_mag
+
+
+def test_dg_advantage_masking():
+    """Padded tokens receive zero advantage."""
+    from experiment4_llm.src.advantages import dg_advantage_per_token
+
+    G, T = 3, 6
+    rewards = torch.tensor([1.0, 0.5, 0.0])
+    old_log_probs = torch.full((G, T), -1.0)
+    mask = torch.ones(G, T)
+    mask[:, 4:] = 0  # last 2 tokens are pads
+
+    adv = dg_advantage_per_token(rewards, old_log_probs, mask, eta=1.0)
+    assert (adv[:, 4:] == 0).all(), "padded positions must be zero"
+    assert not (adv[:, :4] == 0).all(), "unpadded positions must be nonzero"
+
+
+def test_dg_advantage_all_equal_rewards():
+    """If all rewards are equal, U = 0, coef = 0."""
+    from experiment4_llm.src.advantages import dg_advantage_per_token
+
+    G, T = 4, 6
+    rewards = torch.ones(G) * 0.5
+    old_log_probs = torch.full((G, T), -2.0)
+    mask = torch.ones(G, T)
+
+    adv = dg_advantage_per_token(rewards, old_log_probs, mask, eta=1.0)
+    assert torch.allclose(adv, torch.zeros_like(adv))
+
+
+def test_dg_advantage_G_one():
+    """G=1 edge case: returns zeros (no group baseline possible)."""
+    from experiment4_llm.src.advantages import dg_advantage_per_token
+
+    rewards = torch.tensor([0.7])
+    old_log_probs = torch.full((1, 5), -1.0)
+    mask = torch.ones(1, 5)
+    adv = dg_advantage_per_token(rewards, old_log_probs, mask)
+    assert adv.shape == (1, 5)
+    assert torch.allclose(adv, torch.zeros_like(adv))

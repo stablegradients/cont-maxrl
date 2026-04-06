@@ -204,6 +204,10 @@ def prepare_apps(
 
             fn_name = test_cases.get("fn_name")
             starter_code = example.get("starter_code", "")
+            # If call-based (fn_name) but no starter_code, synthesize a stub
+            # so format_prompt uses the call-based template.
+            if fn_name and not (starter_code and starter_code.strip()):
+                starter_code = f"def {fn_name}():\n    pass"
             prompt_text = format_prompt(question, fn_name, starter_code)
             record = make_record("apps", prompt_text, test_cases, max_tests)
             if record is not None:
@@ -281,6 +285,10 @@ def prepare_taco(
 
         fn_name = test_cases.get("fn_name")
         starter_code = example.get("starter_code", "")
+        # If call-based (fn_name) but no starter_code, synthesize a stub
+        # so format_prompt uses the call-based template.
+        if fn_name and not (starter_code and starter_code.strip()):
+            starter_code = f"def {fn_name}():\n    pass"
         prompt_text = format_prompt(question, fn_name, starter_code)
         record = make_record("taco", prompt_text, test_cases, max_tests)
         if record is not None:
@@ -662,7 +670,15 @@ def prepare_deepcoder(
             continue
 
         fn_name = test_cases.get("fn_name")
-        prompt_text = format_prompt(question, fn_name, starter_code=None)
+        # DeepCoder taco has no starter_code field. For call-based problems
+        # (fn_name set), synthesize a minimal stub so format_prompt uses the
+        # call-based template and the model sees the expected function name.
+        # The problem text usually shows usage examples with the function name,
+        # so the model can infer the proper signature.
+        starter_code = None
+        if fn_name:
+            starter_code = f"def {fn_name}():\n    pass"
+        prompt_text = format_prompt(question, fn_name, starter_code)
         record = make_record("deepcoder", prompt_text, test_cases, max_tests)
         if record is not None:
             records.append(record)
@@ -831,11 +847,11 @@ def prepare_evalplus(
                 skipped += 1
                 continue
 
-            # Format prompt — use the docstring-style prompt from evalplus
+            # Format prompt — functional/call-based template with starter code
             prompt_text = format_prompt(
                 f"Complete the following Python function:\n\n```python\n{prompt_code.strip()}\n```",
                 fn_name=entry_point,
-                starter_code=None,
+                starter_code=prompt_code,
             )
 
             test_cases = {"inputs": inputs, "outputs": outputs, "fn_name": entry_point}

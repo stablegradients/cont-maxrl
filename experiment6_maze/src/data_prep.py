@@ -2,9 +2,14 @@
 
 Each record contains:
   - data_source: "maze_{size}x{size}"
-  - prompt: JSON-encoded chat messages (system + user)
-  - reward_model: JSON-encoded dict with ground_truth text sequence
-  - extra_info: JSON-encoded dict with l_max, optimal_len, maze_seed
+  - prompt: single chat message with <bos> + grid tokens + PATH_START
+  - reward_model: dict with ground_truth text sequence
+  - extra_info: dict with l_max, optimal_len, maze_seed
+
+The prompt uses the MaxRL paper's token format:
+  <bos> GRID_START WALL PATH ... NEWLINE ... GRID_END PATH_START
+
+With the custom 32-token word-level tokenizer, each word = 1 token ID.
 
 Usage:
     PYTHONPATH=. python -m experiment6_maze.src.data_prep \
@@ -15,13 +20,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 
 import pandas as pd
 
-from experiment6_maze.src.maze_env import MAZE_SYSTEM_PROMPT, MazeGenerator
+from experiment6_maze.src.maze_env import MazeGenerator
 
 
 def build_record(seed: int, size: int = 17, l_max: int = 64, algorithm: str = "prim") -> dict:
@@ -32,18 +36,21 @@ def build_record(seed: int, size: int = 17, l_max: int = 64, algorithm: str = "p
     optimal_actions = gen.optimal_path_actions()
     optimal_len = len(optimal_actions)
 
+    # Prompt: <bos> + grid tokens (GRID_START WALL PATH ... GRID_END PATH_START)
+    # Wrapped in a single chat message for verl's apply_chat_template
+    prompt_content = "<bos> " + gen.to_prompt_string()
+
     return {
         "data_source": f"maze_{size}x{size}",
-        "prompt": json.dumps([
-            {"role": "system", "content": MAZE_SYSTEM_PROMPT},
-            {"role": "user", "content": gen.to_prompt_string()},
-        ]),
-        "reward_model": json.dumps({"ground_truth": gen.to_text_sequence()}),
-        "extra_info": json.dumps({
+        "prompt": [
+            {"role": "user", "content": prompt_content},
+        ],
+        "reward_model": {"ground_truth": gen.to_text_sequence()},
+        "extra_info": {
             "l_max": l_max,
             "optimal_len": optimal_len,
             "maze_seed": seed,
-        }),
+        },
     }
 
 

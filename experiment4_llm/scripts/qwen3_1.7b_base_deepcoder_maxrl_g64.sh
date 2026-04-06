@@ -63,6 +63,10 @@ export FI_CXI_RDZV_PROTO=alt_read
 export FI_CXI_RDZV_EAGER_SIZE=0
 export FI_MR_CACHE_MONITOR=userfaultfd
 export NCCL_DEBUG=WARN
+export SLURM_NETWORK="single_node_vni,disable_rdzv_get"
+# Socket transport tuning (fallback when CXI RDMA plugin fails)
+export NCCL_SOCKET_NTHREADS=4
+export NCCL_NSOCKS_PERTHREAD=4
 
 # W&B
 export WANDB_API_KEY="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"
@@ -106,10 +110,10 @@ fi
 # Capture Slingshot VNI credentials from srun context
 echo "Capturing Slingshot VNI credentials..."
 SLINGSHOT_ENV=$(srun --nodes=1 --ntasks=1 -w "${HEAD_NODE}" \
-    bash -c 'echo "SLINGSHOT_VNIS=${SLINGSHOT_VNIS:-}"; echo "SLINGSHOT_SVC_IDS=${SLINGSHOT_SVC_IDS:-}"; echo "SLINGSHOT_DEVICES=${SLINGSHOT_DEVICES:-}"')
+    bash -c 'echo "SLINGSHOT_VNIS=${SLINGSHOT_VNIS:-}"; echo "SLINGSHOT_SVC_IDS=${SLINGSHOT_SVC_IDS:-}"; echo "SLINGSHOT_DEVICES=${SLINGSHOT_DEVICES:-}"; echo "SLINGSHOT_TCS=${SLINGSHOT_TCS:-}"')
 eval "${SLINGSHOT_ENV}"
-export SLINGSHOT_VNIS SLINGSHOT_SVC_IDS SLINGSHOT_DEVICES
-echo "SLINGSHOT_VNIS=${SLINGSHOT_VNIS:-unset}"
+export SLINGSHOT_VNIS SLINGSHOT_SVC_IDS SLINGSHOT_DEVICES SLINGSHOT_TCS
+echo "SLINGSHOT_VNIS=${SLINGSHOT_VNIS:-unset} SLINGSHOT_SVC_IDS=${SLINGSHOT_SVC_IDS:-unset} SLINGSHOT_TCS=${SLINGSHOT_TCS:-unset}"
 
 if [[ -z "${SLINGSHOT_VNIS:-}" ]]; then
     echo "WARNING: SLINGSHOT_VNIS is empty — cross-node NCCL may fail"
@@ -138,6 +142,7 @@ for ((i=1; i<=WORKER_NUM; i++)); do
             export SLINGSHOT_VNIS='${SLINGSHOT_VNIS}'
             export SLINGSHOT_SVC_IDS='${SLINGSHOT_SVC_IDS}'
             export SLINGSHOT_DEVICES='${SLINGSHOT_DEVICES}'
+            export SLINGSHOT_TCS='${SLINGSHOT_TCS}'
             export LD_LIBRARY_PATH='/sw/user/nccl/aws-ofi-nccl-1.18.0-lf2.3.1-cu12.9/lib:/opt/cray/libfabric/2.3.1/lib64:${LD_LIBRARY_PATH:-}'
             export NCCL_NET_PLUGIN='/sw/user/nccl/aws-ofi-nccl-1.18.0-lf2.3.1-cu12.9/lib/libnccl-net.so'
             export NCCL_SOCKET_IFNAME=hsn
@@ -157,6 +162,8 @@ for ((i=1; i<=WORKER_NUM; i++)); do
             export FI_CXI_RDZV_EAGER_SIZE=0
             export FI_MR_CACHE_MONITOR=userfaultfd
             export NCCL_DEBUG=WARN
+            export NCCL_SOCKET_NTHREADS=4
+            export NCCL_NSOCKS_PERTHREAD=4
             ray start --address='${HEAD_IP}:${RAY_PORT}' \
                 --num-cpus=$((SLURM_CPUS_PER_TASK - N_GPUS_PER_NODE)) \
                 --num-gpus=${N_GPUS_PER_NODE}
