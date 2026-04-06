@@ -149,7 +149,6 @@ def _make_dg_verl_fn(eta: float = 1.0, surprisal_clip: float = 20.0):
                     response_mask=group_mask,
                     eta=eta,
                     surprisal_clip=surprisal_clip,
-                    scale_by_G=True,
                 )                                                    # [G, T]
                 advantages[idx_t] = group_adv
 

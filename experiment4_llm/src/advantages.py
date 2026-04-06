@@ -157,7 +157,6 @@ def dg_advantage_per_token(
     response_mask: torch.Tensor,     # [G, T]
     eta: float = 1.0,
     surprisal_clip: float = 20.0,
-    scale_by_G: bool = True,
 ) -> torch.Tensor:
     """
     Delightful Policy Gradient per-token advantage (Osband 2026, arXiv:2603.14608).
@@ -165,11 +164,7 @@ def dg_advantage_per_token(
     U_tau  = r_tau - mean(r_group)                       # REINFORCE baseline, [G]
     ell_t  = clip(-log pi_old(a_t), 0, surprisal_clip)   # surprisal, [G, T]
     w_t    = sigmoid(U_tau * ell_t / eta)                # delight gate, [G, T]
-    coef_t = (w_t * U_tau) * G                           # effective coef, [G, T]
-
-    The G scaling matches maxrl_unnormalized_advantage / rloo_advantage: it
-    counteracts the 1/N averaging in verl's token-mean policy loss so gradient
-    magnitude is comparable across {GRPO, GOS G=16, DG} at fixed group size G.
+    coef_t = w_t * U_tau                                 # effective coef, [G, T]
 
     Args:
         rewards: [G] scalar reward per rollout
@@ -177,7 +172,6 @@ def dg_advantage_per_token(
         response_mask: [G, T] 1 for response tokens, 0 for pads
         eta: gate temperature (paper uses 1.0)
         surprisal_clip: max |log pi| before clipping, in nats
-        scale_by_G: multiply by G to match repo scaling convention
 
     Returns:
         advantages: [G, T], already masked (pads are 0)
@@ -200,7 +194,5 @@ def dg_advantage_per_token(
     w = torch.sigmoid(chi / eta)        # [G, T], in (0, 1)
 
     coef = w * U_bcast                  # [G, T]
-    if scale_by_G:
-        coef = coef * G
 
     return coef * response_mask
