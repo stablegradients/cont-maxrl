@@ -102,7 +102,7 @@ $PYTHON "${REPO_ROOT}/experiment4_llm/src/train.py" \
   actor_rollout_ref.actor.strategy=fsdp \
   actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
   actor_rollout_ref.actor.ppo_mini_batch_size=256 \
-  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.actor.ppo_epochs=1 \
   actor_rollout_ref.actor.use_kl_loss=False \
   actor_rollout_ref.actor.kl_loss_coef=0.0 \
