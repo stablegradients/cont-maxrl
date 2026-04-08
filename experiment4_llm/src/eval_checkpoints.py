@@ -64,7 +64,7 @@ def generate_completions(
     n_completions: int = 200,
     temperature: float = 0.6,
     top_p: float = 0.95,
-    top_k: int = 20,
+    top_k: int = -1,
     max_tokens: int = 4096,
     gpu_memory_utilization: float = 0.90,
     tensor_parallel_size: int = 4,
@@ -83,7 +83,9 @@ def generate_completions(
         tensor_parallel_size=tensor_parallel_size,
         max_num_seqs=max_num_seqs,
         dtype="bfloat16",
-        enforce_eager=True,
+        enforce_eager=False,
+        enable_chunked_prefill=True,
+        max_num_batched_tokens=32768,
     )
     sampling_params = SamplingParams(
         n=n_completions,
@@ -251,13 +253,21 @@ def generate_plots(results_dirs: list[str], run_names: list[str], output_path: s
         print("  No reeval metrics found, skipping plots.")
         return
 
-    # Plot config
-    k_values_to_plot = ["1", "10", "50", "100", "200"]
-    colors = {
-        "1": "#1f77b4", "2": "#aec7e8", "5": "#ff7f0e",
-        "10": "#2ca02c", "20": "#98df8a", "50": "#d62728",
-        "100": "#9467bd", "200": "#8c564b",
-    }
+    # Plot config — auto-detect k values from the first available metrics file
+    k_values_to_plot = None
+    for eval_name_check in sorted(all_data.keys()):
+        for run_data_check in all_data[eval_name_check].values():
+            for step_data_check in run_data_check.values():
+                k_values_to_plot = sorted(step_data_check.keys(), key=lambda x: int(x))
+                break
+            if k_values_to_plot:
+                break
+        if k_values_to_plot:
+            break
+    if not k_values_to_plot:
+        k_values_to_plot = ["1", "4", "16", "64", "256"]
+    palette = ["#1f77b4", "#2ca02c", "#ff7f0e", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
+    colors = {k: palette[i % len(palette)] for i, k in enumerate(k_values_to_plot)}
     run_styles = ["-", "--", "-.", ":"]
 
     eval_names = sorted(all_data.keys())
@@ -334,6 +344,99 @@ def generate_plots(results_dirs: list[str], run_names: list[str], output_path: s
         plt.close(fig)
 
 
+def _upload_to_wandb(
+    results_dirs: list[str],
+    wandb_run_ids_list: list[str],
+    wandb_project: str,
+    wandb_entity: str,
+    eval_names: list[str],
+) -> None:
+    """Upload reeval metrics to existing W&B runs.
+
+    wandb_run_ids_list: one entry per results_dir. Each entry can contain
+    multiple run IDs separated by commas (for chained runs). Steps are routed
+    to the correct run by querying the step range from W&B history.
+    """
+    import wandb
+
+    for results_dir, run_ids_str in zip(results_dirs, wandb_run_ids_list):
+        run_ids = [r.strip() for r in run_ids_str.split(",")]
+
+        # Collect all reeval metrics keyed by step
+        step_metrics: dict[int, dict[str, float]] = defaultdict(dict)
+        for eval_name in eval_names:
+            reeval_dir = os.path.join(results_dir, f"reeval_{eval_name}")
+            if not os.path.isdir(reeval_dir):
+                continue
+            for fname in sorted(os.listdir(reeval_dir)):
+                if not fname.startswith("metrics_step") or not fname.endswith(".json"):
+                    continue
+                step = int(fname.replace("metrics_step", "").replace(".json", ""))
+                with open(os.path.join(reeval_dir, fname)) as f:
+                    metrics = json.load(f)
+                prefix = f"insitu_eval/{eval_name}"
+                pk = metrics["pass_at_k"]
+                for k, v in pk.items():
+                    if v is not None:
+                        step_metrics[step][f"{prefix}/pass_at_{k}"] = v
+                summary = metrics.get("summary", {})
+                for key in ["mean_score", "mean_pass_rate", "mean_unique_solution_rate",
+                            "mean_output_length", "n_problems_solved", "unique_code_rate_global"]:
+                    if key in summary:
+                        step_metrics[step][f"{prefix}/{key}"] = summary[key]
+
+        if not step_metrics:
+            print(f"    No reeval metrics found for {results_dir}, skipping.")
+            continue
+
+        # Query step ranges for each run ID
+        api = wandb.Api()
+        run_ranges: list[tuple[str, int, int]] = []
+        for rid in run_ids:
+            try:
+                r = api.run(f"{wandb_entity}/{wandb_project}/{rid}")
+                hist = r.history(keys=["training/global_step"], samples=10000)
+                if len(hist) > 0 and "training/global_step" in hist.columns:
+                    min_s = int(hist["training/global_step"].min())
+                    max_s = int(hist["training/global_step"].max())
+                    run_ranges.append((rid, min_s, max_s))
+                    print(f"    Run {rid}: steps {min_s}-{max_s}")
+            except Exception as e:
+                print(f"    WARNING: could not query run {rid}: {e}")
+
+        if not run_ranges:
+            print(f"    No valid W&B runs found, skipping upload.")
+            continue
+
+        # Group steps by which run they belong to
+        run_step_metrics: dict[str, dict[int, dict]] = defaultdict(dict)
+        for step, mets in sorted(step_metrics.items()):
+            best_run = None
+            for rid, min_s, max_s in run_ranges:
+                if min_s <= step <= max_s:
+                    best_run = rid
+                    break
+            if best_run is None:
+                # Fall back to last run (for steps beyond all ranges)
+                best_run = run_ranges[-1][0]
+            run_step_metrics[best_run][step] = mets
+
+        # Log to each wandb run
+        for rid, steps_mets in run_step_metrics.items():
+            print(f"\n  Uploading to W&B run {rid}...")
+            run = wandb.init(
+                id=rid,
+                project=wandb_project,
+                entity=wandb_entity,
+                resume="allow",
+            )
+            for step in sorted(steps_mets.keys()):
+                run.log(steps_mets[step], step=step)
+                print(f"    Logged {len(steps_mets[step])} metrics at step {step}")
+            run.finish()
+            print(f"    Done uploading to W&B run {rid}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Re-evaluate checkpoints on HE+/MBPP+")
     parser.add_argument("--results_dirs", nargs="+", required=True,
@@ -349,6 +452,8 @@ def main():
                         help="Specific steps to evaluate (default: all available)")
     parser.add_argument("--n_completions", type=int, default=200)
     parser.add_argument("--temperature", type=float, default=0.6)
+    parser.add_argument("--top_p", type=float, default=0.95)
+    parser.add_argument("--top_k", type=int, default=-1)
     parser.add_argument("--max_tokens", type=int, default=4096)
     parser.add_argument("--tensor_parallel_size", type=int, default=4)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.90)
@@ -358,6 +463,12 @@ def main():
                         default=[1, 2, 5, 10, 20, 50, 100, 200])
     parser.add_argument("--plot_output", type=str, default=None,
                         help="Path for plot output (default: <first_results_dir>/reeval_plots/pass_at_k.png)")
+    parser.add_argument("--wandb_run_ids", nargs="+", default=None,
+                        help="W&B run IDs to update with reeval metrics (one per results_dir)")
+    parser.add_argument("--wandb_project", type=str, default="cont-maxrl-code",
+                        help="W&B project name (default: cont-maxrl-code)")
+    parser.add_argument("--wandb_entity", type=str, default="stablegradients",
+                        help="W&B entity (default: stablegradients)")
     parser.add_argument("--plot_only", action="store_true",
                         help="Skip eval, only regenerate plots from existing metrics")
     parser.add_argument("--_direct", action="store_true",
@@ -444,6 +555,8 @@ def main():
                             problems=problems,
                             n_completions=args.n_completions,
                             temperature=args.temperature,
+                            top_p=args.top_p,
+                            top_k=args.top_k,
                             max_tokens=args.max_tokens,
                             gpu_memory_utilization=args.gpu_memory_utilization,
                             tensor_parallel_size=args.tensor_parallel_size,
@@ -466,9 +579,8 @@ def main():
                         print(f"    {eval_name}: saved to {metrics_path}")
 
                         pk = metrics["pass_at_k"]
-                        print(f"    pass@1={pk.get('1', 'N/A'):.4f}  "
-                              f"pass@10={pk.get('10', 'N/A'):.4f}  "
-                              f"pass@100={pk.get('100', 'N/A'):.4f}")
+                        pk_strs = [f"pass@{k}={pk.get(str(k), 'N/A'):.4f}" for k in args.k_values if pk.get(str(k)) is not None]
+                        print(f"    {' '.join(pk_strs)}")
                     else:
                         # Subprocess mode: fresh process avoids vLLM reinit crash
                         eval_file = args.eval_files[args.eval_names.index(eval_name)]
@@ -485,6 +597,8 @@ def main():
                             "--steps", str(step),
                             "--n_completions", str(args.n_completions),
                             "--temperature", str(args.temperature),
+                            "--top_p", str(args.top_p),
+                            "--top_k", str(args.top_k),
                             "--max_tokens", str(args.max_tokens),
                             "--tensor_parallel_size", str(args.tensor_parallel_size),
                             "--gpu_memory_utilization", str(args.gpu_memory_utilization),
@@ -499,9 +613,8 @@ def main():
                             with open(metrics_path) as f:
                                 metrics = json.load(f)
                             pk = metrics["pass_at_k"]
-                            print(f"    pass@1={pk.get('1', 'N/A'):.4f}  "
-                                  f"pass@10={pk.get('10', 'N/A'):.4f}  "
-                                  f"pass@100={pk.get('100', 'N/A'):.4f}")
+                            pk_strs = [f"pass@{k}={pk[str(k)]:.4f}" for k in args.k_values if pk.get(str(k)) is not None]
+                            print(f"    {' '.join(pk_strs)}")
 
     # Generate plots
     print(f"\n{'='*60}")
@@ -514,6 +627,19 @@ def main():
         plot_output = os.path.normpath(plot_output)
 
     generate_plots(args.results_dirs, args.run_names, plot_output)
+
+    # Upload reeval metrics to W&B runs
+    if args.wandb_run_ids and not args._direct:
+        assert len(args.wandb_run_ids) == len(args.results_dirs), \
+            "wandb_run_ids must match results_dirs (one per run)"
+        _upload_to_wandb(
+            results_dirs=args.results_dirs,
+            wandb_run_ids=args.wandb_run_ids,
+            wandb_project=args.wandb_project,
+            wandb_entity=args.wandb_entity,
+            eval_names=args.eval_names,
+        )
+
     print("\nDone!")
 
 

@@ -106,16 +106,13 @@ class TestMazeGenerator:
         gen = MazeGenerator(size=9, seed=0)
         gen.generate()
         prompt = gen.to_prompt_string()
-        # Compact grid format: # . S G, space-separated, newline-delimited
-        assert "S" in prompt, "start marker missing"
-        assert "G" in prompt, "goal marker missing"
-        assert "#" in prompt, "wall marker missing"
-        assert "." in prompt, "path marker missing"
-        lines = prompt.strip().split("\n")
-        assert len(lines) == 9, f"expected 9 rows, got {len(lines)}"
-        for line in lines:
-            cells = line.split(" ")
-            assert len(cells) == 9, f"expected 9 cols, got {len(cells)}"
+        # Word-token format: GRID_START WALL PATH START GOAL NEWLINE ... GRID_END PATH_START
+        assert "START" in prompt, "start marker missing"
+        assert "GOAL" in prompt, "goal marker missing"
+        assert "WALL" in prompt, "wall marker missing"
+        assert "PATH" in prompt, "path marker missing"
+        assert prompt.startswith("GRID_START"), "should start with GRID_START"
+        assert prompt.endswith("PATH_START"), "should end with PATH_START"
 
     def test_size_too_small(self):
         with pytest.raises(ValueError, match="size must be >= 5"):

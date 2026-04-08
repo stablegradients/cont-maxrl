@@ -4,7 +4,6 @@ import pytest
 
 from experiment6_maze.src.data_prep import build_record, generate_dataset
 from experiment6_maze.src.maze_env import (
-    MAZE_SYSTEM_PROMPT,
     MazeEnv,
     MazeGenerator,
     parse_actions,
@@ -52,16 +51,17 @@ class TestDataSource:
 
 
 class TestPromptIsChatMessages:
-    """prompt must be a list of 2 message dicts: system + user roles."""
+    """prompt must be a list with a single user message (word-token format, no system prompt)."""
 
     def test_prompt_is_chat_messages(self):
         record = build_record(0, size=17, l_max=64)
         messages = record["prompt"]
 
         assert isinstance(messages, list)
-        assert len(messages) == 2
-        assert messages[0]["role"] == "system"
-        assert messages[1]["role"] == "user"
+        assert len(messages) == 1
+        assert messages[0]["role"] == "user"
+        assert messages[0]["content"].startswith("<bos> GRID_START")
+        assert "PATH_START" in messages[0]["content"]
 
 
 class TestCorrectLength:
@@ -87,24 +87,30 @@ class TestTrainValSeedsDisjoint:
 
 
 class TestSftRecordFormat:
-    """SFT record: has prompt, completion, completion ends with DONE, system prompt in prompt."""
+    """SFT record: has sequence, prompt, optimal_path_length; sequence ends with DONE <eos>."""
 
     def test_sft_record_format(self):
         record = build_sft_record(0, size=17)
 
+        assert "sequence" in record
         assert "prompt" in record
-        assert "completion" in record
-        assert record["completion"].endswith("DONE")
-        assert MAZE_SYSTEM_PROMPT in record["prompt"]
+        assert "optimal_path_length" in record
+        assert record["sequence"].endswith("DONE <eos>")
+        assert record["prompt"].startswith("<bos> GRID_START")
 
 
 class TestSftCompletionIsValid:
-    """parse_actions returns valid list, and actions solve the maze."""
+    """Extract actions from SFT sequence (after PATH_START), verify they solve the maze."""
 
     def test_sft_completion_is_valid(self):
         for seed in range(20):
             record = build_sft_record(seed, size=17)
-            actions = parse_actions(record["completion"])
+            # Actions are between PATH_START and DONE in the sequence
+            seq = record["sequence"]
+            path_start_idx = seq.index("PATH_START") + len("PATH_START")
+            done_idx = seq.index("DONE")
+            action_str = seq[path_start_idx:done_idx].strip()
+            actions = parse_actions(action_str + " DONE")
             assert actions is not None, f"seed={seed}: parse_actions returned None"
             assert len(actions) > 0, f"seed={seed}: empty action list"
 
@@ -121,18 +127,16 @@ class TestSftCompletionIsValid:
 
 
 class TestPromptFormatMatchesRL:
-    """RL user content == SFT user content (after stripping system prompt prefix)."""
+    """RL prompt content == SFT prompt content."""
 
     def test_prompt_format_matches_rl(self):
         for seed in range(10):
             rl_record = build_record(seed, size=17, l_max=64)
             sft_record = build_sft_record(seed, size=17)
 
-            rl_user_content = rl_record["prompt"][1]["content"]
+            rl_user_content = rl_record["prompt"][0]["content"]
+            sft_prompt = sft_record["prompt"]
 
-            # SFT prompt = MAZE_SYSTEM_PROMPT + "\n\n" + user_content
-            sft_user_content = sft_record["prompt"][len(MAZE_SYSTEM_PROMPT) + 2:]
-
-            assert rl_user_content == sft_user_content, (
-                f"seed={seed}: RL user content does not match SFT user content"
+            assert rl_user_content == sft_prompt, (
+                f"seed={seed}: RL user content does not match SFT prompt"
             )

@@ -28,7 +28,7 @@ REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 
-OUTPUT_DIR="${REPO_ROOT}/results/qwen3_1.7b_base_deepcoder_binary_maxrl_g16_s${SEED}"
+OUTPUT_DIR="/work/nvme/bgmo/sramasubramanian/cont-maxrl/results/qwen3_1.7b_base_deepcoder_binary_maxrl_g16_s${SEED}"
 mkdir -p "${OUTPUT_DIR}"
 
 # Conda CUDA (not system CUDA)

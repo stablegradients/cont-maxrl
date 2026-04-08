@@ -27,7 +27,7 @@ conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
 set -euo pipefail
 
 REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
-STORAGE_ROOT="/projects/bgtv/sramasubramanian/cont-maxrl"
+STORAGE_ROOT="/work/nvme/bgtv/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 

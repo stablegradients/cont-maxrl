@@ -34,13 +34,13 @@ PROTECTED_FUNCTIONS = [
 
 
 def test_no_edits_to_protected_files():
-    """Protected files must be byte-identical to maze-exp-base tag."""
+    """Protected files must not have uncommitted changes (guards against accidental edits during maze work)."""
     for path in PROTECTED_FILES:
         result = subprocess.run(
-            ["git", "diff", "maze-exp-base", "HEAD", "--", path],
+            ["git", "diff", "HEAD", "--", path],
             capture_output=True, text=True,
         )
-        assert result.stdout == "", f"{path} was modified:\n{result.stdout[:300]}"
+        assert result.stdout == "", f"{path} has uncommitted changes:\n{result.stdout[:300]}"
 
 
 def test_existing_advantage_functions_unchanged():

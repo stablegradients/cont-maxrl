@@ -31,7 +31,7 @@ set -euo pipefail
 trap 'echo "Caught SIGTERM (wall-time limit) — proceeding to self-chain"' TERM
 
 REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
-STORAGE_ROOT="/projects/bgtv/sramasubramanian/cont-maxrl"
+STORAGE_ROOT="/work/nvme/bgtv/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 

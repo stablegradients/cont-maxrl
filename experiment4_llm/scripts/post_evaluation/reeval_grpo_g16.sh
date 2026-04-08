@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=reeval_maxrl_g16
-#SBATCH --account=bgmo-dtai-gh
+#SBATCH --job-name=reeval_grpo_g16
+#SBATCH --account=bgtu-dtai-gh
 #SBATCH --partition=ghx4
 #SBATCH --gpus-per-node=4
-#SBATCH --time=12:00:00
+#SBATCH --time=16:00:00
 #SBATCH --mem=0
 #SBATCH --cpus-per-task=288
 #SBATCH --nodes=1
-#SBATCH --output=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.out
-#SBATCH --error=/projects/bgmo/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.err
+#SBATCH --output=/projects/bgtu/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.out
+#SBATCH --error=/projects/bgtu/sramasubramanian/cont-maxrl/slurm_logs/%x_%j.err
 
-# Re-evaluate MaxRL G=16 checkpoints on HE+ and MBPP+ (fixed prompts)
+# Re-evaluate GRPO G=16 checkpoints (all 3 benchmarks, 200 completions)
 
 module load python/miniforge3_pytorch/2.10.0
 eval "$(conda shell.bash hook)"
@@ -19,6 +19,7 @@ conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
 set -euo pipefail
 
 REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
+RESULTS_DIR="/projects/bgtu/sramasubramanian/cont-maxrl/results/qwen3_1.7b_deepcoder_grpo_g16_s0"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 
@@ -34,29 +35,35 @@ export HF_HOME="${REPO_ROOT}/.cache/huggingface"
 export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export VLLM_USE_V1=0
 export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
+export WANDB_API_KEY="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"
 export TORCH_COMPILE_DISABLE=1
 export TORCHDYNAMO_DISABLE=1
 export TMPDIR="/tmp/${USER}_reeval_tmp"
 mkdir -p "${TMPDIR}"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 
-EVAL_STEPS="180 340"
-
 $PYTHON -m experiment4_llm.src.eval_checkpoints \
-  --results_dirs "${REPO_ROOT}/results/qwen3_1.7b_base_deepcoder_maxrl_g16_s42" \
-  --run_names "MaxRL_G16" \
-  --eval_files "${REPO_ROOT}/data/evalplus_humaneval_test.parquet" "${REPO_ROOT}/data/evalplus_mbpp_test.parquet" \
-  --eval_names humaneval_plus mbpp_plus \
+  --results_dirs "${RESULTS_DIR}" \
+  --run_names "GRPO_G16" \
+  --eval_files \
+    "${REPO_ROOT}/data/livecodebench_v5_test.parquet" \
+    "${REPO_ROOT}/data/evalplus_humaneval_test.parquet" \
+    "${REPO_ROOT}/data/evalplus_mbpp_test.parquet" \
+  --eval_names livecodebench_v5 humaneval_plus mbpp_plus \
   --base_model Qwen/Qwen3-1.7B-Base \
-  --steps ${EVAL_STEPS} \
-  --n_completions 200 \
+  --n_completions 256 \
   --temperature 0.6 \
+  --top_p 0.95 \
+  --top_k -1 \
   --max_tokens 4096 \
   --tensor_parallel_size 4 \
-  --gpu_memory_utilization 0.90 \
+  --gpu_memory_utilization 0.95 \
   --timeout_per_test 6 \
-  --n_workers 128 \
-  --k_values 1 2 5 10 20 50 100 200 \
-  --plot_output "${REPO_ROOT}/results/reeval_plots/pass_at_k_maxrl.png"
+  --n_workers 256 \
+  --k_values 1 4 16 64 256 \
+  --plot_output "${RESULTS_DIR}/reeval_plots/pass_at_k.png" \
+  --wandb_run_ids "4vcqjozy,z3gickll" \
+  --wandb_project cont-maxrl-code \
+  --wandb_entity stablegradients
 
-echo "=== MaxRL G=16 re-evaluation complete ==="
+echo "=== GRPO G=16 re-evaluation complete ==="
