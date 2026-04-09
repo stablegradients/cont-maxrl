@@ -358,3 +358,7 @@ def main():
 
     if use_ddp:
         cleanup_ddp()
+
+
+if __name__ == "__main__":
+    main()

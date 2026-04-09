@@ -16,13 +16,13 @@ def download_nyu(data_dir: str):
     out.mkdir(parents=True, exist_ok=True)
 
     print("Downloading NYU Depth v2 (train split)...")
-    train_ds = load_dataset("sayakpaul/nyu_depth_v2", split="train")
+    train_ds = load_dataset("sayakpaul/nyu_depth_v2", split="train", trust_remote_code=True)
     train_path = out / "train"
     train_ds.save_to_disk(str(train_path))
     print(f"  Saved {len(train_ds)} train images to {train_path}")
 
     print("Downloading NYU Depth v2 (validation split)...")
-    val_ds = load_dataset("sayakpaul/nyu_depth_v2", split="validation")
+    val_ds = load_dataset("sayakpaul/nyu_depth_v2", split="validation", trust_remote_code=True)
     val_path = out / "validation"
     val_ds.save_to_disk(str(val_path))
     print(f"  Saved {len(val_ds)} validation images to {val_path}")
