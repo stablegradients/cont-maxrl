@@ -26,3 +26,8 @@ experiment4_llm/scripts/runs/
 
 # Claude Code
 .claude/
+
+# Experiment 7 depth
+experiment7_depth/scripts/runs/
+experiment7_depth/results/
+experiment7_depth/figures/
