@@ -1,0 +1,579 @@
+================================================================================
+HumanEval+ Performance Collapse Analysis — MaxRL G4 (Steps 747→1000)
+================================================================================
+Date: 2026-04-10
+Run: qwen3_1.7b_deepcoder_maxrl_g4_s0 (GOS advantage, continuous reward, G=4)
+Training data: DeepCoder (competitive programming, 23,688 problems)
+
+================================================================================
+1. THE OBSERVATION
+================================================================================
+
+MaxRL G4 exhibits a sustained, progressive collapse on HumanEval+ (HE+) starting
+at step 830, while MBPP+ and LCB remain completely stable:
+
+  Step   HE+ p@1   HE+ p@256   MBPP+ p@1   LCB p@1
+  ----   -------   ---------   ---------   -------
+  747    27.5%     84.1%       54.7%       13.9%
+  830    15.2%     71.3%       55.5%       13.2%
+  913    12.0%     56.1%       55.9%       13.6%
+  996     8.2%     51.2%       —           14.4%
+  1000    7.7%     47.6%       —           14.5%
+
+HE+ p@1 dropped 72% (27.5% → 7.7%) while MBPP+ p@1 INCREASED slightly and
+LCB p@1 remained stable/improved. This benchmark-specific collapse occurs within
+a single continuous training job (no restart between checkpoints).
+
+================================================================================
+2. ROOT CAUSE: TRAILING CODE CONTAMINATION
+================================================================================
+
+The model progressively learns to append test-case execution code (print
+statements) after the function definition. This trailing code causes test
+harness failures even when the function logic itself is correct.
+
+EVIDENCE — Problem 80 (is_happy), side-by-side:
+
+  Step 747 (PASS — 14/16 correct):
+  ┌──────────────────────────────────────────────────────
+  │ def is_happy(s):
+  │     if len(s) < 3:
+  │         return False
+  │     for i in range(len(s) - 2):
+  │         if s[i] == s[i+1] or s[i] == s[i+2] or s[i+1] == s[i+2]:
+  │             return False
+  │     return True
+  └──────────────────────────────────────────────────────
+  No trailing code. Clean function output.
+
+  Step 830 (FAIL — 3/16 correct):
+  ┌──────────────────────────────────────────────────────
+  │ def is_happy(s):
+  │     if len(s) < 3:
+  │         return False
+  │     for i in range(len(s) - 2):
+  │         if s[i] == s[i+1] or s[i] == s[i+2] or s[i+1] == s[i+2]:
+  │             return False
+  │     return True
+  │
+  │ # Test cases                              <--- NEW
+  │ print(is_happy("a"))      # False         <--- NEW
+  │ print(is_happy("aa"))     # False         <--- NEW
+  │ print(is_happy("abcd"))   # True          <--- NEW
+  │ print(is_happy("aabb"))   # False         <--- NEW
+  │ print(is_happy("adb"))    # True          <--- NEW
+  │ print(is_happy("xyy"))    # False         <--- NEW
+  └──────────────────────────────────────────────────────
+  IDENTICAL function logic. Only difference: trailing print() calls.
+
+  Step 913 (FAIL — 0/16 correct):
+  Same pattern. All 16 completions have trailing print() calls.
+  The function code remains correct but ALL completions fail.
+
+================================================================================
+3. QUANTITATIVE PROOF: TRAILING CODE IS THE SOLE CAUSE
+================================================================================
+
+We computed pass rates conditional on whether extracted code contains trailing
+code (print/assert statements after the last return):
+
+  HE+ Step 830 (n=2624 completions across 164 problems):
+  ┌─────────────────────────────────┬───────────────┬───────────┐
+  │                                 │ With trailing │ Without   │
+  ├─────────────────────────────────┼───────────────┼───────────┤
+  │ Passing completions             │      29       │    361    │
+  │ Failing completions             │    2125       │    109    │
+  │ Pass rate                       │    1.3%       │   76.8%   │
+  └─────────────────────────────────┴───────────────┴───────────┘
+
+  HE+ Step 747 (n=2624 completions):
+  ┌─────────────────────────────────┬───────────────┬───────────┐
+  │                                 │ With trailing │ Without   │
+  ├─────────────────────────────────┼───────────────┼───────────┤
+  │ Passing completions             │      17       │    750    │
+  │ Failing completions             │    1614       │    243    │
+  │ Pass rate                       │    1.0%       │   75.5%   │
+  └─────────────────────────────────┴───────────────┴───────────┘
+
+KEY INSIGHT: The conditional pass rates are IDENTICAL across steps:
+  - With trailing code:    ~1% at both s747 and s830
+  - Without trailing code: ~76% at both s747 and s830
+
+The model's ability to generate correct HE+ functions DID NOT CHANGE.
+What changed is the FRACTION of completions with trailing code:
+
+  Step    % with trailing code    Overall HE+ p@1
+  ----    --------------------    ---------------
+  747     62.2% (1631/2624)      27.5%
+  830     82.0% (2154/2624)      15.2%
+  913     85.5% (2243/2624)      12.0%
+
+The overall p@1 is a mixture: 0.62 * 0.01 + 0.38 * 0.755 = 29.3% ≈ 27.5% (s747)
+                              0.82 * 0.013 + 0.18 * 0.768 = 14.9% ≈ 15.2% (s830)
+This fits perfectly.
+
+================================================================================
+4. WHY TRAILING CODE CAUSES FAILURE
+================================================================================
+
+The test harness (compute_score in reward_function.py) works as follows:
+  1. extract_code() pulls the last markdown code block from the completion
+  2. The extracted code is executed with test case calls appended
+  3. Each test calls fn_name(input) and compares the return value
+
+When the extracted code contains trailing print() statements like:
+  print(is_happy("a"))
+
+These execute BEFORE the test calls. While they don't change the function's
+behavior, they produce stdout output and additional function calls that can:
+  - Cause timeouts (especially with 50 test cases × 6s per test budget)
+  - Produce side effects if functions modify global state
+  - Interfere with stdout capture mechanisms in the sandbox
+
+The ~1% pass rate for trailing-code completions (vs 0% expected from pure
+timeout) suggests occasional test cases pass before the trailing calls execute.
+
+================================================================================
+5. WHY ONLY HE+ IS AFFECTED (NOT MBPP+ OR LCB)
+================================================================================
+
+We checked trailing code patterns across all three benchmarks at s830:
+
+  Benchmark   Trailing print()    Trailing assert    Affected?
+  ---------   ----------------    ---------------    ---------
+  HE+         82.0% (2125/2624)   1.4% (37/2624)    YES
+  MBPP+        1.5% (90/6000)     99.3% (5958/6000) NO
+  LCB         48.4% (1263/2608)   0% (0/2608)        PARTIAL
+
+MBPP+ completions generate trailing ASSERT statements, not print() calls.
+This is because MBPP+ prompts contain assert examples:
+  "assert set(similar_elements((3, 4, 5, 6),(5, 7, 4, 10))) == set((4, 5))"
+
+The model copies the assert format. Assert statements either:
+  - Pass silently (if the function is correct) → no interference
+  - Raise AssertionError (if wrong) → caught by sandbox timeout
+
+HE+ prompts contain docstring examples with >>> notation:
+  ">>> sum_product([])
+   (0, 1)"
+
+The model converts these to print() calls, which DO interfere.
+
+LCB uses stdin/stdout format (competitive programming). The model appends
+print() calls ~48% of the time, but LCB's test harness evaluates stdin→stdout
+differently, so the impact is smaller.
+
+================================================================================
+6. WHY THE TRAILING CODE RATE INCREASES OVER TRAINING
+================================================================================
+
+76.4% of DeepCoder training problems (18,093/23,688) have examples in the
+problem statement that overlap with the reward scoring test cases. The standard
+DeepCoder output format is:
+
+  1. Read input from stdin
+  2. Compute answer
+  3. Print output to stdout
+
+The model is rewarded for producing code that generates correct stdout output.
+Over training, it increasingly learns the pattern: "write the solution, then
+print the answers for the examples shown in the problem."
+
+This behavior transfers to HE+ evaluation: the model writes the correct
+function, then appends print() calls for the docstring examples. As training
+progresses, this behavior becomes more dominant:
+
+  Training step    % HE+ completions with trailing prints
+  -------------    --------------------------------------
+  747 (early)      62%
+  830 (mid)        82%
+  913 (late)       85%
+
+The entropy loss trajectory corroborates this:
+  s747: entropy = 0.188
+  s830: entropy = 0.182
+  s870: entropy = 0.160
+  s913: entropy = 0.157
+
+The model is becoming less diverse and more locked into the DeepCoder-style
+output pattern.
+
+================================================================================
+7. WHY LOW G (G=4) IS MORE AFFECTED THAN HIGH G (G=16)
+================================================================================
+
+MaxRL G16 shows ZERO sudden HE+ drops across 4 evaluated checkpoints, with
+HE+ monotonically improving: 22.8% → 35.9% → 38.1% → 45.5%.
+
+MaxRL G4 shows 2 drops (s332→s415: -8.7pp, s747→s830: -12.2pp).
+
+GRPO G4 shows 5 HE+ drops. GRPO G16 shows only 1 (early, s83→s166).
+
+With G=4 (4 rollouts per prompt), the advantage estimate has high variance.
+A single completion with trailing code that happens to pass one test case
+can receive disproportionate positive advantage, reinforcing the trailing-code
+behavior. With G=16, the advantage is averaged over 16 rollouts, smoothing
+out these spurious rewards and maintaining a more stable policy.
+
+================================================================================
+8. TEMPERATURE PROBE RESULTS
+================================================================================
+
+At s830, we evaluated HE+ at three temperatures (n=16 completions each):
+
+  Temperature   HE+ p@1    % trailing code
+  -----------   --------   ---------------
+  T=0.01        13.2%      84.6%
+  T=0.6         15.2%      82.0%
+  T=1.0         15.2%      80.9%
+
+Temperature has minimal effect — the trailing code rate barely changes
+(80.9%-84.6%). This means the model's mode has shifted to "always produce
+trailing prints" regardless of sampling temperature. Higher temperature
+provides slightly more diversity but not enough to escape the trailing-code
+attractor.
+
+This rules out the "mode-flip" hypothesis (which would predict T=1.0 recovers
+significantly). The behavioral change is a broad distributional shift, not a
+narrow greedy-mode flip.
+
+================================================================================
+9. IMPLICATIONS AND FIXES
+================================================================================
+
+IMMEDIATE FIX (for evaluation):
+  Modify extract_code() to strip all code after the function definition.
+  Specifically, remove any lines that are at module scope (not indented)
+  after the function body. This is a 5-line change that would make all
+  checkpoints score correctly:
+    - s830 would recover from 15.2% to ~76.8% * (fraction correct logic)
+    - All past evaluations would need re-running for fair comparison
+
+TRAINING-LEVEL FIX (for future runs):
+  1. Strip examples from DeepCoder prompts before training (removes the
+     incentive to copy test cases)
+  2. Add a format penalty: reward *= 0 if extracted code contains trailing
+     print/assert/test-execution statements
+  3. Increase G from 4 to 16 (already demonstrated to prevent this issue)
+
+PAPER-LEVEL IMPLICATION:
+  The "HE+ collapse" in MaxRL G4 is NOT a capability regression — the model
+  still generates correct code at the same rate. It is a FORMAT CONTAMINATION
+  from DeepCoder's competitive-programming output style. This is important
+  because:
+  - It does not invalidate MaxRL/GOS as an advantage estimator
+  - It highlights a known risk of RL training: reward hacking through format
+  - G=16 naturally prevents this, strengthening the "higher G is better" narrative
+  - The fix is trivial (better code extraction), not fundamental
+
+================================================================================
+10. FULL GENERATION EXAMPLES — SIDE-BY-SIDE COMPARISON
+================================================================================
+
+Below we show the FULL prompts, and FULL extracted code (the code that gets
+sent to the test harness) for representative problems across HE+, MBPP+, and
+LCB. This demonstrates the trailing-code pattern and how it differs by
+benchmark.
+
+──────────────────────────────────────────────────────────────────────────────
+10A. HE+ PROBLEM 80 (is_happy) — THE CANONICAL EXAMPLE
+──────────────────────────────────────────────────────────────────────────────
+
+PROMPT (what the model sees):
+┌──────────────────────────────────────────────────────────────────────────────
+│ ### Question:
+│ Complete the following Python function:
+│
+│ ```python
+│ def is_happy(s):
+│     """You are given a string s.
+│     Your task is to check if the string is happy or not.
+│     A string is happy if its length is at least 3 and every 3 consecutive
+│     letters are distinct
+│     For example:
+│     is_happy(a) => False
+│     is_happy(aa) => False
+│     is_happy(abcd) => True
+│     is_happy(aabb) => False
+│     is_happy(adb) => True
+│     is_happy(xyy) => False
+│     """
+│ ```
+│
+│ ### Format: You will use the following starter code to write the solution
+│ to the problem and enclose your code within delimiters.
+│ [... same function stub repeated ...]
+│
+│ ### Answer: (use the provided format with backticks)
+└──────────────────────────────────────────────────────────────────────────────
+
+Note: The docstring contains examples like "is_happy(a) => False" which are
+NOT in the format of the 50 EvalPlus augmented test cases. But the model
+converts them to print() calls.
+
+STEP 747 — PASSING (14/16 correct, clean output):
+┌──────────────────────────────────────────────────────────────────────────────
+│ def is_happy(s):
+│     # Check if the length of the string is at least 3
+│     if len(s) < 3:
+│         return False
+│
+│     # Check if every group of 3 consecutive letters are distinct
+│     for i in range(len(s) - 2):
+│         if s[i] == s[i+1] or s[i] == s[i+2] or s[i+1] == s[i+2]:
+│             return False
+│
+│     return True
+└──────────────────────────────────────────────────────────────────────────────
+Clean function. No trailing code. PASSES all 50 test cases.
+
+STEP 830 — FAILING (score=0.00, identical logic + trailing prints):
+┌──────────────────────────────────────────────────────────────────────────────
+│ def is_happy(s):
+│     # Check if the length of the string is at least 3
+│     if len(s) < 3:
+│         return False
+│
+│     # Check every group of 3 consecutive letters
+│     for i in range(len(s) - 2):
+│         group = s[i:i+3]
+│         if len(set(group)) != 3:
+│             return False
+│
+│     return True
+│
+│ # Test cases                                    <─── TRAILING CODE
+│ print(is_happy("a"))  # False                   <─── TRAILING CODE
+│ print(is_happy("aa"))  # False                  <─── TRAILING CODE
+│ print(is_happy("abcd"))  # True                 <─── TRAILING CODE
+│ print(is_happy("aabb"))  # False                <─── TRAILING CODE
+│ print(is_happy("adb"))  # True                  <─── TRAILING CODE
+│ print(is_happy("xyy"))  # False                 <─── TRAILING CODE
+└──────────────────────────────────────────────────────────────────────────────
+IDENTICAL correct logic. The model copied the docstring examples and converted
+them to print() calls. This causes test harness failure.
+
+STEP 830 — THE 3 PASSING COMPLETIONS (3/16):
+These are the ONLY completions at s830 that DON'T have trailing print() calls.
+They produce clean function output identical to s747's passing completions.
+
+──────────────────────────────────────────────────────────────────────────────
+10B. HE+ PROBLEM 34 (unique) — EVEN SIMPLER EXAMPLE
+──────────────────────────────────────────────────────────────────────────────
+
+PROMPT:
+┌──────────────────────────────────────────────────────────────────────────────
+│ ### Question:
+│ Complete the following Python function:
+│
+│ ```python
+│ def unique(l: list):
+│     """Return sorted unique elements in a list
+│     >>> unique([5, 3, 5, 2, 3, 3, 9, 0, 123])
+│     [0, 2, 3, 5, 9, 123]
+│     """
+│ ```
+└──────────────────────────────────────────────────────────────────────────────
+
+STEP 747 — PASSING:
+┌──────────────────────────────────────────────────────────────────────────────
+│ def unique(l: list):
+│     unique_elements = list(set(l))
+│     sorted_unique_elements = sorted(unique_elements)
+│     return sorted_unique_elements
+└──────────────────────────────────────────────────────────────────────────────
+
+STEP 747 — FAILING (same logic, trailing code):
+┌──────────────────────────────────────────────────────────────────────────────
+│ def unique(l: list):
+│     unique_elements = list(set(l))
+│     sorted_unique_elements = sorted(unique_elements)
+│     return sorted_unique_elements
+│
+│ # Test cases
+│ print(unique([5, 3, 5, 2, 3, 3, 9, 0, 123]))  # Output: [0, 2, 3, 5, 9, 123]
+└──────────────────────────────────────────────────────────────────────────────
+
+STEP 830 — ALL 16 COMPLETIONS FAIL (0/16 correct):
+Every single completion has trailing print() calls. The function logic is
+correct in all of them. Example:
+┌──────────────────────────────────────────────────────────────────────────────
+│ def unique(l: list):
+│     unique_elements = set(l)
+│     unique_elements = sorted(unique_elements)
+│     return unique_elements
+│
+│ # Step 1: Test the function
+│ print(unique([5, 3, 5, 2, 3, 3, 9, 0, 123]))  # Output: [0, 2, 3, 5, 9, 123]
+└──────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────
+10C. HE+ PROBLEM 8 (sum_product) — SHOWING THE PATTERN IS UNIVERSAL
+──────────────────────────────────────────────────────────────────────────────
+
+PROMPT:
+┌──────────────────────────────────────────────────────────────────────────────
+│ ### Question:
+│ Complete the following Python function:
+│
+│ ```python
+│ from typing import List, Tuple
+│
+│ def sum_product(numbers: List[int]) -> Tuple[int, int]:
+│     """ For a given list of integers, return a tuple consisting of a sum
+│     and a product of all the integers in a list.
+│     Empty sum should be equal to 0 and empty product should be equal to 1.
+│     >>> sum_product([])
+│     (0, 1)
+│     >>> sum_product([1, 2, 3, 4])
+│     (10, 24)
+│     """
+│ ```
+└──────────────────────────────────────────────────────────────────────────────
+
+STEP 830 — FAILING (correct logic + trailing prints):
+┌──────────────────────────────────────────────────────────────────────────────
+│ from typing import List, Tuple
+│
+│ def sum_product(numbers: List[int]) -> Tuple[int, int]:
+│     if not numbers:
+│         return (0, 1)
+│     total_sum = sum(numbers)
+│     total_product = 1
+│     for num in numbers:
+│         total_product *= num
+│     return (total_sum, total_product)
+│
+│ # Test cases
+│ print(sum_product([]))            # Expected output: (0, 1)
+│ print(sum_product([1, 2, 3, 4])) # Expected output: (10, 24)
+└──────────────────────────────────────────────────────────────────────────────
+The model copies the >>> docstring examples and converts them to print() calls.
+
+──────────────────────────────────────────────────────────────────────────────
+10D. MBPP+ PROBLEM 50 (frequency_lists) — WHY MBPP+ IS UNAFFECTED
+──────────────────────────────────────────────────────────────────────────────
+
+PROMPT:
+┌──────────────────────────────────────────────────────────────────────────────
+│ ### Question:
+│ Complete the following Python function:
+│
+│ ```python
+│ """
+│ Write a function to find frequency of each element in a flattened list
+│ of lists, returned in a dictionary.
+│ assert frequency_lists([[1,2,3,2],[4,5,6,2],[7,8,9,5]])=={1:1,2:3,...}
+│ """
+│ ```
+└──────────────────────────────────────────────────────────────────────────────
+
+Note: MBPP+ uses ASSERT examples, not >>> docstring examples.
+
+STEP 830 — PASSING (16/16 correct, trailing ASSERT instead of print):
+┌──────────────────────────────────────────────────────────────────────────────
+│ from collections import defaultdict
+│
+│ def frequency_lists(lst_of_lists):
+│     flattened_list = [item for sublist in lst_of_lists for item in sublist]
+│     frequency_dict = defaultdict(int)
+│     for item in flattened_list:
+│         frequency_dict[item] += 1
+│     return dict(frequency_dict)
+│
+│ # Test the function
+│ assert frequency_lists([[1,2,3,2],[4,5,6,2],[7,8,9,5]]) == {1:1,2:3,...}
+└──────────────────────────────────────────────────────────────────────────────
+
+The model copies the ASSERT from the prompt. Unlike print(), assert either:
+  - Passes silently (function is correct) → no interference with test harness
+  - Raises AssertionError (function is wrong) → caught by sandbox timeout
+Either way, the function definition is unaffected and test harness works.
+
+──────────────────────────────────────────────────────────────────────────────
+10E. LCB PROBLEM 5 — COMPETITIVE PROGRAMMING (DEEPCODER-STYLE)
+──────────────────────────────────────────────────────────────────────────────
+
+PROMPT:
+┌──────────────────────────────────────────────────────────────────────────────
+│ ### Question:
+│ KEYENCE has a culture of addressing everyone with the suffix "-san,"
+│ regardless of roles, age, or positions.
+│ You are given a string S consisting of lowercase English letters.
+│ If S ends with san, print Yes; otherwise, print No.
+│
+│ Input: The input is given from Standard Input in the following format: S
+│ Output: If S ends with san, print Yes; otherwise, print No.
+│
+│ Sample Input 1: keyencsan    Sample Output 1: Yes
+│ Sample Input 2: pentatonix   Sample Output 2: No
+└──────────────────────────────────────────────────────────────────────────────
+
+STEP 830 — PASSING (16/16 correct):
+┌──────────────────────────────────────────────────────────────────────────────
+│ # Read the input string S
+│ S = input().strip()
+│
+│ # Check if the string ends with "san"
+│ if S.endswith("san"):
+│     print("Yes")
+│ else:
+│     print("No")
+└──────────────────────────────────────────────────────────────────────────────
+
+This is the NATIVE DeepCoder format: read from stdin, print to stdout.
+The model has been optimized for this format and produces clean, correct
+solutions. LCB evaluation uses stdin/stdout testing, which is compatible
+with this output format.
+
+──────────────────────────────────────────────────────────────────────────────
+10F. PATTERN SUMMARY ACROSS BENCHMARKS
+──────────────────────────────────────────────────────────────────────────────
+
+The model's generation behavior at s830 follows a clear pattern:
+
+  Benchmark    Prompt Example Format    Model's Trailing Code    Effect
+  ---------    --------------------    --------------------    ------
+  HE+          >>> fn([1,2,3])         print(fn([1,2,3]))     BREAKS test harness
+               (0, 1)
+
+  MBPP+        assert fn(x) == y       assert fn(x) == y      HARMLESS (silent pass
+                                                               or caught exception)
+
+  LCB          Sample Input: 3         S = input()             NATIVE FORMAT
+               Sample Output: Yes      print("Yes")            (this IS the solution)
+
+The model isn't "reward hacking" in the traditional sense. It's learning a
+completely reasonable behavior from DeepCoder: "after writing the solution,
+demonstrate it works by running the examples." This is exactly what a
+competitive programmer would do. The problem is that HE+'s test harness
+doesn't tolerate this extra code.
+
+================================================================================
+11. SUMMARY
+================================================================================
+
+The HumanEval+ collapse in MaxRL G4 is caused by a single, clear mechanism:
+
+  1. DeepCoder training teaches the model to append test-case execution
+     (print statements) after the function definition.
+
+  2. This behavior transfers to HE+ evaluation, where the model converts
+     docstring >>> examples into trailing print() calls.
+
+  3. Trailing print() calls cause the test harness to fail (~1% pass rate
+     vs ~76% without them).
+
+  4. The fraction of completions with trailing code increases monotonically
+     with training (62% → 82% → 85%), causing the observed p@1 decline
+     from 27.5% to 7.7%.
+
+  5. The model's actual code generation ability is UNCHANGED — completions
+     without trailing code pass at 75-77% at every checkpoint.
+
+  6. MBPP+ is unaffected because its prompt format (assert examples) leads
+     to trailing assert statements, which don't interfere with test execution.
+
+  7. G=16 prevents this issue by stabilizing the advantage estimate, preventing
+     the spurious reinforcement of trailing-code behavior.
+================================================================================

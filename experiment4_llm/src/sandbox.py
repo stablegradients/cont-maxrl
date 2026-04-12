@@ -101,8 +101,12 @@ with open(sys.argv[2]) as _f:
 
 _fn_name = sys.argv[3]
 
+import contextlib
+_silenced = io.StringIO()
+
 _namespace = {{}}
-exec(compile({import_string_repr} + "\\n\\n" + _user_code, '<solution>', 'exec'), _namespace)
+with contextlib.redirect_stdout(_silenced), contextlib.redirect_stderr(_silenced):
+    exec(compile({import_string_repr} + "\\n\\n" + _user_code, '<solution>', 'exec'), _namespace)
 
 # Look up the function: try standalone first, then class Solution method
 _fn = _namespace.get(_fn_name)
@@ -121,7 +125,8 @@ try:
 except (json.JSONDecodeError, ValueError):
     _args = [_input_data] if _input_data else []
 
-_result = _fn(*_args)
+with contextlib.redirect_stdout(_silenced), contextlib.redirect_stderr(_silenced):
+    _result = _fn(*_args)
 # Coerce tuples to lists (matches official LCB)
 if isinstance(_result, tuple):
     _result = list(_result)
@@ -165,9 +170,12 @@ _timeout = _td["timeout"]
 _results = []
 
 if _fn_name:
+    import contextlib
+    _silenced = io.StringIO()
     _ns = {{}}
     try:
-        exec(compile(_IMPORT_STR + "\\n\\n" + _code, '<solution>', 'exec'), _ns)
+        with contextlib.redirect_stdout(_silenced), contextlib.redirect_stderr(_silenced):
+            exec(compile(_IMPORT_STR + "\\n\\n" + _code, '<solution>', 'exec'), _ns)
     except Exception:
         print(json.dumps([None] * len(_inputs)))
         sys.exit(0)
@@ -188,7 +196,8 @@ if _fn_name:
                     _args = [_args]
             except (json.JSONDecodeError, ValueError):
                 _args = [_s] if _s else []
-            _r = _fn(*_args)
+            with contextlib.redirect_stdout(_silenced), contextlib.redirect_stderr(_silenced):
+                _r = _fn(*_args)
             signal.alarm(0)
             if isinstance(_r, tuple):
                 _r = list(_r)
