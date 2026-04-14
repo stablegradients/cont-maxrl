@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 from collections import defaultdict
+from functools import partial
 
 import numpy as np
 import torch
@@ -24,6 +25,7 @@ from experiment4_llm.src.advantages import (
     reinforce_baseline_advantage as _reinforce_baseline_1d,
     rloo_advantage as _rloo_1d,
     binary_maxrl_advantage as _binary_maxrl_1d,
+    pkpo_advantage as _pkpo_1d,
 )
 
 
@@ -100,6 +102,9 @@ CUSTOM_ESTIMATORS = {
     "reinforce_baseline": _make_verl_advantage_fn(_reinforce_baseline_1d),
     "rloo": _make_verl_advantage_fn(_rloo_1d),
     "binary_maxrl": _make_verl_advantage_fn(_binary_maxrl_1d),
+    "pkpo_k4":  _make_verl_advantage_fn(partial(_pkpo_1d, k_opt=4,  variant="loo_minus_one")),
+    "pkpo_k8":  _make_verl_advantage_fn(partial(_pkpo_1d, k_opt=8,  variant="loo_minus_one")),
+    "pkpo_k16": _make_verl_advantage_fn(partial(_pkpo_1d, k_opt=16, variant="loo_minus_one")),
 }
 
 

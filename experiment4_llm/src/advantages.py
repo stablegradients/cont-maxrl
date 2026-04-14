@@ -196,3 +196,128 @@ def dg_advantage_per_token(
     coef = w * U_bcast                  # [G, T]
 
     return coef * response_mask
+
+
+# ---------------------------------------------------------------------------
+# PKPO (Walder & Karkhanis 2025, arXiv:2505.15201) — direct port of Listing 1
+# ---------------------------------------------------------------------------
+import math
+
+
+def _pkpo_m_normed(N: int, K: int, i: int, j: int) -> float:
+    """Normalized weight m_{ij} / C(N,K). Paper Listing 1, _m_normed."""
+    if i == j and i >= K - 1:
+        # numpy: K/(N-K+1) * np.prod(np.arange(i-K+2, i+1) / np.arange(N-K+2, N+1))
+        num = 1.0
+        den = 1.0
+        for a in range(i - K + 2, i + 1):
+            num *= a
+        for a in range(N - K + 2, N + 1):
+            den *= a
+        return (K / (N - K + 1)) * (num / den)
+    if j > i and j >= K - 1 and K >= 2:
+        # numpy: K/(N-K+1) * (K-1)/N * np.prod(np.arange(j-K+2, j) / np.arange(N-K+2, N))
+        num = 1.0
+        den = 1.0
+        for a in range(j - K + 2, j):
+            num *= a
+        for a in range(N - K + 2, N):
+            den *= a
+        return (K / (N - K + 1)) * ((K - 1) / N) * (num / den)
+    return 0.0
+
+
+def _pkpo_m_diagonal(N: int, K: int, dtype, device) -> torch.Tensor:
+    return torch.tensor(
+        [_pkpo_m_normed(N, K, i, i) for i in range(N)],
+        dtype=dtype, device=device,
+    )
+
+
+def _pkpo_deltas(N: int, K: int, dtype, device) -> torch.Tensor:
+    # Listing 1: returns length N-2, not N-1.
+    return torch.tensor(
+        [
+            _pkpo_m_normed(N - 1, K, i, i + 1)
+            - _pkpo_m_normed(N - 1, K, i + 1, i + 1)
+            for i in range(N - 2)
+        ],
+        dtype=dtype, device=device,
+    )
+
+
+def _pkpo_s_sorted(g_sorted: torch.Tensor, K: int) -> torch.Tensor:
+    """Eq. (19), the raw s_i. g_sorted must already be ascending."""
+    N = g_sorted.numel()
+    dtype, device = g_sorted.dtype, g_sorted.device
+    diag = _pkpo_m_diagonal(N, K, dtype, device)            # [N]
+    c = (g_sorted * diag).clone()                            # [N]
+    if N >= 2:
+        deltas = _pkpo_deltas(N + 1, K, dtype, device)      # [N-1]
+        c[: N - 1] = c[: N - 1] + g_sorted[1:] * deltas
+    return torch.flip(torch.cumsum(torch.flip(c, [0]), dim=0), [0])
+
+
+def _pkpo_b_sorted(g_sorted: torch.Tensor, K: int) -> torch.Tensor:
+    """Baseline b used by sloo and sloo_minus_one. g_sorted ascending."""
+    N = g_sorted.numel()
+    dtype, device = g_sorted.dtype, g_sorted.device
+    if N <= 1 or K < 1:
+        return torch.zeros(N, dtype=dtype, device=device)
+    diag_nm1 = _pkpo_m_diagonal(N - 1, K, dtype, device)    # [N-1]
+    arange_1_N = torch.arange(1, N, dtype=dtype, device=device)
+    w = (diag_nm1 * arange_1_N).clone()                      # [N-1]
+    if N >= 3:
+        deltas = _pkpo_deltas(N, K, dtype, device)          # [N-2]
+        arange_1_Nm1 = torch.arange(1, N - 1, dtype=dtype, device=device)
+        w[1:] = w[1:] + deltas * arange_1_Nm1
+    c1 = (w * g_sorted[1:]).sum().unsqueeze(0)
+    c2 = (g_sorted[:-1] - g_sorted[1:]) * w
+    return torch.cumsum(torch.cat([c1, c2], dim=0), dim=0)
+
+
+def pkpo_advantage(
+    rewards: torch.Tensor,
+    k_opt: int = 8,
+    variant: str = "loo_minus_one",
+) -> torch.Tensor:
+    """Pass@K Policy Optimization (Walder & Karkhanis 2025, arXiv:2505.15201).
+
+    Reward transformation [G] -> [G] unbiased for grad max_g@k_opt.
+    See PKPO_IMPLEMENTATION.md for full spec.
+    """
+    G = rewards.numel()
+    if G <= 1:
+        return torch.zeros_like(rewards)
+    if not (1 <= k_opt <= G):
+        raise ValueError(f"pkpo_advantage: k_opt={k_opt} must be in [1, G={G}]")
+    if variant not in ("raw", "loo", "loo_minus_one"):
+        raise ValueError(f"pkpo_advantage: unknown variant '{variant}'")
+
+    sorted_rewards, sort_idx = torch.sort(rewards)
+
+    if k_opt == 1:
+        s_sorted = sorted_rewards - sorted_rewards.mean()
+    else:
+        s_sorted = _pkpo_s_sorted(sorted_rewards, k_opt)
+        if variant == "raw":
+            pass
+        elif variant == "loo":
+            b = torch.zeros(G, dtype=rewards.dtype, device=rewards.device)
+            for i in range(G):
+                mask = torch.ones(G, dtype=torch.bool, device=rewards.device)
+                mask[i] = False
+                g_minus = sorted_rewards[mask]
+                k_minus = min(k_opt, G - 1)
+                s_minus = _pkpo_s_sorted(g_minus, k_minus)
+                b[i] = s_minus.sum() / (G - 1)
+            s_sorted = s_sorted - b
+        elif variant == "loo_minus_one":
+            b = _pkpo_b_sorted(sorted_rewards, k_opt - 1)
+            s_sorted = s_sorted - b * k_opt / (k_opt - 1) / G
+
+    s_sorted = s_sorted * G
+
+    advantages = torch.zeros_like(rewards)
+    advantages[sort_idx] = s_sorted
+    return advantages

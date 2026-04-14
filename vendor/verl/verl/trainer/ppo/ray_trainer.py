@@ -94,6 +94,9 @@ class AdvantageEstimator(str, Enum):
     REINFORCE_BASELINE = "reinforce_baseline"
     BINARY_MAXRL = "binary_maxrl"
     DG = "dg"
+    PKPO_K4 = "pkpo_k4"
+    PKPO_K8 = "pkpo_k8"
+    PKPO_K16 = "pkpo_k16"
 
 
 @dataclass
@@ -264,6 +267,9 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         AdvantageEstimator.REINFORCE_BASELINE,
         AdvantageEstimator.RLOO,
         AdvantageEstimator.BINARY_MAXRL,
+        AdvantageEstimator.PKPO_K4,
+        AdvantageEstimator.PKPO_K8,
+        AdvantageEstimator.PKPO_K16,
     ):
         from experiment4_llm.src.verl_register import CUSTOM_ESTIMATORS
         estimator_name = adv_estimator.value if hasattr(adv_estimator, 'value') else str(adv_estimator)
@@ -352,6 +358,9 @@ class RayPPOTrainer:
             AdvantageEstimator.REINFORCE_BASELINE,
             AdvantageEstimator.BINARY_MAXRL,
             AdvantageEstimator.DG,
+            AdvantageEstimator.PKPO_K4,
+            AdvantageEstimator.PKPO_K8,
+            AdvantageEstimator.PKPO_K16,
         ]:
             self.use_critic = False
         else:

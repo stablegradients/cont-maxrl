@@ -1,0 +1,18 @@
+DG (Delightful Gradient) — notes for later revisit
+====================================================
+Date: 2026-04-13
+
+Status: deprioritized. Method underperforms; parking for now.
+
+Known issue:
+  - test_dg_advantage_per_token_basic fails because the test still passes
+    scale_by_G=True, but that kwarg was removed from dg_advantage_per_token().
+    The function signature changed but the test was never updated.
+    File: experiment4_llm/tests/test_advantages_core.py:300
+
+What to do when revisiting:
+  1. Decide whether scale_by_G belongs in dg_advantage_per_token or not.
+  2. Update the test to match the current function signature.
+  3. Re-evaluate whether DG is worth keeping as a baseline or should be
+     removed entirely (advantage code, verl_register DG_FACTORY, ray_trainer
+     enum + dispatch).
