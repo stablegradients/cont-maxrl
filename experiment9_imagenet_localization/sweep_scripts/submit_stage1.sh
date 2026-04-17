@@ -1,0 +1,28 @@
+#!/bin/bash
+# Submit Stage 1 (24 scripts).
+set -euo pipefail
+
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K10_N64_seed42.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K10_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K10_N64_seed44.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K25_N64_seed42.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K25_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K25_N64_seed44.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K50_N64_seed42.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K50_N64_seed44.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K100_N64_seed42.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K100_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K100_N64_seed44.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K10_N64_seed42.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K10_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K10_N64_seed44.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K25_N64_seed42.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K25_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K25_N64_seed44.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K50_N64_seed42.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K50_N64_seed44.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K100_N64_seed42.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K100_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K100_N64_seed44.sh"

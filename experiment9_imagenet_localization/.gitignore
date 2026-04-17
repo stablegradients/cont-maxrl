@@ -1,0 +1,6 @@
+results/
+sweep_scripts/logs/
+__pycache__/
+*.pyc
+*.pt
+wandb/
