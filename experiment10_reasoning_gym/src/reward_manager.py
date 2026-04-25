@@ -97,11 +97,19 @@ def _get_scorer(task: str):
 
 
 def _score_continuous(task: str, answer_str: str, entry: dict) -> float:
-    """Raw continuous score in [0, 1] for the given task."""
+    """Raw continuous score in [0, 1] for the given task.
+
+    reasoning_gym's score_answer for some tasks (notably game_of_life) raises on
+    malformed model output (e.g. KeyError when the decoded grid isn't a full dict).
+    A broken output is simply a wrong answer, so catch any exception and return 0.0.
+    Without this, one bad rollout crashes the reward worker and tears down training.
+    """
     if task == "knights_knaves":
         return _knk_fixed_score(answer_str, entry)
-    # Generic: use reasoning_gym's built-in score_answer
-    return float(_get_scorer(task).score_answer(answer_str, entry))
+    try:
+        return float(_get_scorer(task).score_answer(answer_str, entry))
+    except Exception:
+        return 0.0
 
 
 # ---------------------------------------------------------------------------

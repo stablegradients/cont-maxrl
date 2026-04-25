@@ -26,3 +26,7 @@ experiment4_llm/scripts/runs/
 
 # Claude Code
 .claude/
+
+# Secrets
+.env
+.env.*
