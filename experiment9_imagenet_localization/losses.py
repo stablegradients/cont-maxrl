@@ -152,6 +152,109 @@ def localization_mse_loss(
     return F.mse_loss(pred, gt_primary_box)
 
 
+def _centroid_match_target(
+    pred: torch.Tensor,       # (B, 4) xywh
+    gt_boxes: torch.Tensor,   # (B, M, 4) xywh
+    gt_mask: torch.Tensor,    # (B, M) bool
+) -> torch.Tensor:
+    """Select each image's GT target by minimum centroid L2 distance.
+
+    For each image, picks j* = argmin_j ||pred_center - GT_j_center||_2 among
+    valid GTs. Returns the (B, 4) target box.
+
+    Motivation: max-IoU matching breaks down when the prediction overlaps no
+    GT (IoU==0 for all j). In that regime argmax-IoU is undefined up to ties
+    and silently falls back to the first valid GT. Centroid L2 matching gives
+    a meaningful signal even when boxes don't overlap, making it a more
+    stable matcher early in training or for hard (small/off-center) images.
+    """
+    B, M, _ = gt_boxes.shape
+
+    with torch.no_grad():
+        pred_c = pred[:, None, :2]             # (B, 1, 2)
+        gt_c   = gt_boxes[..., :2]             # (B, M, 2)
+        d2 = ((pred_c - gt_c) ** 2).sum(dim=-1)   # (B, M) squared L2
+        # Mask padded rows so they lose the argmin
+        d2 = torch.where(gt_mask, d2, torch.full_like(d2, float("inf")))
+        j_star = d2.argmin(dim=-1)             # (B,)
+
+    target = gt_boxes.gather(
+        1, j_star.view(B, 1, 1).expand(-1, 1, 4)
+    ).squeeze(1)
+    return target
+
+
+def localization_mse_centroid_match_loss(
+    pred: torch.Tensor,
+    gt_boxes: torch.Tensor,
+    gt_mask: torch.Tensor,
+) -> torch.Tensor:
+    """MSE loss against the GT with closest centroid to the prediction.
+
+    Matcher: min-L2-distance of (x_c, y_c) — see `_centroid_match_target`.
+    Loss: F.mse_loss(pred, target).
+
+    Use this when max-IoU matching is unstable (e.g., early training when
+    predictions overlap no GT, so IoU matching falls back to first-GT).
+    """
+    target = _centroid_match_target(pred, gt_boxes, gt_mask)
+    return F.mse_loss(pred, target)
+
+
+def localization_l1_centroid_match_loss(
+    pred: torch.Tensor,
+    gt_boxes: torch.Tensor,
+    gt_mask: torch.Tensor,
+) -> torch.Tensor:
+    """L1 loss against the GT with closest centroid to the prediction.
+
+    Matcher: min-L2-distance of (x_c, y_c) — see `_centroid_match_target`.
+    Loss: F.l1_loss(pred, target).
+    """
+    target = _centroid_match_target(pred, gt_boxes, gt_mask)
+    return F.l1_loss(pred, target)
+
+
+def localization_l1_iou_match_loss(
+    pred: torch.Tensor,       # (B, 4) in [0, 1]  — xywh
+    gt_boxes: torch.Tensor,   # (B, M, 4)         — xywh, padded
+    gt_mask: torch.Tensor,    # (B, M) bool       — valid GT rows
+    eps: float = 1e-10,
+) -> torch.Tensor:
+    """L1 (mean absolute error) against the GT with highest IoU vs the prediction.
+
+    Same matching rule as `localization_mse_iou_match_loss` (argmax-IoU over
+    valid GTs, recomputed each batch, no gradient through argmax), but applies
+    F.l1_loss instead of F.mse_loss on the residual. L1 is more robust to
+    outliers and generally yields slightly tighter localization on small boxes
+    since large coordinate errors aren't squared.
+    """
+    B, M, _ = gt_boxes.shape
+
+    with torch.no_grad():
+        pred_exp = pred.unsqueeze(1).expand(-1, M, -1)
+        pc1 = pred_exp[..., :2] - pred_exp[..., 2:] / 2
+        pc2 = pred_exp[..., :2] + pred_exp[..., 2:] / 2
+        gc1 = gt_boxes[..., :2] - gt_boxes[..., 2:] / 2
+        gc2 = gt_boxes[..., :2] + gt_boxes[..., 2:] / 2
+        i1 = torch.maximum(pc1, gc1)
+        i2 = torch.minimum(pc2, gc2)
+        inter_wh = (i2 - i1).clamp(min=0.0)
+        inter = inter_wh[..., 0] * inter_wh[..., 1]
+        pa = pred_exp[..., 2] * pred_exp[..., 3]
+        ga = gt_boxes[..., 2] * gt_boxes[..., 3]
+        union = (pa + ga - inter).clamp(min=eps)
+        iou = inter / union
+        iou = torch.where(gt_mask, iou, torch.full_like(iou, -1.0))
+        j_star = iou.argmax(dim=-1)
+
+    target = gt_boxes.gather(
+        1, j_star.view(B, 1, 1).expand(-1, 1, 4)
+    ).squeeze(1)
+
+    return F.l1_loss(pred, target)
+
+
 def localization_mse_iou_match_loss(
     pred: torch.Tensor,       # (B, 4) in [0, 1]  — xywh
     gt_boxes: torch.Tensor,   # (B, M, 4)         — xywh, padded
@@ -216,7 +319,7 @@ def localization_exp_iou_ord_ce_loss(
     gt_mask: torch.Tensor,               # (B, M) bool — valid GT rows
     K: int,
     n_thresholds: int = 100,
-    eps: float = 1e-8,
+    eps: float = 1e-4,
 ) -> torch.Tensor:
     """Expected-IoU ordinal CE loss — exact infinite-N limit of GOS for IoU.
 

@@ -1,17 +1,16 @@
 #!/bin/bash
 #SBATCH --job-name=j_5c9e87b6
 #SBATCH --partition=general
-#SBATCH --gres=gpu:a6000:1
+#SBATCH --gres=gpu:1
+#SBATCH --nodelist=gpu24,gpu25,gpu26,gpu28,gpu29,gpu30,gpu31
+#SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=48:00:00
-#SBATCH --output=/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/logs/j_5c9e87b6_%j.out
+#SBATCH --output=experiment9_imagenet_localization/sweep_scripts/logs/j_5c9e87b6_%j.out
 
 set -euo pipefail
 
-# wandb reads credentials from ~/.netrc (written by `wandb login`), so no
-# WANDB_API_KEY env export is needed. The earlier strict `${VAR:?...}` check
-# was killing jobs before they started.
 export WANDB_DIR=/zfsauton/scratch/shrinivr/wandb
 export WANDB_ENTITY=stablegradients
 export WANDB_RUN_GROUP="gos_K50_N256"

@@ -1,0 +1,25 @@
+#!/bin/bash
+# Submit replica matrix (21 scripts) at seed 43.
+set -euo pipefail
+
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K50_N16_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K50_N256_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/gos_K50_N1024_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/binary_maxrl_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/grpo_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/grpo_K50_N256_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/rloo_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/rloo_K50_N256_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/reinforce_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/reinforce_K50_N256_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/dg_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/ordinal_ce_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/plain_ce_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/mse_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/mse_iou_match_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/mse_centroid_match_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/l1_iou_match_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/l1_iou_match_K50_N256_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/l1_centroid_match_K50_N64_seed43.sh"
+sbatch "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/exp_iou_ord_ce_K50_N64_seed43.sh"

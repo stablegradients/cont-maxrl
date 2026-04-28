@@ -39,6 +39,48 @@ SEEDS = (42, 43, 44)
 N_PRIMARY = 64
 N_SWEEP_VALUES = (4, 16, 64, 256)
 
+# ---------------------------------------------------------------------------
+# Replica matrix — the exact set of (method, K, N) configurations that was
+# executed at seed=42 and that the user wants replicated at new seeds to
+# enable multi-seed aggregate plots (and, at seed=43 only, gradient / cosine
+# analysis). Keep this list in sync with ``results/*_seed42/`` if the matrix
+# is ever expanded.
+# ---------------------------------------------------------------------------
+
+REPLICA_MATRIX_K50: tuple[tuple[str, int, int], ...] = (
+    ("gos",                 50,   16),
+    ("gos",                 50,   64),
+    ("gos",                 50,  256),
+    ("gos",                 50, 1024),
+    ("binary_maxrl",        50,   64),
+    ("grpo",                50,   64),
+    ("grpo",                50,  256),
+    ("rloo",                50,   64),
+    ("rloo",                50,  256),
+    ("reinforce",           50,   64),
+    ("reinforce",           50,  256),
+    ("dg",                  50,   64),
+    ("ordinal_ce",          50,   64),
+    ("plain_ce",            50,   64),
+    ("mse",                 50,   64),
+    ("mse_iou_match",       50,   64),
+    ("mse_centroid_match",  50,   64),
+    ("l1_iou_match",        50,   64),
+    ("l1_iou_match",        50,  256),
+    ("l1_centroid_match",   50,   64),
+    ("exp_iou_ord_ce",      50,   64),
+)
+assert len(REPLICA_MATRIX_K50) == 21, "replica matrix should have 21 entries"
+
+
+def replica_configs(seeds: tuple[int, ...]) -> list[tuple[str, int, int, int]]:
+    """Cross REPLICA_MATRIX_K50 with the given seeds -> (method, K, N, seed)."""
+    return [
+        (method, K, N, seed)
+        for (method, K, N) in REPLICA_MATRIX_K50
+        for seed in seeds
+    ]
+
 REPO_DIR = "/zfsauton/scratch/shrinivr/cont-maxrl"
 EXPERIMENT_DIR = os.path.join(REPO_DIR, "experiment9_imagenet_localization")
 
@@ -64,7 +106,10 @@ SLURM_TEMPLATE = """\
 #SBATCH --time={time}
 #SBATCH --output={log_dir}/{job_name}_%j.out
 
-set -euo pipefail
+# `set -u` would be nice but breaks conda activation: some conda env-activate
+# scripts (e.g. activate-binutils_linux-64.sh) reference unbound vars like
+# ADDR2LINE and hard-fail under -u. We keep -e + -o pipefail for safety.
+set -eo pipefail
 
 # wandb reads credentials from ~/.netrc (written by `wandb login`), so no
 # WANDB_API_KEY env export is needed. The earlier strict `${{VAR:?...}}` check
@@ -389,12 +434,62 @@ def parse_args() -> argparse.Namespace:
             "(adds 4 K-values × 3 seeds = 12 extra scripts; total 134)."
         ),
     )
+    parser.add_argument(
+        "--mode",
+        choices=("full_sweep", "replica"),
+        default="full_sweep",
+        help=(
+            "full_sweep: generate the 4-stage headline/supervised/RL/N-sweep "
+            "matrix (default). replica: generate only the 21-config "
+            "seed-42 replica matrix at --replica_seeds, with no stages."
+        ),
+    )
+    parser.add_argument(
+        "--replica_seeds",
+        type=int,
+        nargs="+",
+        default=[43],
+        help=(
+            "Seeds to instantiate the replica matrix at (only used when "
+            "--mode=replica). Default: [43]. The seed-42 runs are already on "
+            "disk so we default to seed 43 only."
+        ),
+    )
     return parser.parse_args()
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+
+def _generate_batch(
+    configs: list[tuple[str, int, int, int]],
+    args,
+    out_dir: str,
+    log_dir: str,
+) -> list[str]:
+    """Emit one .sh per config and return the list of absolute script paths."""
+    script_paths: list[str] = []
+    for (method, K, N, seed) in configs:
+        path = write_script(
+            out_dir=out_dir,
+            method=method,
+            K=K,
+            N=N,
+            seed=seed,
+            results_dir=args.results_dir,
+            data_dir=args.data_dir,
+            partition=args.partition,
+            conda_env=args.conda_env,
+            train_subsample=args.train_subsample,
+            epochs=args.epochs,
+            time=args.time,
+            log_dir=log_dir,
+            repo_dir=args.repo_dir,
+        )
+        script_paths.append(path)
+    return script_paths
 
 
 def main() -> None:
@@ -405,28 +500,47 @@ def main() -> None:
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
 
+    if args.mode == "replica":
+        # --- Replica-matrix mode: 21 configs × |replica_seeds| ------------
+        configs = replica_configs(tuple(args.replica_seeds))
+        script_paths = _generate_batch(configs, args, out_dir, log_dir)
+
+        # Per-seed launcher (e.g. submit_replica_seed43.sh)
+        for seed in args.replica_seeds:
+            seed_scripts = [
+                p for p in script_paths if p.endswith(f"_seed{seed}.sh")
+            ]
+            path = os.path.join(out_dir, f"submit_replica_seed{seed}.sh")
+            _write_launcher(
+                path, seed_scripts,
+                f"Submit replica matrix ({len(seed_scripts)} scripts) at seed {seed}.",
+            )
+
+        # Combined launcher across all replica seeds.
+        all_path = os.path.join(out_dir, "submit_replica_all.sh")
+        _write_launcher(
+            all_path, script_paths,
+            f"Submit the full replica matrix ({len(script_paths)} scripts) "
+            f"across seeds {args.replica_seeds}.",
+        )
+
+        print(f"Wrote {len(script_paths)} replica scripts to {out_dir}")
+        for seed in args.replica_seeds:
+            n = sum(1 for p in script_paths if p.endswith(f"_seed{seed}.sh"))
+            print(f"  seed {seed}: {n} scripts")
+        seed_list = ",".join(str(s) for s in args.replica_seeds)
+        print(
+            f"Launchers written: submit_replica_all.sh + "
+            f"submit_replica_seed{{{seed_list}}}.sh"
+        )
+        return
+
+    # --- Full-sweep mode (default) ----------------------------------------
     stages = stage_groups(include_mse=args.include_mse)
     per_stage_scripts: dict[int, list[str]] = {1: [], 2: [], 3: [], 4: []}
 
     for stage_num, configs in stages.items():
-        for (method, K, N, seed) in configs:
-            path = write_script(
-                out_dir=out_dir,
-                method=method,
-                K=K,
-                N=N,
-                seed=seed,
-                results_dir=args.results_dir,
-                data_dir=args.data_dir,
-                partition=args.partition,
-                conda_env=args.conda_env,
-                train_subsample=args.train_subsample,
-                epochs=args.epochs,
-                time=args.time,
-                log_dir=log_dir,
-                repo_dir=args.repo_dir,
-            )
-            per_stage_scripts[stage_num].append(path)
+        per_stage_scripts[stage_num] = _generate_batch(configs, args, out_dir, log_dir)
 
     # Write launcher scripts
     write_submit_all(out_dir, per_stage_scripts)

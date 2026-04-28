@@ -14,6 +14,9 @@ from experiment9_imagenet_localization.losses import (
     localization_plain_ce_loss,
     localization_mse_loss,
     localization_mse_iou_match_loss,
+    localization_mse_centroid_match_loss,
+    localization_l1_iou_match_loss,
+    localization_l1_centroid_match_loss,
 )
 from experiment9_imagenet_localization.model import LocalizationPolicy  # type hint
 
@@ -104,16 +107,13 @@ def rl_training_step(
         sampled_boxes = clamp_boxes_to_image(coords)
         rewards = batched_max_iou(sampled_boxes, gt_boxes, gt_mask)  # (B, N)
 
-        B = rewards.shape[0]
-        advantages = torch.stack(
-            [advantage_fn(rewards[b]) for b in range(B)],
-            dim=0,
-        )                                                 # (B, N)
+        # advantage_fn operates on the last dim — (B, N) in → (B, N) out,
+        # no Python per-image loop required.
+        advantages = advantage_fn(rewards)                # (B, N)
 
     sample_log_probs = factored_sample_log_prob(log_probs, samples)  # (B, N)
 
     # PG loss: -mean_b mean_n (advantages[b, n] * log_prob[b, n])
-    # We compute mean over N first (per-image avg), then mean over B.
     per_image = -(advantages.detach() * sample_log_probs).mean(dim=1)  # (B,)
     loss = per_image.mean()
 
@@ -228,6 +228,22 @@ def train_supervised_epoch_localization(
             gt_boxes = batch['gt_boxes'].to(device)             # (B, M, 4)
             gt_mask  = batch['gt_mask'].to(device)              # (B, M) bool
             loss = localization_mse_iou_match_loss(pred, gt_boxes, gt_mask)
+        elif method == "l1_iou_match":
+            # L1 against the GT with highest IoU vs the prediction.
+            pred = model(images)                                # (B, 4)
+            gt_boxes = batch['gt_boxes'].to(device)             # (B, M, 4)
+            gt_mask  = batch['gt_mask'].to(device)              # (B, M) bool
+            loss = localization_l1_iou_match_loss(pred, gt_boxes, gt_mask)
+        elif method == "mse_centroid_match":
+            pred = model(images)
+            gt_boxes = batch['gt_boxes'].to(device)
+            gt_mask  = batch['gt_mask'].to(device)
+            loss = localization_mse_centroid_match_loss(pred, gt_boxes, gt_mask)
+        elif method == "l1_centroid_match":
+            pred = model(images)
+            gt_boxes = batch['gt_boxes'].to(device)
+            gt_mask  = batch['gt_mask'].to(device)
+            loss = localization_l1_centroid_match_loss(pred, gt_boxes, gt_mask)
         elif method == "exp_iou_ord_ce":
             logits = model(images)                             # dict of (B, K)
             gt_boxes = batch['gt_boxes'].to(device)             # (B, M, 4)

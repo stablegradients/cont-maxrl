@@ -7,7 +7,10 @@
 #SBATCH --time=48:00:00
 #SBATCH --output=/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/logs/j_0e0d0258_%j.out
 
-set -euo pipefail
+# `set -u` would be nice but breaks conda activation: some conda env-activate
+# scripts (e.g. activate-binutils_linux-64.sh) reference unbound vars like
+# ADDR2LINE and hard-fail under -u. We keep -e + -o pipefail for safety.
+set -eo pipefail
 
 # wandb reads credentials from ~/.netrc (written by `wandb login`), so no
 # WANDB_API_KEY env export is needed. The earlier strict `${VAR:?...}` check
@@ -19,7 +22,7 @@ export WANDB_RUN_GROUP="plain_ce_K50_N64"
 cd "/zfsauton/scratch/shrinivr/cont-maxrl"
 
 source ~/.bashrc
-conda activate base
+conda activate cont-maxrl
 
 python -m experiment9_imagenet_localization.run \
     --method plain_ce \

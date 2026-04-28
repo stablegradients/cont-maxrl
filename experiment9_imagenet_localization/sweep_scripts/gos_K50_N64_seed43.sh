@@ -1,25 +1,20 @@
 #!/bin/bash
-#SBATCH --job-name=j_3d720390
+#SBATCH --job-name=gos_K50_N64_seed43
 #SBATCH --partition=general
 #SBATCH --gres=gpu:a6000:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=48:00:00
-#SBATCH --output=/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/logs/j_3d720390_%j.out
+#SBATCH --output=/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/logs/gos_K50_N64_seed43_%j.out
 
-set -euo pipefail
-
-# wandb reads credentials from ~/.netrc (written by `wandb login`), so no
-# WANDB_API_KEY env export is needed. The earlier strict `${VAR:?...}` check
-# was killing jobs before they started.
+set -eo pipefail
 export WANDB_DIR=/zfsauton/scratch/shrinivr/wandb
 export WANDB_ENTITY=stablegradients
 export WANDB_RUN_GROUP="gos_K50_N64"
 
 cd "/zfsauton/scratch/shrinivr/cont-maxrl"
-
 source ~/.bashrc
-conda activate base
+conda activate cont-maxrl
 
 python -m experiment9_imagenet_localization.run \
     --method gos \

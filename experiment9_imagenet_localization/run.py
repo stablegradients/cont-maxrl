@@ -15,8 +15,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
+import tempfile
 from typing import Optional
 
 import numpy as np
@@ -43,7 +45,8 @@ from experiment9_imagenet_localization.train import (
 RL_METHODS = {"gos", "binary_maxrl", "grpo", "rloo", "reinforce", "dg"}
 SUPERVISED_METHODS = {
     "ordinal_ce", "plain_ce",
-    "mse", "mse_iou_match",
+    "mse", "mse_iou_match", "mse_centroid_match",
+    "l1_iou_match", "l1_centroid_match",
     "exp_iou_ord_ce",
 }
 ALL_METHODS = sorted(RL_METHODS | SUPERVISED_METHODS)
@@ -74,6 +77,64 @@ def _ddp_cleanup() -> None:
 
 # Global tracker for best checkpoint
 _BEST_VAL_IOU: float = -1.0
+
+# Epochs at which we dump a per-epoch checkpoint for offline gradient / cosine
+# analysis. Mirrors experiment5_ordinal's {1, 10, 25, 50} schedule. The loop
+# additionally writes ``final.pt`` at the last epoch and keeps ``best.pt`` /
+# ``last.pt`` as before. Epochs that exceed the configured run length are
+# skipped silently.
+GRADIENT_ANALYSIS_EPOCHS: tuple[int, ...] = (1, 10, 25, 50)
+
+
+def _atomic_write_json(path: str, payload) -> None:
+    """Write ``payload`` as JSON to ``path`` atomically (fsync + rename).
+
+    Guarantees that a crashed mid-write does not truncate the existing file —
+    important because we re-write the whole metrics history each epoch.
+    """
+    directory = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(
+        prefix=".metrics.", suffix=".json.tmp", dir=directory,
+    )
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
+def _jsonable(metrics: dict) -> dict:
+    """Shallow copy of ``metrics`` with non-JSON-native scalars coerced.
+
+    torch scalars / numpy scalars / dicts-of-floats slip in from wandb logs;
+    cast them to plain floats. Non-scalar values (tensors, ndarrays) are
+    dropped with a warning — they should not appear here but we guard anyway.
+    """
+    out: dict = {}
+    for k, v in metrics.items():
+        if v is None:
+            out[k] = None
+            continue
+        if hasattr(v, "item") and not isinstance(v, (str, bytes)):
+            try:
+                out[k] = v.item()
+                continue
+            except Exception:
+                pass
+        if isinstance(v, (int, float, bool, str)):
+            out[k] = v
+            continue
+        try:
+            out[k] = float(v)
+        except (TypeError, ValueError):
+            # Skip unserialisable entry; log once so we notice.
+            print(f"[metrics.json] dropping non-scalar key {k!r} (type={type(v).__name__})")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -161,13 +222,23 @@ def save_checkpoint(
     output_dir: str,
     *,
     best_val_iou_tracker: list,  # single-element list used as mutable container
+    total_epochs: Optional[int] = None,
+    milestone_epochs: tuple[int, ...] = GRADIENT_ANALYSIS_EPOCHS,
 ) -> None:
     """Save last.pt every epoch and best.pt when val/iou_greedy improves.
+
+    Additionally saves a fresh checkpoint named ``epoch_{epoch}.pt`` whenever
+    ``epoch`` is in ``milestone_epochs`` and ``final.pt`` when the epoch equals
+    ``total_epochs`` — mirrors experiment5_ordinal's post-hoc analysis schedule
+    so gradient / cosine analyses can reuse the same code.
 
     Args:
         best_val_iou_tracker: a one-element list holding the best val IoU seen
             so far (float). Mutated in-place when a new best is found. Pass a
             reference to ``[float('-inf')]`` from the caller.
+        total_epochs: if provided and ``epoch == total_epochs``, also write
+            ``final.pt``. Left optional for callers that don't need it.
+        milestone_epochs: epochs that trigger ``epoch_{epoch}.pt`` copies.
     """
     payload = {
         "epoch": epoch,
@@ -175,6 +246,9 @@ def save_checkpoint(
         "optimizer_state_dict": optimizer.state_dict(),
         "metrics": metrics,
     }
+
+    ckpt_dir = os.path.join(output_dir, "checkpoints")
+    os.makedirs(ckpt_dir, exist_ok=True)
 
     last_path = os.path.join(output_dir, "last.pt")
     torch.save(payload, last_path)
@@ -186,6 +260,42 @@ def save_checkpoint(
         best_path = os.path.join(output_dir, "best.pt")
         torch.save(payload, best_path)
         print(f"  [checkpoint] New best val/iou_greedy={current_iou:.4f} -> saved best.pt")
+
+    # Milestone per-epoch copy for gradient / cosine analysis.
+    if epoch in milestone_epochs:
+        epoch_path = os.path.join(ckpt_dir, f"epoch_{epoch}.pt")
+        torch.save(payload, epoch_path)
+        print(f"  [checkpoint] Saved milestone epoch_{epoch}.pt")
+
+    # Final checkpoint.
+    if total_epochs is not None and epoch == total_epochs:
+        final_path = os.path.join(ckpt_dir, "final.pt")
+        torch.save(payload, final_path)
+        print(f"  [checkpoint] Saved final.pt (epoch={epoch})")
+
+
+# ---------------------------------------------------------------------------
+# metrics.json persistence
+# ---------------------------------------------------------------------------
+
+
+def _append_metrics_record(
+    history: list[dict],
+    epoch: int,
+    metrics: dict,
+    output_dir: str,
+) -> None:
+    """Append this epoch's metrics record to ``history`` and persist to disk.
+
+    The on-disk file ``metrics.json`` matches experiment5_ordinal's layout: a
+    list of dicts, one per epoch, each with an ``epoch`` key plus every logged
+    metric. Written atomically so partially-completed jobs leave the file in
+    a coherent state.
+    """
+    record = _jsonable(metrics)
+    record["epoch"] = epoch
+    history.append(record)
+    _atomic_write_json(os.path.join(output_dir, "metrics.json"), history)
 
 
 # ---------------------------------------------------------------------------
@@ -201,14 +311,26 @@ def evaluate_mse_regressor(
 ) -> dict:
     """Evaluate the MSE regression baseline.
 
-    Returns:
-        dict with:
-        - val/iou_greedy: mean IoU of the single predicted box vs GT.
-        - val/mse_loss:   mean per-sample L2 loss against the primary GT box.
+    MSE regressor outputs one deterministic point prediction per image (no
+    sampling), so sample-based metrics (iou_expected, iou_best_of_N, entropy)
+    don't apply. We log everything else that does apply, matching
+    `evaluate_localization`'s schema as closely as possible:
+
+      - val/iou_greedy:  mean max-IoU(pred, GT_j) over batch
+      - val/iou_at_50, val/iou_at_75, val/iou_at_90: CorLoc fractions
+      - val/mse_loss:    mean MSE vs primary GT (for historical comparison)
+      - val_{tier}/iou_greedy, val_{tier}/count: per-size-tier splits
     """
+    from experiment9_imagenet_localization.evaluate import (
+        SIZE_TIERS,
+        size_tier_of_primary_box,
+    )
+
     model.eval()
-    ious: list[float] = []
+    ious_all: list[torch.Tensor] = []
     mse_losses: list[float] = []
+    tier_iou: dict[str, list[torch.Tensor]] = {t: [] for t in SIZE_TIERS}
+    tier_count: dict[str, int] = {t: 0 for t in SIZE_TIERS}
 
     for batch in val_loader:
         images = batch["images"].to(device)            # (B, 3, H, W)
@@ -217,24 +339,39 @@ def evaluate_mse_regressor(
 
         pred = model(images)                           # (B, 4) in [0, 1]
 
-        # IoU: expand to (B, 1, 4) for batched_max_iou
+        # Max-IoU over all valid GTs (B,)
         iou_batch = batched_max_iou(
             pred.unsqueeze(1), gt_boxes, gt_mask
-        ).squeeze(1)                                   # (B,)
-        ious.extend(iou_batch.cpu().tolist())
+        ).squeeze(1).cpu()
+        ious_all.append(iou_batch)
 
-        # MSE against primary GT box
-        gt_primary = gt_boxes[:, 0, :]                 # (B, 4)
+        # MSE against primary GT — kept for backwards comparability
+        gt_primary = gt_boxes[:, 0, :]
         mse = F.mse_loss(pred, gt_primary, reduction="mean")
         mse_losses.append(mse.item())
 
-    mean_iou = float(sum(ious) / len(ious)) if ious else float("nan")
-    mean_mse = float(sum(mse_losses) / len(mse_losses)) if mse_losses else float("nan")
+        # Per-tier bookkeeping (tier determined by primary GT area)
+        primary_cpu = gt_boxes[:, 0, :].cpu()
+        tiers = size_tier_of_primary_box(primary_cpu)
+        for b_idx, tier in enumerate(tiers):
+            tier_iou[tier].append(iou_batch[b_idx].unsqueeze(0))
+            tier_count[tier] += 1
 
-    return {
-        "val/iou_greedy": mean_iou,
-        "val/mse_loss": mean_mse,
+    ious_flat = torch.cat(ious_all)
+    metrics: dict = {
+        "val/iou_greedy": ious_flat.mean().item(),
+        "val/iou_at_50":  (ious_flat >= 0.5 ).float().mean().item(),
+        "val/iou_at_75":  (ious_flat >= 0.75).float().mean().item(),
+        "val/iou_at_90":  (ious_flat >= 0.9 ).float().mean().item(),
+        "val/mse_loss":   float(sum(mse_losses) / len(mse_losses)) if mse_losses else float("nan"),
     }
+    for tier in SIZE_TIERS:
+        if tier_iou[tier]:
+            metrics[f"val_{tier}/iou_greedy"] = torch.cat(tier_iou[tier]).mean().item()
+        else:
+            metrics[f"val_{tier}/iou_greedy"] = float("nan")
+        metrics[f"val_{tier}/count"] = tier_count[tier]
+    return metrics
 
 
 # ---------------------------------------------------------------------------
@@ -299,8 +436,16 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
 
     # --- Run identity + output dir ---
     run_name = f"{args.method}_K{args.K}_N{args.N}_seed{args.seed}"
-    run_group = f"{args.method}_K{args.K}_N{args.N}"
-    output_dir = os.path.join(args.output_dir, run_name)
+    # Allow the sweep launcher to override the W&B group via env var
+    # (e.g. to tag a re-run with `_fixedN`). Falls back to the canonical
+    # group name when the env var is unset.
+    run_group = os.environ.get(
+        "WANDB_RUN_GROUP", f"{args.method}_K{args.K}_N{args.N}"
+    )
+    # Use args.output_dir directly. Sweep scripts pass the per-run path
+    # (e.g. results/<run_name>) — appending run_name again would create
+    # the legacy results/<run>/<run>/ nested structure.
+    output_dir = args.output_dir
     if is_main:
         os.makedirs(output_dir, exist_ok=True)
         _print_banner(args, run_name, output_dir)
@@ -353,7 +498,10 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     )
 
     # --- Model ---
-    is_mse = args.method in ("mse", "mse_iou_match")
+    is_mse = args.method in (
+        "mse", "mse_iou_match", "mse_centroid_match",
+        "l1_iou_match", "l1_centroid_match",
+    )
     if is_mse:
         model = LocalizationRegressor(pretrained=not args.no_pretrained, seed=args.seed)
     else:
@@ -416,6 +564,21 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # Store last epoch's metrics for final W&B summary
     train_metrics: dict = {}
 
+    # In-memory history mirrored to metrics.json after each epoch. Resumed
+    # from disk if a previous run left one behind — useful when a job is
+    # requeued on SLURM pre-emption.
+    metrics_history: list[dict] = []
+    metrics_path = os.path.join(output_dir, "metrics.json")
+    if is_main and os.path.exists(metrics_path):
+        try:
+            with open(metrics_path) as fh:
+                loaded = json.load(fh)
+            if isinstance(loaded, list):
+                metrics_history = loaded
+                print(f"Loaded existing metrics.json with {len(metrics_history)} epochs.")
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"[metrics.json] existing file unreadable ({exc}); starting fresh.")
+
     # --- Training loop ---
     for epoch in range(1, args.epochs + 1):
 
@@ -454,10 +617,16 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
             if wandb_run is not None:
                 wandb_run.log({**train_metrics, "epoch": epoch})
 
+            # --- Persist per-epoch metrics.json (mirror of the W&B dict) ---
+            _append_metrics_record(
+                metrics_history, epoch, train_metrics, output_dir,
+            )
+
             # --- Checkpoint ---
             save_checkpoint(
                 raw_model, optimizer, epoch, train_metrics, output_dir,
                 best_val_iou_tracker=best_val_iou_tracker,
+                total_epochs=args.epochs,
             )
 
         if is_ddp:

@@ -1,7 +1,16 @@
+
 """Advantage estimators for ImageNet localization RL experiment.
 
-All functions operate on per-image rollouts (shape [N]) and return
-mean-centered advantages (shape [N]).
+All functions are **polymorphic over the last tensor dimension**:
+
+    rewards.shape == (N,)      -> advantages.shape == (N,)
+    rewards.shape == (B, N)    -> advantages.shape == (B, N)
+    rewards.shape == (*batch, N) -> advantages.shape == (*batch, N)
+
+The per-image loop over the batch dim (Python for b in range(B)) is
+therefore unnecessary — just call `advantage_fn(rewards)` once with the
+full (B, N) tensor. This matters at large N (e.g. N=16384): the dispatch
+overhead of 128 sequential torch calls per step becomes the bottleneck.
 
 Methods:
 - gos: Gap-Over-Survivors (our method, formerly continuous_maxrl)
@@ -15,184 +24,180 @@ Methods:
 import torch
 
 
+SURVIVAL_FLOOR_EPS: float = 1e-4
+"""Clamp the empirical (1 - F̂(τ)) at this floor inside gos_advantage —
+mirrors localization_exp_iou_ord_ce_loss's clamp(min=1e-4) on P(IoU > τ).
+The cumulative-hazard integrand 1/(1 − F̂) is then bounded at 1/ε = 1e4,
+which keeps gos's per-step gradient scale comparable to J_ord at any N.
+"""
+
+
 def gos_advantage(rewards: torch.Tensor) -> torch.Tensor:
     """Gap-Over-Survivors (GOS) advantage for continuous rewards.
 
-    Computes the continuous MaxRL / GOS advantage by sorting rewards,
-    computing gap-over-survivors increments, taking the cumulative sum,
-    scaling by N (to compensate for the 1/N in the policy-gradient mean loss),
-    mean-centering, and scattering back to the original order.
+    Operates on the last dim: (N,) → (N,) or (*batch, N) → (*batch, N).
+
+    Algorithm (per-row, last dim):
+      1. Sort rewards ascending.
+      2. Gaps: gap_i = r_(i) - r_(i-1), with r_(0) = 0.
+      3. Cumulative Σ (gap_i / max(N - i + 1, ε·N)); scale by N.
+         The clamp on the survivor count is the empirical analog of
+         ``localization_exp_iou_ord_ce_loss``'s ``clamp(min=1e-4)`` on
+         ``P(IoU > τ)`` — ensures the cumulative-hazard integrand is
+         bounded by 1/ε.
+      4. Mean-center along the last dim.
+      5. Scatter back to original order.
 
     Args:
-        rewards: (N,) tensor of reward values in [0, 1]
+        rewards: tensor shaped (*batch, N) of reward values in [0, 1].
 
     Returns:
-        advantages: (N,) mean-centered advantages, same dtype and device as input.
-                    Returns zeros for N <= 1.
+        Mean-centered advantages, same shape / dtype / device as input.
+        Returns zeros when the last dim is empty or of size ≤ 1.
     """
-    N = rewards.numel()
-    if N == 0:
+    if rewards.numel() == 0:
         return torch.zeros_like(rewards)
+    N = rewards.shape[-1]
     if N <= 1:
         return torch.zeros_like(rewards)
 
-    sorted_rewards, sort_indices = torch.sort(rewards, stable=True)
+    sorted_rewards, sort_indices = torch.sort(rewards, dim=-1, stable=True)
 
-    # Gaps: gap_i = r_(i) - r_(i-1), with r_(0) = 0
-    prev = torch.cat([
-        torch.zeros(1, device=rewards.device, dtype=rewards.dtype),
-        sorted_rewards[:-1],
-    ])
-    gaps = sorted_rewards - prev                         # (N,)
-    survivors = torch.arange(N, 0, -1, device=rewards.device).to(rewards.dtype)  # [N, N-1, ..., 1]
+    # Shift sorted_rewards right by 1 along last dim, padding with 0.
+    batch_shape = sorted_rewards.shape[:-1]
+    zero_col = torch.zeros(
+        *batch_shape, 1, device=rewards.device, dtype=rewards.dtype,
+    )
+    prev = torch.cat([zero_col, sorted_rewards[..., :-1]], dim=-1)
+    gaps = sorted_rewards - prev
 
-    # Cumulative gap-over-survivors weight
-    increments = gaps / survivors                        # (N,)
-    weights = torch.cumsum(increments, dim=0)            # (N,)
+    # survivors shape (N,) broadcasts against (*batch, N). Clamp at N·ε so
+    # 1/(1-F̂) ≤ 1/ε, matching exp_iou_ord_ce's clamp on P(IoU > τ).
+    min_surv = max(1.0, float(N) * SURVIVAL_FLOOR_EPS)
+    survivors = torch.arange(
+        N, 0, -1, device=rewards.device, dtype=rewards.dtype,
+    ).clamp(min=min_surv)
+    increments = gaps / survivors
+    weights = torch.cumsum(increments, dim=-1) * N
+    weights = weights - weights.mean(dim=-1, keepdim=True)
 
-    # Scale by N so that (1/N)*sum(w_i * score_i) has O(1) magnitude.
-    # Without this, the 1/N in the policy-gradient loss causes gradient vanishing.
-    weights = weights * N
-
-    # Mean-center
-    weights = weights - weights.mean()
-
-    # Unsort back to original order
-    advantages = torch.zeros(N, device=rewards.device, dtype=rewards.dtype)
-    advantages[sort_indices] = weights
-
+    advantages = torch.zeros_like(rewards)
+    advantages.scatter_(dim=-1, index=sort_indices, src=weights)
     return advantages
 
 
 def binary_maxrl_advantage(rewards: torch.Tensor) -> torch.Tensor:
     """Binary MaxRL advantage (Tajwar et al.), binarized at r == 1.0 (exact).
 
-    Success = exact match (r == 1.0). Failure = anything else.
-    If all rewards are the same (all success or all failure), returns zeros.
+    Operates on the last dim. Success = exact match (r == 1.0); failure = anything
+    else. For rows where all samples succeed or all fail, returns zeros.
 
-    Scaled by N so that (1/N)*sum(adv_i * score_i) has O(1) magnitude:
+    Scaled so that (1/N)·Σ adv_i · score_i has O(1) magnitude:
       success advantage = +(N - K) / K
       failure advantage = -1
 
     Args:
-        rewards: (N,) tensor of reward values
+        rewards: tensor shaped (*batch, N).
 
     Returns:
-        advantages: (N,) advantages, same dtype and device as input.
-                    Returns zeros for N <= 1 or degenerate (all same).
+        Advantages, same shape / dtype / device as input.
     """
-    N = rewards.numel()
+    if rewards.numel() == 0:
+        return torch.zeros_like(rewards)
+    N = rewards.shape[-1]
     if N <= 1:
         return torch.zeros_like(rewards)
 
-    successes = (rewards == 1.0)
-    K = successes.sum().item()
+    successes = (rewards == 1.0)                                   # (*, N) bool
+    K = successes.sum(dim=-1, keepdim=True).to(rewards.dtype)      # (*, 1)
 
-    advantages = torch.zeros(N, device=rewards.device, dtype=rewards.dtype)
+    safe_K = K.clamp(min=1)                                         # avoid div-by-0
+    adv_success = (N - K) / safe_K                                 # (*, 1)
 
-    if K == 0 or K == N:
-        return advantages  # all zeros — no signal when all same
-
-    advantages[successes] = (N - K) / K
-    advantages[~successes] = -1.0
-
-    return advantages
+    advantages = torch.where(
+        successes,
+        adv_success.expand_as(rewards),
+        torch.full_like(rewards, -1.0),
+    )
+    degenerate = (K == 0) | (K == N)                               # (*, 1) bool
+    return torch.where(
+        degenerate.expand_as(rewards),
+        torch.zeros_like(rewards),
+        advantages,
+    )
 
 
 def grpo_advantage(rewards: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """GRPO advantage: z-score normalized rewards.
 
-    Normalizes rewards to zero mean and unit standard deviation.
-    Returns zeros when std < 1e-4 (all rewards nearly equal) to avoid
-    division by near-zero.
+    Operates on the last dim. Rows with near-zero std (< 1e-4) get zero
+    advantages to avoid division instability.
 
     Args:
-        rewards: (N,) tensor of reward values
-        eps: numerical stability constant added to std denominator
-
-    Returns:
-        advantages: (N,) z-score normalized advantages, same dtype/device.
-                    Returns zeros for N <= 1 or near-constant rewards.
+        rewards: tensor shaped (*batch, N).
+        eps: numerical stability constant added to std denominator.
     """
-    N = rewards.numel()
+    if rewards.numel() == 0:
+        return torch.zeros_like(rewards)
+    N = rewards.shape[-1]
     if N <= 1:
         return torch.zeros_like(rewards)
 
-    mean_r = rewards.mean()
-    std_r = rewards.std()
-
-    if std_r < 1e-4:
-        return torch.zeros_like(rewards)
-
-    return (rewards - mean_r) / (std_r + eps)
+    mean = rewards.mean(dim=-1, keepdim=True)
+    std = rewards.std(dim=-1, keepdim=True)
+    normalized = (rewards - mean) / (std + eps)
+    zero_mask = (std < 1e-4).expand_as(rewards)
+    return torch.where(zero_mask, torch.zeros_like(rewards), normalized)
 
 
 def rloo_advantage(rewards: torch.Tensor) -> torch.Tensor:
     """Leave-One-Out (RLOO) baseline advantage.
 
-    A_i = (N * r_i - sum(r)) / (N - 1)
+    A_i = (N · r_i - Σ r) / (N - 1)
 
-    Each sample is compared against the mean of all other samples.
-    Returns zeros for N == 1 (leave-one-out is undefined).
-
-    Args:
-        rewards: (N,) tensor of reward values
-
-    Returns:
-        advantages: (N,) RLOO advantages, same dtype and device as input.
-                    Returns zeros for N <= 1.
+    Operates on the last dim. Returns zeros when the last dim has ≤ 1 element.
     """
-    N = rewards.numel()
+    if rewards.numel() == 0:
+        return torch.zeros_like(rewards)
+    N = rewards.shape[-1]
     if N <= 1:
         return torch.zeros_like(rewards)
 
-    total = rewards.sum()
+    total = rewards.sum(dim=-1, keepdim=True)
     return (N * rewards - total) / (N - 1)
 
 
 def reinforce_advantage(rewards: torch.Tensor) -> torch.Tensor:
-    """REINFORCE with baseline: mean-centered, no std normalization.
+    """REINFORCE with baseline: mean-centered along the last dim.
 
     A_i = r_i - mean(r)
-
-    Args:
-        rewards: (N,) tensor of reward values
-
-    Returns:
-        advantages: (N,) mean-centered advantages, same dtype and device.
-                    Returns zeros for N <= 1.
     """
-    N = rewards.numel()
+    if rewards.numel() == 0:
+        return torch.zeros_like(rewards)
+    N = rewards.shape[-1]
     if N <= 1:
         return torch.zeros_like(rewards)
 
-    return rewards - rewards.mean()
+    return rewards - rewards.mean(dim=-1, keepdim=True)
 
 
 def dg_advantage(rewards: torch.Tensor) -> torch.Tensor:
     """Delightful Policy Gradient (DG) advantage.
 
-    Sharpens reward differences via a sigmoid with temperature 0.1:
+    Sharpens reward differences via sigmoid with temperature 0.1 along the
+    last dim:
       s_i = sigmoid((r_i - mean(r)) / 0.1)
       A_i = s_i - mean(s)
-
-    The sigmoid keeps advantages bounded while amplifying rank differences.
-    Returns zeros for N <= 1.
-
-    Args:
-        rewards: (N,) tensor of reward values
-
-    Returns:
-        advantages: (N,) sigmoid-sharpened centered advantages, same dtype/device.
-                    Returns zeros for N <= 1.
     """
-    N = rewards.numel()
+    if rewards.numel() == 0:
+        return torch.zeros_like(rewards)
+    N = rewards.shape[-1]
     if N <= 1:
         return torch.zeros_like(rewards)
 
-    mean_r = rewards.mean()
+    mean_r = rewards.mean(dim=-1, keepdim=True)
     s = torch.sigmoid((rewards - mean_r) / 0.1)
-    return s - s.mean()
+    return s - s.mean(dim=-1, keepdim=True)
 
 
 # ---------------------------------------------------------------------------
