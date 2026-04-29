@@ -8,7 +8,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=384G
+#SBATCH --mem=480G
 #SBATCH --time=48:00:00
 #SBATCH --output=/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/sweep_scripts/logs/gos_K50_N262144_seed45_survFloor_%j.out
 
@@ -23,6 +23,7 @@ export MASTER_PORT=$((20000 + RANDOM % 20000))
 cd "/zfsauton/scratch/shrinivr/cont-maxrl"
 source ~/.bashrc
 conda activate cont-maxrl
+export DISABLE_COMPILE=1
 
 torchrun \
     --nproc_per_node=8 \

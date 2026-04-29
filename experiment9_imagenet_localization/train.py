@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, Callable
 
+import os
 import torch
 import torch.nn.functional as F
 
@@ -91,27 +92,43 @@ def rl_training_step(
     gt_boxes = batch['gt_boxes'].to(device)             # (B, MAX_M, 4)
     gt_mask  = batch['gt_mask'].to(device)              # (B, MAX_M) bool
 
-    logits = model(images)                               # dict of (B, K)
-    log_probs = {h: F.log_softmax(logits[h], dim=-1) for h in HEAD_NAMES}
+    # Forward pass: optionally bf16 autocast (toggle via BF16=1 env var).
+    # Default off because earlier comparisons showed ~5% train reward drop
+    # at end of epoch 1 vs fp32 — likely from the gradient on logits being
+    # downcast to bf16 at the autocast boundary.
+    use_bf16 = bool(int(os.environ.get("BF16", "0"))) and device.type == 'cuda'
+    if use_bf16:
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+            logits = model(images)
+        log_probs = {h: F.log_softmax(logits[h].float(), dim=-1) for h in HEAD_NAMES}
+    else:
+        logits = model(images)                           # dict of (B, K)
+        log_probs = {h: F.log_softmax(logits[h], dim=-1) for h in HEAD_NAMES}
 
-    # Sample and compute boxes in no-grad context (rewards don't need grad)
+    # Stack the 4 head probabilities into one (4·B, K) tensor so we can
+    # do a single multinomial / single gather instead of 4 separate kernel
+    # launches per step. Saves a few % at small N, more at large N where
+    # kernel-launch overhead matters less than the memory traffic.
+    B = log_probs['x_c'].size(0)
+    log_probs_stacked = torch.stack([log_probs[h] for h in HEAD_NAMES], dim=0)  # (4, B, K)
+
     with torch.no_grad():
-        probs = {h: log_probs[h].exp() for h in HEAD_NAMES}
-        samples: dict[str, torch.Tensor] = {}
-        for h in HEAD_NAMES:
-            samples[h] = torch.multinomial(probs[h], N, replacement=True)  # (B, N)
-        coords = torch.stack(
-            [(samples[h].float() + 0.5) / K for h in HEAD_NAMES],
-            dim=-1,
-        )                                                 # (B, N, 4)
+        probs_flat = log_probs_stacked.exp().reshape(4 * B, K)              # (4·B, K)
+        # One fused multinomial draws N samples for every (head, image).
+        samples_flat = torch.multinomial(probs_flat, N, replacement=True)   # (4·B, N)
+        samples_stacked = samples_flat.view(4, B, N)                         # (4, B, N)
+
+        # coords: (B, N, 4) — note we permute (4, B, N) → (B, N, 4)
+        coords = ((samples_stacked.float() + 0.5) / K).permute(1, 2, 0)
         sampled_boxes = clamp_boxes_to_image(coords)
-        rewards = batched_max_iou(sampled_boxes, gt_boxes, gt_mask)  # (B, N)
+        rewards = batched_max_iou(sampled_boxes, gt_boxes, gt_mask)         # (B, N)
 
-        # advantage_fn operates on the last dim — (B, N) in → (B, N) out,
-        # no Python per-image loop required.
-        advantages = advantage_fn(rewards)                # (B, N)
+        # advantage_fn operates on the last dim — (B, N) in → (B, N) out.
+        advantages = advantage_fn(rewards)                                  # (B, N)
 
-    sample_log_probs = factored_sample_log_prob(log_probs, samples)  # (B, N)
+    # Fused gather across heads: per_head_lp[h] = log_probs[h].gather(1, samples[h])
+    # → stacked: (4, B, N) gathered from (4, B, K) at indices (4, B, N)
+    sample_log_probs = log_probs_stacked.gather(2, samples_stacked).sum(dim=0)  # (B, N)
 
     # PG loss: -mean_b mean_n (advantages[b, n] * log_prob[b, n])
     per_image = -(advantages.detach() * sample_log_probs).mean(dim=1)  # (B,)
