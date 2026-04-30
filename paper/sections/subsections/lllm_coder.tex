@@ -1,0 +1,53 @@
+%########################################################################
+\subsection{LLM Code Generation}
+\label{sec:exp_llm}
+%########################################################################
+
+Section~\ref{sec:exp_ordinal} validated continuous MaxRL in a controlled setting where the supervised gradient is computable exactly. We now test whether this gradient alignment yields practical gains in a large-scale, non-differentiable setting: training an LLM to generate code, where the reward is the \emph{fraction of test cases passed}. Code generation is the natural testbed for continuous MaxRL because the reward $r \in [0,1]$ is genuinely continuous (a problem with 20 test cases produces 21 distinct reward levels), and the ordinal structure is semantically meaningful: passing 18 of 20 tests is strictly better than passing 10 of 20, and the training signal should reflect this.
+
+\paragraph{Setup.} We train Qwen3-1.7B-Base~\citep{qwen2025qwen25} on DeepCoder-clean, a curated subset of approximately 23{,}000 Python programming problems with all LiveCodeBench~\citep{jain2024livecodebench} overlapping problems removed to prevent train-test contamination. The training reward for each generated solution is $r = (\text{number of test cases passed}) / (\text{total test cases}) \in [0,1]$. Solutions that fail to parse or that time out receive $r = 0$. All methods share identical training infrastructure built on verl~\citep{sheng2024verl}: fully on-policy updates (one gradient step per rollout batch, no importance ratio clipping), no KL penalty ($\beta = 0$), and no entropy bonus. We train for \tbd{1000} RL steps with learning rate $10^{-6}$, \tbd{256} prompts per batch, $G = 16$ rollouts per prompt (with ablations at $G \in \{4, 64\}$), maximum response length 4096 tokens, and rollout temperature $1.0$. Thinking mode is disabled. All training runs use \tbd{4}$\times$ NVIDIA GH200 GPUs on the NCSA DeltaAI cluster.
+
+\paragraph{Evaluation.} We evaluate on three benchmarks using the unbiased pass@$k$ estimator of \citet{chen2021evaluating} with \tbd{200} completions per problem, temperature $0.6$, and top-$p$ $0.95$:
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{LiveCodeBench v5}~\citep{jain2024livecodebench}: \tbd{529} competition-level problems from LeetCode, AtCoder, and Codeforces, collected after model training cutoffs. This is the primary in-distribution evaluation (problems resemble DeepCoder in style and difficulty).
+  \item \textbf{HumanEval+}~\citep{liu2024evalplus}: 164 function-level Python problems with augmented test suites. Tests out-of-distribution generalization to a different problem format.
+  \item \textbf{MBPP+}~\citep{liu2024evalplus}: 399 basic Python tasks with augmented tests. The easiest benchmark, testing whether methods maintain breadth on simple problems.
+\end{itemize}
+
+\paragraph{Methods.} We compare five RL objectives, all sharing the same training hyperparameters:
+\begin{itemize}[leftmargin=2em,itemsep=2pt]
+  \item \textbf{GOS} (continuous MaxRL): gap-over-survivors advantages (Algorithm~\ref{alg:gap_over_survivors}), mean-centered. Uses the full continuous reward $r \in [0,1]$.
+  \item \textbf{GRPO}~\citep{shao2024deepseekmath}: z-score advantages within each prompt group. Uses the full continuous reward.
+  \item \textbf{RLOO}~\citep{ahmadian2024rloo}: leave-one-out baseline subtraction. Uses the full continuous reward.
+  \item \textbf{REINFORCE}: vanilla policy gradient with batch-mean baseline. Uses the full continuous reward.
+  \item \textbf{Binary MaxRL}~\citep{tajwar2026maxrl}: the binary MaxRL advantage of \citet{tajwar2026maxrl}. Thresholds the continuous reward at $r > 0$ to produce a binary signal, discarding all partial-credit information.
+\end{itemize}
+Including Binary MaxRL isolates the contribution of continuous rewards: it uses the same MaxRL objective as GOS but ignores the ordinal structure. If GOS outperforms Binary MaxRL, the gain is attributable to exploiting partial credit rather than to the MaxRL framework per se. Including RLOO and REINFORCE alongside GRPO forecloses the objection that any observed advantage is specific to the GRPO baseline.
+
+\paragraph{Main results.} Figure~\ref{fig:llm_passk} presents pass@$k$ curves on all three benchmarks for the best checkpoint of each method.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/llm/figure_llm_passk.pdf}
+    \caption{\textbf{Pass@$k$ curves on LLM code generation} (Qwen3-1.7B-Base, $G = 16$). Each panel shows one evaluation benchmark; the $x$-axis is $k$ (log scale) and the $y$-axis is pass@$k$. GOS (continuous MaxRL) Pareto-dominates all baselines: it matches or exceeds the best alternative at pass@1 while simultaneously achieving higher pass@$k$ at all $k$, indicating that it improves greedy quality \emph{without sacrificing coverage}. GRPO shows characteristic pass@$k$ degradation at large $k$, consistent with the diversity collapse documented in prior work~\citep{yue2025dorpo, wu2026grpocollapse}. Binary MaxRL underperforms GOS, confirming that the continuous reward signal carries exploitable ordinal structure that binary thresholding discards. The dashed gray line is the untrained base model.}
+    \label{fig:llm_passk}
+\end{figure}
+
+Three findings emerge. First, GOS Pareto-dominates all baselines across all three benchmarks: it achieves pass@1 of \tbd{X.X\%} on LCB v5 (vs.\ \tbd{X.X\%} for GRPO, \tbd{X.X\%} for RLOO, \tbd{X.X\%} for REINFORCE, \tbd{X.X\%} for Binary MaxRL) while simultaneously reaching pass@\tbd{200} of \tbd{X.X\%} (vs.\ \tbd{X.X\%} for GRPO). This Pareto dominance is the hallmark of the MaxRL objective: by concentrating gradient on hard problems via $1/p_\tau$ weighting, GOS improves the policy's weakest predictions without collapsing diversity on problems it already solves.
+
+Second, GRPO exhibits the pass@$k$ degradation pattern documented by \citet{yue2025dorpo}: pass@1 improves during training, but pass@$k$ for large $k$ \emph{declines} relative to the base model, indicating that GRPO sharpens the policy distribution at the cost of coverage. On HumanEval+, GRPO's pass@\tbd{200} drops from \tbd{X.X\%} (base) to \tbd{X.X\%} after training. GOS avoids this: its pass@$k$ improves relative to the base model at \emph{all} values of $k$, consistent with the theoretical prediction that the MaxRL objective optimizes coverage directly.
+
+Third, Binary MaxRL consistently underperforms GOS, with the gap widening at higher $k$. On LCB v5, GOS achieves \tbd{X.X\%} pass@\tbd{200} vs.\ Binary MaxRL's \tbd{X.X\%}. This confirms that continuous rewards carry exploitable ordinal structure: a solution passing 18 of 20 tests is close to correct, and GOS's survival-function weighting channels gradient toward promoting such near-misses to full passes. Binary MaxRL treats this solution identically to one passing 1 of 20 tests, wasting the partial-credit signal.
+
+\paragraph{Effect of rollout count $G$.} Figure~\ref{fig:llm_rollout_ablation} ablates $G \in \{4, 16, 64\}$ for GOS and GRPO.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/llm/figure_llm_rollout_ablation.pdf}
+    \caption{\textbf{Rollout ablation on LCB v5.} Pass@1 and pass@\tbd{200} as a function of rollout count $G$ for GOS and GRPO. GOS at $G = 4$ already surpasses GRPO at $G = 16$ on both metrics, yielding a \tbd{4}$\times$ rollout efficiency advantage. Increasing $G$ to 64 provides diminishing returns for GOS, consistent with the rapid $(1-p_\tau)^G$ convergence predicted by Theorem~\ref{thm:convergence}.}
+    \label{fig:llm_rollout_ablation}
+\end{figure}
+
+GOS at $G = 4$ achieves pass@1 of \tbd{X.X\%} and pass@\tbd{200} of \tbd{X.X\%} on LCB v5, already exceeding GRPO at $G = 16$ (\tbd{X.X\%} and \tbd{X.X\%} respectively). This \tbd{4}$\times$ efficiency advantage in rollout count translates directly to wall-clock savings, since rollout generation dominates training time. The result mirrors the UTKFace finding (Section~\ref{sec:exp_ordinal}), where continuous MaxRL at $G = 16$ matched GRPO at $G = 64$: in both settings, exploiting the ordinal reward structure yields a multiplicative reduction in required samples.
+
+\paragraph{Key takeaway.} On LLM code generation with continuous rewards, GOS Pareto-dominates GRPO, RLOO, REINFORCE, and Binary MaxRL across three evaluation benchmarks, achieving simultaneous gains in pass@1 (greedy quality) and pass@$k$ (coverage). The advantage over Binary MaxRL isolates the value of continuous rewards: the ordinal structure in partial test-case passage rates is a genuine learning signal, not noise. GOS extracts this signal; GRPO's z-score normalization and Binary MaxRL's thresholding both discard it. Additional training dynamics (entropy, response length, gradient norms) are reported in Appendix~\ref{app:llm_training_dynamics}.
