@@ -42,7 +42,7 @@ from experiment9_imagenet_localization.train import (
 # Method groupings
 # ---------------------------------------------------------------------------
 
-RL_METHODS = {"gos", "binary_maxrl", "grpo", "rloo", "reinforce", "dg"}
+RL_METHODS = {"gos", "binary_maxrl", "grpo", "rloo", "reinforce", "dg", "pkpo"}
 SUPERVISED_METHODS = {
     "ordinal_ce", "plain_ce",
     "mse", "mse_iou_match", "mse_centroid_match",

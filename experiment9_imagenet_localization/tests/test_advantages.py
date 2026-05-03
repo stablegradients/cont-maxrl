@@ -488,13 +488,15 @@ def test_grpo_scale_invariant_but_gos_not():
 
 
 def test_advantage_fns_keys_and_order():
-    """ADVANTAGE_FNS must have exactly the 6 expected keys in canonical order.
+    """ADVANTAGE_FNS must have exactly the 7 expected keys in canonical order.
 
     The dict serves as the central dispatch table for experiment config; any
     missing or misspelled key (e.g., 'cont_maxrl' instead of 'gos') would cause
     a KeyError when loading a saved experiment config.
     """
-    expected_keys = ["gos", "binary_maxrl", "grpo", "rloo", "reinforce", "dg"]
+    expected_keys = [
+        "gos", "binary_maxrl", "grpo", "rloo", "reinforce", "dg", "pkpo",
+    ]
     actual_keys = list(ADVANTAGE_FNS.keys())
     assert actual_keys == expected_keys, (
         f"ADVANTAGE_FNS keys mismatch: expected {expected_keys}, got {actual_keys}"

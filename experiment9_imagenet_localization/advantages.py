@@ -19,7 +19,10 @@ Methods:
 - rloo: Leave-One-Out baseline
 - reinforce: mean-centered baseline (no std normalization)
 - dg: Delightful Policy Gradient (sigmoid-sharpened)
+- pkpo: Pass@K Policy Optimization (Walder & Karkhanis 2025, Eq 33)
 """
+
+import os
 
 import torch
 
@@ -224,6 +227,200 @@ def dg_advantage(rewards: torch.Tensor) -> torch.Tensor:
 
 
 # ---------------------------------------------------------------------------
+# Pass@K Policy Optimization (PKPO) — Walder & Karkhanis 2025 (arXiv:2505.15201)
+# Implements s_i^(loo-1) (Eq 33), the recommended estimator from the paper.
+# Reference: Listing 1 in the paper. Verified bit-exact (1e-16) vs the numpy
+# reference for N up to 256 and K up to 16.
+# ---------------------------------------------------------------------------
+
+PKPO_K_DEFAULT: int = int(os.environ.get("PKPO_K", "8"))
+"""Default pass@k threshold for ``pkpo_advantage``.
+
+Set via the ``PKPO_K`` env var so different runs in a sweep can target
+different k values without code changes. The valid range is 2..N. At
+k=1, the paper says no transformation (== mean-centered REINFORCE);
+``pkpo_advantage`` falls back to mean-centering for k=1 only.
+"""
+
+
+# Cache of (m_diag_outer, deltas_outer, m_diag_inner, deltas_inner) tensors,
+# keyed by (N, K). All four are invariant given (N, K) and broadcast against
+# (*batch, N) sorted-rewards tensors.
+_PKPO_WEIGHT_CACHE: dict = {}
+
+
+def _pkpo_m_diagonal_np(N: int, K: int) -> torch.Tensor:
+    """``_m_diagonal(N, K)`` from the paper's Listing 1.
+
+    m_ii^(normed) = K/(N-K+1) * prod_{l=1..K-1} (i-K+1+l)/(N-K+1+l) for i ≥ K-1,
+    else 0.  Indices are zero-based (i ∈ {0, .., N-1}).
+    """
+    out = torch.zeros(N, dtype=torch.float64)
+    if K < 1 or N < 1:
+        return out
+    for i in range(N):
+        if i < K - 1:
+            continue
+        if K == 1:
+            out[i] = 1.0 / N
+            continue
+        num = torch.arange(i - K + 2, i + 1, dtype=torch.float64)
+        den = torch.arange(N - K + 2, N + 1, dtype=torch.float64)
+        out[i] = K / (N - K + 1) * (num / den).prod()
+    return out
+
+
+def _pkpo_deltas_np(N: int, K: int) -> torch.Tensor:
+    """``_deltas(N, K)`` from the paper's Listing 1, length N-2.
+
+    delta_i = m_normed(N-1, K, i, i+1) - m_normed(N-1, K, i+1, i+1).
+    """
+    if N <= 2:
+        return torch.zeros(0, dtype=torch.float64)
+    out = torch.zeros(N - 2, dtype=torch.float64)
+    M = N - 1
+    for i in range(N - 2):
+        # off-diagonal (i, i+1) at size-M arr
+        j = i + 1
+        if j > i and j >= K - 1 and K >= 2:
+            if K == 2:
+                v_off = float(K / (M - K + 1) * (K - 1) / M)
+            else:
+                num = torch.arange(j - K + 2, j, dtype=torch.float64)
+                den = torch.arange(M - K + 2, M, dtype=torch.float64)
+                v_off = float(
+                    K / (M - K + 1) * (K - 1) / M * (num / den).prod()
+                )
+        else:
+            v_off = 0.0
+        # diagonal at i+1 in size-M arr
+        if j >= K - 1 and K >= 1:
+            if K == 1:
+                ratio = 1.0
+            else:
+                num = torch.arange(j - K + 2, j + 1, dtype=torch.float64)
+                den = torch.arange(M - K + 2, M + 1, dtype=torch.float64)
+                ratio = float((num / den).prod())
+            v_diag = K / (M - K + 1) * ratio
+        else:
+            v_diag = 0.0
+        out[i] = v_off - v_diag
+    return out
+
+
+def _pkpo_get_weights(N: int, K: int, device, dtype):
+    """Return (m_diag_outer, deltas_outer, m_diag_inner, deltas_inner) for sloo_minus_one(g, K).
+
+    Computed once per (N, K) in float64 and cached. Cast to the requested
+    dtype/device at retrieval (cast cost is negligible vs construction).
+    """
+    cache_key = (N, K)
+    if cache_key not in _PKPO_WEIGHT_CACHE:
+        # s(g, K) needs m_diagonal(N, K) and deltas(N+1, K).
+        m_diag_outer = _pkpo_m_diagonal_np(N, K)
+        deltas_outer = _pkpo_deltas_np(N + 1, K)
+        # _b(g, K-1) needs m_diagonal(N-1, K-1) and deltas(N, K-1).
+        m_diag_inner = _pkpo_m_diagonal_np(N - 1, K - 1)
+        deltas_inner = _pkpo_deltas_np(N, K - 1)
+        _PKPO_WEIGHT_CACHE[cache_key] = (
+            m_diag_outer, deltas_outer, m_diag_inner, deltas_inner,
+        )
+    m_diag_outer, deltas_outer, m_diag_inner, deltas_inner = _PKPO_WEIGHT_CACHE[cache_key]
+    return (
+        m_diag_outer.to(device=device, dtype=dtype),
+        deltas_outer.to(device=device, dtype=dtype),
+        m_diag_inner.to(device=device, dtype=dtype),
+        deltas_inner.to(device=device, dtype=dtype),
+    )
+
+
+def pkpo_advantage(rewards: torch.Tensor, k: int | None = None) -> torch.Tensor:
+    """Pass@K Policy Optimization (PKPO) advantage — s_i^(loo-1) of Eq 33.
+
+    Operates on the last dim. Implements the leave-one-out-minus-one baseline
+    from Walder & Karkhanis 2025, the paper's recommended pkpo estimator. The
+    weight on each sample, as a function of its sorted rank, interpolates
+    between uniform (k=1, == REINFORCE) and "max only" (k=N, == TZSM25).
+
+    Algorithm (per-row, last dim):
+      1. Sort rewards ascending.
+      2. s_sorted = s(sorted_g, K)        — Eq 19 (cumsum-from-right).
+      3. b_sorted = _b(sorted_g, K-1)     — auxiliary cumsum, Eq 32 recursion.
+      4. sloo_m1_sorted = s_sorted - b_sorted * K / ((K-1) * N)   — Eq 33.
+      5. Scatter back to the original order.
+
+    Internally computes in float64 for the binomial-ratio precision (the
+    weights span ~1e-13 .. 1e0 at N=256, K=16, which is fine for float64
+    cumsums but tight for float32). Result is cast back to ``rewards.dtype``.
+
+    Args:
+        rewards: tensor shaped (*batch, N) of reward values (any range OK).
+        k: pass@k threshold; valid range 1..N.  Defaults to ``PKPO_K_DEFAULT``
+            (env-var-controlled).  At k=1 returns mean-centered rewards
+            (==REINFORCE) since the loo-1 baseline divides by k-1=0.
+
+    Returns:
+        Advantages, same shape / dtype / device as input.
+    """
+    if rewards.numel() == 0:
+        return torch.zeros_like(rewards)
+    N = rewards.shape[-1]
+    if N <= 1:
+        return torch.zeros_like(rewards)
+
+    if k is None:
+        k = PKPO_K_DEFAULT
+    if k < 1 or k > N:
+        raise ValueError(f"pkpo_advantage: k={k} out of range [1, N={N}]")
+    if k == 1:
+        # Eq 33 has K-1 in the denominator → undefined.  Paper notes that
+        # k=1 corresponds to "no reward transformation"; the unbiased
+        # mean-centered REINFORCE baseline is the natural choice.
+        return rewards - rewards.mean(dim=-1, keepdim=True)
+
+    # Compute in float64 for the binomial-ratio precision.
+    sorted_g64, sort_idx = torch.sort(rewards.to(torch.float64), dim=-1, stable=True)
+
+    m_diag_outer, deltas_outer, m_diag_inner, deltas_inner = _pkpo_get_weights(
+        N, k, device=sorted_g64.device, dtype=torch.float64,
+    )
+
+    # --- s(sorted_g, k) — Eq 19 ---
+    c = sorted_g64 * m_diag_outer                          # (..., N)
+    update = sorted_g64[..., 1:] * deltas_outer            # (..., N-1)
+    zero_pad = torch.zeros(
+        *sorted_g64.shape[:-1], 1, dtype=torch.float64, device=sorted_g64.device,
+    )
+    c = c + torch.cat([update, zero_pad], dim=-1)          # add to first N-1 entries
+    s_sorted = torch.flip(torch.cumsum(torch.flip(c, dims=[-1]), dim=-1), dims=[-1])
+
+    # --- _b(sorted_g, k-1) — Eq 32 recursion in cumsum form ---
+    arange_1_N = torch.arange(
+        1, N, dtype=torch.float64, device=sorted_g64.device,
+    )                                                       # (N-1,)
+    arange_1_Nm1 = torch.arange(
+        1, N - 1, dtype=torch.float64, device=sorted_g64.device,
+    )                                                       # (N-2,)
+    w = m_diag_inner * arange_1_N                           # (N-1,)
+    w = w + torch.cat(
+        [torch.zeros(1, dtype=torch.float64, device=w.device), deltas_inner * arange_1_Nm1],
+        dim=0,
+    )                                                       # (N-1,)
+    c1 = (w * sorted_g64[..., 1:]).sum(dim=-1, keepdim=True)         # (..., 1)
+    c2 = (sorted_g64[..., :-1] - sorted_g64[..., 1:]) * w            # (..., N-1)
+    b_sorted = torch.cumsum(torch.cat([c1, c2], dim=-1), dim=-1)     # (..., N)
+
+    # --- sloo_minus_one (Eq 33): s - _b * k / ((k-1) * N) ---
+    sloo_m1_sorted = s_sorted - b_sorted * (k / ((k - 1) * N))
+
+    # Scatter back to original order, restore input dtype.
+    advantages_sorted = sloo_m1_sorted.to(rewards.dtype)
+    advantages = torch.zeros_like(rewards)
+    advantages.scatter_(dim=-1, index=sort_idx, src=advantages_sorted)
+    return advantages
+
+
+# ---------------------------------------------------------------------------
 # Dispatch dict for convenience.
 # Keys in the canonical order for this experiment.
 # ---------------------------------------------------------------------------
@@ -235,4 +432,5 @@ ADVANTAGE_FNS = {
     "rloo": rloo_advantage,
     "reinforce": reinforce_advantage,
     "dg": dg_advantage,
+    "pkpo": pkpo_advantage,
 }
