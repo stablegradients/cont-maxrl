@@ -24,15 +24,27 @@ Methods:
 import torch
 
 
-SURVIVAL_FLOOR_EPS: float = 1e-4
-"""Clamp the empirical (1 - F̂(τ)) at this floor inside gos_advantage —
-mirrors localization_exp_iou_ord_ce_loss's clamp(min=1e-4) on P(IoU > τ).
-The cumulative-hazard integrand 1/(1 − F̂) is then bounded at 1/ε = 1e4,
-which keeps gos's per-step gradient scale comparable to J_ord at any N.
+GOS_SURVIVAL_EPS: float = 1e-4
+"""Survival-floor ε for the GOS increment mask.
+
+At each quality-level interval j in the GOS sum, the empirical survival
+fraction is (N − j) / N.  Intervals where this fraction < ε are masked
+(their increment is zeroed), mirroring exp_iou_ord_ce_loss's
+clamp(min=ε) on P(IoU > τ): thresholds where P(IoU > τ) ≤ ε contribute
+zero gradient in the supervised loss, so the RL estimator must skip them
+too.  In the N → ∞ limit the mask converges to 𝟙(S(τ) ≥ ε), and the
+GOS gradient converges to ∇ L_ε exactly.
+
+Practical effect: at ε = 1e-4, the mask only binds when N > 1/ε = 10000;
+at N = 16384 it zeros a single increment (survivors = 1), at N = 131072
+about 13 increments.  For N ≤ 10000 the mask is all-True (no-op).
 """
 
 
-def gos_advantage(rewards: torch.Tensor) -> torch.Tensor:
+def gos_advantage(
+    rewards: torch.Tensor,
+    survival_eps: float = GOS_SURVIVAL_EPS,
+) -> torch.Tensor:
     """Gap-Over-Survivors (GOS) advantage for continuous rewards.
 
     Operates on the last dim: (N,) → (N,) or (*batch, N) → (*batch, N).
@@ -40,16 +52,21 @@ def gos_advantage(rewards: torch.Tensor) -> torch.Tensor:
     Algorithm (per-row, last dim):
       1. Sort rewards ascending.
       2. Gaps: gap_i = r_(i) - r_(i-1), with r_(0) = 0.
-      3. Cumulative Σ (gap_i / max(N - i + 1, ε·N)); scale by N.
-         The clamp on the survivor count is the empirical analog of
-         ``localization_exp_iou_ord_ce_loss``'s ``clamp(min=1e-4)`` on
-         ``P(IoU > τ)`` — ensures the cumulative-hazard integrand is
-         bounded by 1/ε.
-      4. Mean-center along the last dim.
+      3. Increments: gap_i / survivors_i, where survivors_i = N − i + 1.
+         Increments at positions where the empirical survival fraction
+         survivors_i / N < survival_eps are zeroed (masked out).
+         This is the exact finite-N analog of exp_iou_ord_ce_loss's
+         clamp(min=eps) on P(IoU > τ): both omit quality levels where
+         the survival probability is below ε.
+      4. Cumulative sum, scale by N, mean-center.
       5. Scatter back to original order.
 
     Args:
         rewards: tensor shaped (*batch, N) of reward values in [0, 1].
+        survival_eps: floor on the empirical survival fraction.  Intervals
+            where (N − j) / N < survival_eps are masked out.  Must match
+            the ``eps`` used in ``localization_exp_iou_ord_ce_loss`` for
+            the N → ∞ identity to hold.  Default 1e-4.
 
     Returns:
         Mean-centered advantages, same shape / dtype / device as input.
@@ -71,13 +88,19 @@ def gos_advantage(rewards: torch.Tensor) -> torch.Tensor:
     prev = torch.cat([zero_col, sorted_rewards[..., :-1]], dim=-1)
     gaps = sorted_rewards - prev
 
-    # survivors shape (N,) broadcasts against (*batch, N). Clamp at N·ε so
-    # 1/(1-F̂) ≤ 1/ε, matching exp_iou_ord_ce's clamp on P(IoU > τ).
-    min_surv = max(1.0, float(N) * SURVIVAL_FLOOR_EPS)
+    # Survivors: [N, N-1, ..., 1].  No clamp on the counts themselves.
     survivors = torch.arange(
         N, 0, -1, device=rewards.device, dtype=rewards.dtype,
-    ).clamp(min=min_surv)
+    )
     increments = gaps / survivors
+
+    # Mask out quality-level intervals where the empirical survival
+    # fraction drops below ε, matching exp_iou_ord_ce_loss's clamp.
+    # survivors is shape (N,); broadcasts against (*batch, N).
+    if survival_eps > 0:
+        mask = (survivors / N >= survival_eps)          # (N,) bool
+        increments = increments * mask.to(increments.dtype)
+
     weights = torch.cumsum(increments, dim=-1) * N
     weights = weights - weights.mean(dim=-1, keepdim=True)
 

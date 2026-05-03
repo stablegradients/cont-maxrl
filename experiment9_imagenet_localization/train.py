@@ -89,6 +89,11 @@ def rl_training_step(
     advantage_fn = ADVANTAGE_FNS[method]
 
     images   = batch['images'].to(device)               # (B, 3, 224, 224)
+    # channels_last layout: matches the cuDNN Tensor-Core code path on
+    # Ampere (a6000/a5000), gives ~1.5× on ResNet conv. No-op if the model
+    # wasn't converted (PyTorch silently falls back).
+    if device.type == 'cuda':
+        images = images.contiguous(memory_format=torch.channels_last)
     gt_boxes = batch['gt_boxes'].to(device)             # (B, MAX_M, 4)
     gt_mask  = batch['gt_mask'].to(device)              # (B, MAX_M) bool
 

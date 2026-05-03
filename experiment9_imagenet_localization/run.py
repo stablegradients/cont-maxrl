@@ -512,6 +512,11 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
+    # channels_last: makes the ResNet backbone use cuDNN's NHWC Tensor-Core
+    # path. ~1.5× faster forward+backward on a6000/a5000. No-op for ops
+    # without a channels_last kernel — they auto-fallback to NCHW.
+    if torch.cuda.is_available():
+        model = model.to(memory_format=torch.channels_last)
     if is_main:
         print(f"Device: {device}")
         print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}\n")
@@ -526,9 +531,12 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # back if the compiler trips on a graph break.
     if torch.cuda.is_available() and not bool(int(os.environ.get("DISABLE_COMPILE", "0"))):
         try:
-            model = torch.compile(model, mode="reduce-overhead", dynamic=False)
+            # mode='default' (the standard inductor pipeline) — avoids CUDA
+            # graphs which were causing slow CPU-RAM growth → OOM in our
+            # earlier runs. Still gives ~1.3× via op fusion / kernel selection.
+            model = torch.compile(model, mode="default", dynamic=False)
             if is_main:
-                print("torch.compile: enabled (mode=reduce-overhead)")
+                print("torch.compile: enabled (mode=default)")
         except Exception as e:  # noqa: BLE001
             if is_main:
                 print(f"torch.compile: skipped ({e})")

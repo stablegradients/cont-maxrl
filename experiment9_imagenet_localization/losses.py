@@ -351,7 +351,9 @@ def localization_exp_iou_ord_ce_loss(
         gt_mask:       (B, M) bool — which rows are real GT (vs padding)
         K:             number of bins per coordinate
         n_thresholds:  T; number of grid points for the τ integral
-        eps:           clamp for log(P) when P ≈ 0 and for zero-area union
+        eps:           clamp for log(P) when P ≈ 0 and for zero-area union.
+                       Must match ``GOS_SURVIVAL_EPS`` in ``advantages.py``
+                       for the GOS → exp_iou_ord_ce identity (N → ∞) to hold.
 
     Returns:
         scalar loss, positive value, averaged over batch.
