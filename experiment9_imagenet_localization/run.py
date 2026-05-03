@@ -524,6 +524,7 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # Keep a reference to the unwrapped model for eval/checkpointing
     raw_model = model
     if is_ddp:
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
         model = DDP(model, device_ids=[local_rank])
 
     # torch.compile fuses the backbone + head ops; gives 1.3-1.8× speedup
