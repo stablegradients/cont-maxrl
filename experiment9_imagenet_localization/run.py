@@ -47,7 +47,7 @@ SUPERVISED_METHODS = {
     "ordinal_ce", "plain_ce",
     "mse", "mse_iou_match", "mse_centroid_match",
     "l1_iou_match", "l1_centroid_match",
-    "exp_iou_ord_ce",
+    "exp_iou_ord_ce", "exp_iou_ord_ce_clamped",
 }
 ALL_METHODS = sorted(RL_METHODS | SUPERVISED_METHODS)
 
@@ -175,6 +175,13 @@ def parse_args() -> argparse.Namespace:
                         help="Batch size per GPU.")
     parser.add_argument("--lr", type=float, default=5e-4,
                         help="Peak learning rate after linear warmup.")
+    parser.add_argument("--optimizer", type=str, default="adam",
+                        choices=["adam", "sgd"],
+                        help="Optimizer. Adam (default) uses lr=5e-4 typically; "
+                             "SGD uses lr=0.02, momentum=0.9 — the canonical "
+                             "ResNet-50 detection recipe at eff_batch=128.")
+    parser.add_argument("--momentum", type=float, default=0.9,
+                        help="SGD momentum (ignored for Adam).")
     parser.add_argument("--warmup_epochs", type=int, default=1,
                         help="Number of epochs over which to linearly warm up "
                              "the LR from ~0 to --lr. Backbone is NOT frozen "
@@ -550,7 +557,17 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # Schedule: linear LR warmup from ~0 → args.lr over the first
     # `warmup_epochs` epochs, then cosine decay to 0 over the remainder.
     # Matches the standard detection-model recipe (DETR, RetinaNet, etc.).
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    if args.optimizer == "sgd":
+        optimizer = torch.optim.SGD(
+            model.parameters(),
+            lr=args.lr,
+            momentum=args.momentum,
+            weight_decay=1e-4,
+        )
+    else:
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=args.lr, weight_decay=1e-4,
+        )
     steps_per_epoch = len(train_loader)
     warmup_steps = args.warmup_epochs * steps_per_epoch
     total_steps = args.epochs * steps_per_epoch
@@ -573,8 +590,12 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=total_steps, eta_min=0.0,
         )
+    if args.optimizer == "sgd":
+        opt_desc = f"SGD(lr={args.lr}, momentum={args.momentum}, wd=1e-4)"
+    else:
+        opt_desc = f"Adam(lr={args.lr}, wd=1e-4)"
     print(
-        f"Optimizer: Adam(lr={args.lr}, wd=1e-4); "
+        f"Optimizer: {opt_desc}; "
         f"linear warmup {warmup_steps} steps → cosine to 0 over remaining "
         f"{total_steps - warmup_steps} steps."
     )

@@ -128,6 +128,62 @@ def test_exp_iou_ord_ce_handles_invalid_gt_rows():
     )
 
 
+def test_exp_iou_ord_ce_clamp_pred_false_matches_baseline():
+    """clamp_pred=False must produce bit-identical output to omitting the
+    kwarg, so the existing exp_iou_ord_ce baseline is unaffected."""
+    B, K = 2, 5
+    logits = _random_logits(B, K, seed=7)
+    gt_boxes = torch.tensor([
+        [[0.5, 0.5, 0.4, 0.4], [0.2, 0.3, 0.1, 0.2], [0, 0, 0, 0]],
+        [[0.3, 0.7, 0.5, 0.3], [0, 0, 0, 0],          [0, 0, 0, 0]],
+    ])
+    gt_mask = torch.tensor([[True, True, False], [True, False, False]])
+    base = localization_exp_iou_ord_ce_loss(
+        logits, gt_boxes, gt_mask, K=K, n_thresholds=10,
+    )
+    explicit = localization_exp_iou_ord_ce_loss(
+        logits, gt_boxes, gt_mask, K=K, n_thresholds=10, clamp_pred=False,
+    )
+    assert torch.equal(base, explicit), (
+        f"clamp_pred=False must not change behavior; got {base} vs {explicit}"
+    )
+
+
+def test_exp_iou_ord_ce_clamp_pred_true_finite_grad_and_differs():
+    """clamp_pred=True must return finite/positive loss with grad to all heads
+    and must differ from clamp_pred=False on logits where the predicted box
+    can extend outside [0,1]."""
+    B, K = 2, 5
+    g = torch.Generator().manual_seed(11)
+    logits = {h: torch.randn(B, K, generator=g, requires_grad=True)
+              for h in HEAD_NAMES}
+    gt_boxes = torch.tensor([
+        [[0.5, 0.5, 0.6, 0.6], [0, 0, 0, 0]],
+        [[0.2, 0.8, 0.5, 0.3], [0, 0, 0, 0]],
+    ])
+    gt_mask = torch.tensor([[True, False], [True, False]])
+
+    loss_unclamped = localization_exp_iou_ord_ce_loss(
+        logits, gt_boxes, gt_mask, K=K, n_thresholds=10, clamp_pred=False,
+    )
+    loss_clamped = localization_exp_iou_ord_ce_loss(
+        logits, gt_boxes, gt_mask, K=K, n_thresholds=10, clamp_pred=True,
+    )
+
+    assert torch.isfinite(loss_clamped), f"clamped loss not finite: {loss_clamped}"
+    assert loss_clamped.item() >= 0.0, f"clamped loss must be nonneg, got {loss_clamped}"
+    assert not torch.allclose(loss_unclamped, loss_clamped), (
+        f"clamp_pred=True did not change anything: "
+        f"unclamped={loss_unclamped.item()} clamped={loss_clamped.item()}"
+    )
+    loss_clamped.backward()
+    for h in HEAD_NAMES:
+        grad = logits[h].grad
+        assert grad is not None, f"no grad reached head {h!r}"
+        assert torch.isfinite(grad).all(), f"non-finite grad on head {h!r}: {grad}"
+        assert grad.abs().sum().item() > 0.0, f"zero grad on head {h!r}"
+
+
 # ===========================================================================
 # Factored log-prob tests
 # ===========================================================================

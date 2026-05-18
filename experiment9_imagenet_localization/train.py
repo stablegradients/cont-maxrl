@@ -266,13 +266,14 @@ def train_supervised_epoch_localization(
             gt_boxes = batch['gt_boxes'].to(device)
             gt_mask  = batch['gt_mask'].to(device)
             loss = localization_l1_centroid_match_loss(pred, gt_boxes, gt_mask)
-        elif method == "exp_iou_ord_ce":
+        elif method in ("exp_iou_ord_ce", "exp_iou_ord_ce_clamped"):
             logits = model(images)                             # dict of (B, K)
             gt_boxes = batch['gt_boxes'].to(device)             # (B, M, 4)
             gt_mask  = batch['gt_mask'].to(device)              # (B, M) bool
             loss = localization_exp_iou_ord_ce_loss(
                 logits, gt_boxes, gt_mask, K,
                 n_thresholds=100,
+                clamp_pred=(method == "exp_iou_ord_ce_clamped"),
             )
         else:
             logits = model(images)                             # dict of (B, K)
@@ -308,37 +309,96 @@ def train_supervised_epoch_localization(
 
 
 # ---------------------------------------------------------------------------
-# Running-metrics helpers (kept here rather than in their own file)
+# Running-metrics helpers — online (constant-memory) accumulator.
+#
+# The original version buffered every step's flattened rewards + advantages
+# on CPU (out['rewards'].flatten().cpu() append).  At N=16k, B=128, ~4254
+# steps/epoch that is ~68 GB host RAM per epoch (272 GB at N=65k), which
+# OOM-killed jobs even at 96 GB / 128 GB SLURM allocations.
+#
+# All finalized metrics are linear functionals of the per-step reward /
+# advantage tensors (mean, std via sum + sum-of-squares, per-threshold
+# fractions, mean |advantage|), so they can be computed online with O(1)
+# state per stat.  After this fix, single-GPU N=16k / N=65k jobs run in
+# ~5 GB of host RAM regardless of epoch size.
 # ---------------------------------------------------------------------------
 
 def _running_metrics_init() -> dict:
     return {
-        'losses': [], 'rewards': [], 'advantages': [], 'grad_norms': [],
+        # per-step scalars (still small): keep as lists for fmean.
+        'losses': [],
+        'grad_norms': [],
+        # online reward stats
+        'count_r': 0,
+        'sum_r': 0.0,
+        'sum_r2': 0.0,
+        'count_r_gt_0_5': 0,
+        'count_r_gt_0_75': 0,
+        'count_r_eq_0': 0,
+        'count_r_in_02_08': 0,
+        # online advantage stats
+        'count_a': 0,
+        'sum_abs_a': 0.0,
     }
+
 
 def _running_metrics_update(m: dict, loss: float, out: dict, grad_norm: float) -> None:
     m['losses'].append(loss)
-    m['rewards'].append(out['rewards'].flatten().cpu())
-    m['advantages'].append(out['advantages'].flatten().cpu())
     m['grad_norms'].append(grad_norm)
+
+    r = out['rewards']
+    m['count_r'] += int(r.numel())
+    m['sum_r'] += float(r.sum().item())
+    m['sum_r2'] += float((r * r).sum().item())
+    m['count_r_gt_0_5'] += int((r > 0.5).sum().item())
+    m['count_r_gt_0_75'] += int((r > 0.75).sum().item())
+    m['count_r_eq_0'] += int((r == 0).sum().item())
+    m['count_r_in_02_08'] += int(((r > 0.2) & (r < 0.8)).sum().item())
+
+    a = out['advantages']
+    m['count_a'] += int(a.numel())
+    m['sum_abs_a'] += float(a.abs().sum().item())
+
 
 def _running_metrics_finalize(m: dict) -> dict:
     if not m['losses']:
         return {'loss_mean': 0.0}
-    r = torch.cat(m['rewards'])
-    a = torch.cat(m['advantages'])
+
+    n = m['count_r']
+    if n > 0:
+        mean_r = m['sum_r'] / n
+        if n > 1:
+            # Sample variance (Bessel's correction) — matches torch.std()'s
+            # default unbiased=True. Clamp at 0 for fp64 catastrophic
+            # cancellation when sum_r2 ≈ n·mean².
+            var_r = max(
+                (m['sum_r2'] - n * mean_r * mean_r) / (n - 1), 0.0,
+            )
+            std_r = var_r ** 0.5
+        else:
+            std_r = 0.0  # single sample → torch.std returns NaN; we return 0.
+        frac_gt_05 = m['count_r_gt_0_5'] / n
+        frac_gt_075 = m['count_r_gt_0_75'] / n
+        frac_eq_0 = m['count_r_eq_0'] / n
+        frac_in_02_08 = m['count_r_in_02_08'] / n
+    else:
+        mean_r = std_r = 0.0
+        frac_gt_05 = frac_gt_075 = frac_eq_0 = frac_in_02_08 = 0.0
+
+    abs_a_mean = m['sum_abs_a'] / m['count_a'] if m['count_a'] > 0 else 0.0
+
     import statistics
     return {
         'loss_mean':         statistics.fmean(m['losses']),
-        'reward_mean':       r.mean().item(),
-        'reward_std':        r.std().item(),
-        'reward_at_0_5':     (r > 0.5).float().mean().item(),
-        'reward_at_0_75':    (r > 0.75).float().mean().item(),
-        'frac_zero_reward':  (r == 0).float().mean().item(),
+        'reward_mean':       mean_r,
+        'reward_std':        std_r,
+        'reward_at_0_5':     frac_gt_05,
+        'reward_at_0_75':    frac_gt_075,
+        'frac_zero_reward':  frac_eq_0,
         # Day-2 go/no-go gate (spec §9.1): fraction of rollouts with IoU strictly
         # in (0.2, 0.8). Must be >= 0.10 after epoch 1 for GOS vs binary_maxrl to
         # be separable; otherwise the reward distribution is effectively binary.
-        'frac_iou_band_02_08': ((r > 0.2) & (r < 0.8)).float().mean().item(),
-        'advantage_abs_mean':a.abs().mean().item(),
+        'frac_iou_band_02_08': frac_in_02_08,
+        'advantage_abs_mean':abs_a_mean,
         'grad_norm_mean':    statistics.fmean(m['grad_norms']),
     }

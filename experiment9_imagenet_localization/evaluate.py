@@ -33,13 +33,19 @@ def greedy_box_from_logits(
     logits: dict[str, torch.Tensor],  # each (B, K)
     K: int,
 ) -> torch.Tensor:
-    """Argmax bin per head → bin center → (B, 4) xywh box."""
+    """Argmax bin per head → bin center → (B, 4) xywh box, clamped to [0, 1].
+
+    The clamp mirrors clamp_boxes_to_image used in the RL training path and in
+    sample_boxes_from_logits, so the box geometry seen at eval matches the box
+    geometry seen during training.
+    """
     coords = []
     for h in HEAD_NAMES:
         idx = logits[h].argmax(dim=-1)  # (B,)
         coord = (idx.float() + 0.5) / K  # (B,)
         coords.append(coord)
-    return torch.stack(coords, dim=-1)  # (B, 4)
+    boxes = torch.stack(coords, dim=-1)  # (B, 4)
+    return clamp_boxes_to_image(boxes)
 
 
 def sample_boxes_from_logits(

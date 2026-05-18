@@ -17,12 +17,13 @@ set -eo pipefail
 # was killing jobs before they started.
 export WANDB_DIR=/zfsauton/scratch/shrinivr/wandb
 export WANDB_ENTITY=stablegradients
-export WANDB_RUN_GROUP="grpo_K50_N64"
+export WANDB_RUN_GROUP="grpo_K50_N64_clamped"
 
 cd "/zfsauton/scratch/shrinivr/cont-maxrl"
 
 source ~/.bashrc
 conda activate cont-maxrl
+export TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_${SLURM_JOB_ID}
 
 python -m experiment9_imagenet_localization.run \
     --method grpo \
@@ -32,6 +33,7 @@ python -m experiment9_imagenet_localization.run \
     --epochs 30 \
     --batch_size 128 \
     --lr 5e-4 \
+    --grad_clip 4.0 \
     --data_dir "/zfsauton/datasets/imagenet" \
     --output_dir "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/results/grpo_K50_N64_seed44" \
     --num_workers 8 \

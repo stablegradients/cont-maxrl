@@ -23,6 +23,7 @@ export MASTER_PORT=$((20000 + RANDOM % 20000))
 cd "/zfsauton/scratch/shrinivr/cont-maxrl"
 source ~/.bashrc
 conda activate cont-maxrl
+export TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_${SLURM_JOB_ID}
 export DISABLE_COMPILE=1
 
 torchrun \

@@ -436,6 +436,10 @@ def _accumulate_ref_gradient(
             loss = _mse_ref_loss_single(logits, gb, gm, K)
         elif ref_method == "exp_iou_ord_ce":
             loss = localization_exp_iou_ord_ce_loss(logits, gb, gm, K)
+        elif ref_method == "exp_iou_ord_ce_clamped":
+            loss = localization_exp_iou_ord_ce_loss(
+                logits, gb, gm, K, clamp_pred=True,
+            )
         else:
             raise ValueError(f"unknown ref_method: {ref_method!r}")
         (loss / n).backward()

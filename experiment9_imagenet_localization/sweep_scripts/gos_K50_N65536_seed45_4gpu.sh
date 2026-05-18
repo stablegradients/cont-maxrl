@@ -22,7 +22,8 @@ export MASTER_PORT=$((20000 + RANDOM % 20000))
 cd "/zfsauton/scratch/shrinivr/cont-maxrl"
 source ~/.bashrc
 conda activate cont-maxrl
-export DISABLE_COMPILE=1
+export TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_${SLURM_JOB_ID}
+# torch.compile enabled (matches the exp_iou_ord_ce_clamped baseline for tighter parity)
 
 torchrun \
     --nproc_per_node=4 \
@@ -36,6 +37,7 @@ torchrun \
         --epochs 30 \
         --batch_size 32 \
         --lr 5e-4 \
+        --grad_clip 4.0 \
         --data_dir "/zfsauton/datasets/imagenet" \
         --output_dir "/zfsauton/scratch/shrinivr/cont-maxrl/experiment9_imagenet_localization/results/gos_K50_N65536_seed45_4gpu" \
         --num_workers 8 \

@@ -16,6 +16,7 @@ export WANDB_RUN_GROUP="gos_K50_N4096_singleGPU"
 cd "/zfsauton/scratch/shrinivr/cont-maxrl"
 source ~/.bashrc
 conda activate cont-maxrl
+export TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_${SLURM_JOB_ID}
 
 # Speedup stack: bf16 autocast (~1.4×, gradient cos verified ≈ 1.0 vs fp32)
 # + torch.compile mode='default' (~1.3×) + channels_last layout (~1.5×,

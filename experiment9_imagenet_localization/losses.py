@@ -320,6 +320,7 @@ def localization_exp_iou_ord_ce_loss(
     K: int,
     n_thresholds: int = 100,
     eps: float = 1e-4,
+    clamp_pred: bool = False,
 ) -> torch.Tensor:
     """Expected-IoU ordinal CE loss — exact infinite-N limit of GOS for IoU.
 
@@ -354,6 +355,12 @@ def localization_exp_iou_ord_ce_loss(
         eps:           clamp for log(P) when P ≈ 0 and for zero-area union.
                        Must match ``GOS_SURVIVAL_EPS`` in ``advantages.py``
                        for the GOS → exp_iou_ord_ce identity (N → ∞) to hold.
+        clamp_pred:    if True, clamp predicted box corners to [0, 1] before
+                       computing intersection/union, matching the RL path's
+                       clamp_boxes_to_image. The predicted area becomes 4-D
+                       over (xc, yc, w, h) because the clamped width depends
+                       on xc (and clamped height on yc). Default False
+                       (baseline behavior — bit-identical to the pre-flag version).
 
     Returns:
         scalar loss, positive value, averaged over batch.
@@ -379,8 +386,21 @@ def localization_exp_iou_ord_ce_loss(
     py1 = bc.view(K, 1) - bc.view(1, K) / 2
     py2 = bc.view(K, 1) + bc.view(1, K) / 2
 
-    # Predicted area (K, K) over (k3, k4) = w × h
-    pred_area = bc[:, None] * bc[None, :]       # (K, K)
+    if clamp_pred:
+        # Mirror clamp_boxes_to_image in the RL path: corners pinned to [0, 1].
+        # After clamping, the predicted width depends on (xc, w) jointly, so
+        # pred_area becomes 4-D over (xc, yc, w, h).
+        px1 = px1.clamp(0.0, 1.0)
+        px2 = px2.clamp(0.0, 1.0)
+        py1 = py1.clamp(0.0, 1.0)
+        py2 = py2.clamp(0.0, 1.0)
+        pred_w = (px2 - px1).clamp(min=0.0)                              # (K_xc, K_w)
+        pred_h = (py2 - py1).clamp(min=0.0)                              # (K_yc, K_h)
+        # axis order matches iou_m: (xc, yc, w, h)
+        pred_area = pred_w[:, None, :, None] * pred_h[None, :, None, :]  # (K_xc, K_yc, K_w, K_h)
+    else:
+        # Predicted area (K, K) over (k3, k4) = w × h (full, unclamped)
+        pred_area = bc[:, None] * bc[None, :]                            # (K, K)
 
     # 4. Max-over-M-GT IoU tensor (B, K, K, K, K)
     iou_max = torch.full(
@@ -408,11 +428,20 @@ def localization_exp_iou_ord_ce_loss(
 
         # IoU (B, K, K, K, K) = inter / (pred_area + gt_area - inter)
         inter = int_x[:, :, None, :, None] * int_y[:, None, :, None, :]
-        union = (
-            pred_area[None, None, None, :, :]
-            + gt_area[:, None, None, None, None]
-            - inter
-        )
+        if clamp_pred:
+            # pred_area shape (K_xc, K_yc, K_w, K_h) → broadcast as (1, ...)
+            union = (
+                pred_area[None]
+                + gt_area[:, None, None, None, None]
+                - inter
+            )
+        else:
+            # pred_area shape (K_w, K_h) → broadcast as (1, 1, 1, K_w, K_h)
+            union = (
+                pred_area[None, None, None, :, :]
+                + gt_area[:, None, None, None, None]
+                - inter
+            )
         iou_m = inter / union.clamp(min=eps)
 
         # Zero-out (actually set to -1) for invalid GT rows

@@ -15,6 +15,7 @@ export WANDB_RUN_GROUP="gos_K50_N65536"
 cd "/zfsauton/scratch/shrinivr/cont-maxrl"
 source ~/.bashrc
 conda activate cont-maxrl
+export TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_${SLURM_JOB_ID}
 
 python -m experiment9_imagenet_localization.run \
     --method gos \

@@ -112,6 +112,36 @@ def test_greedy_box_deterministic():
     torch.testing.assert_close(box1, box2, atol=0.0, rtol=0.0)
 
 
+def test_greedy_box_corners_clamped_to_unit_square():
+    """For extreme argmax indices (xc at bin 0 + w at bin K-1) the unclamped
+    corners would extend outside [0,1]. greedy_box_from_logits must clamp so
+    the box geometry matches the RL training path and sample_boxes_from_logits.
+    """
+    K = 50
+    B = 1
+    # Build logits so argmax picks bin 0 for xc/yc and bin K-1 for w/h.
+    # This produces xc=yc=0.01, w=h=0.99, so unclamped corners are (-0.485, 0.505).
+    big = 100.0
+    logits = {}
+    for h in ('x_c', 'y_c'):
+        v = torch.full((B, K), -big)
+        v[:, 0] = big          # argmax at bin 0
+        logits[h] = v
+    for h in ('w', 'h'):
+        v = torch.full((B, K), -big)
+        v[:, K - 1] = big       # argmax at bin K-1
+        logits[h] = v
+    box = greedy_box_from_logits(logits, K=K)
+    # Convert xywh -> corners and check [0,1] containment.
+    xc, yc, w, h = box.unbind(-1)
+    x1, x2 = xc - w / 2, xc + w / 2
+    y1, y2 = yc - h / 2, yc + h / 2
+    assert (x1 >= 0.0).all(), f"x1 below 0: {x1}"
+    assert (y1 >= 0.0).all(), f"y1 below 0: {y1}"
+    assert (x2 <= 1.0).all(), f"x2 above 1: {x2}"
+    assert (y2 <= 1.0).all(), f"y2 above 1: {y2}"
+
+
 def test_sample_boxes_shape_and_range():
     """sample_boxes_from_logits must return (B, N, 4) with values in [0, 1].
 

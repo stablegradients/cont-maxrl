@@ -176,7 +176,7 @@ def max_iou_over_gt(
 
 
 # ---------------------------------------------------------------------------
-# Batched wrapper
+# Batched wrapper — fully vectorized over (B, N, M)
 # ---------------------------------------------------------------------------
 
 
@@ -187,18 +187,58 @@ def batched_max_iou(
 ) -> torch.Tensor:
     """Compute per-image max IoU reward matrix.
 
+    Fully vectorized across (B, N, M) — no Python loop. The intermediate
+    (B, N, M) IoU tensor is materialized once and reduced along the M axis.
+
+    Memory: O(B · N · M) for the IoU matrix. At B=128, N=16384, M=10 this is
+    ~80 MB; at N=65536 it is ~320 MB. Both fit easily on A5000 (24 GB) /
+    A6000 (48 GB).
+
     Args:
-        sampled:  (B, N, 4)
-        gt:       (B, M, 4)
-        gt_mask:  (B, M)
+        sampled:  (B, N, 4) xywh in [0, 1].
+        gt:       (B, M, 4) xywh in [0, 1], padded rows ignored via gt_mask.
+        gt_mask:  (B, M) bool — True for real GT rows.
 
     Returns:
-        (B, N) reward matrix, each entry in [0, 1].
+        (B, N) reward matrix, each entry in [0, 1]. Images with all-False
+        gt_mask (no real GTs) contribute zeros, never -1 or NaN.
     """
-    B = sampled.shape[0]
-    results = []
-    for b in range(B):
-        results.append(
-            max_iou_over_gt(sampled[b], gt[b], gt_mask[b])
-        )  # (N,)
-    return torch.stack(results, dim=0)  # (B, N)
+    # Convert both sets to corners. xywh_to_corners is broadcast-friendly.
+    a = xywh_to_corners(sampled)   # (B, N, 4)
+    b = xywh_to_corners(gt)        # (B, M, 4)
+
+    # Broadcast: a -> (B, N, 1, 4), b -> (B, 1, M, 4)
+    a_e = a.unsqueeze(2)           # (B, N, 1, 4)
+    b_e = b.unsqueeze(1)           # (B, 1, M, 4)
+
+    x1_int = torch.maximum(a_e[..., 0], b_e[..., 0])
+    y1_int = torch.maximum(a_e[..., 1], b_e[..., 1])
+    x2_int = torch.minimum(a_e[..., 2], b_e[..., 2])
+    y2_int = torch.minimum(a_e[..., 3], b_e[..., 3])
+
+    inter_w = (x2_int - x1_int).clamp(min=0.0)
+    inter_h = (y2_int - y1_int).clamp(min=0.0)
+    inter = inter_w * inter_h                                   # (B, N, M)
+
+    area_a = sampled[..., 2] * sampled[..., 3]                  # (B, N)
+    area_b = gt[..., 2] * gt[..., 3]                            # (B, M)
+    union = area_a.unsqueeze(2) + area_b.unsqueeze(1) - inter   # (B, N, M)
+
+    iou = torch.where(
+        union > EPS,
+        inter / (union + EPS),
+        torch.zeros_like(inter),
+    )                                                           # (B, N, M)
+
+    # Mask invalid GT rows so they cannot win the max; -1 < 0 so any real
+    # GT (IoU >= 0) outranks them.
+    iou = iou.masked_fill(~gt_mask.unsqueeze(1), -1.0)          # (B, N, M)
+
+    max_iou, _ = iou.max(dim=2)                                 # (B, N)
+
+    # Images with no real GT have all-False gt_mask → max=-1; replace with 0.
+    no_gt = ~gt_mask.any(dim=1, keepdim=True)                   # (B, 1)
+    max_iou = torch.where(no_gt, torch.zeros_like(max_iou), max_iou)
+
+    # Defensive clamp against numerical overshoot (real IoU is in [0, 1]).
+    return max_iou.clamp(0.0, 1.0)
