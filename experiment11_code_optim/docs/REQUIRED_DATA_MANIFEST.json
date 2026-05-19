@@ -1,0 +1,111 @@
+{
+  "spec_section": "§5 / §14 step 4 — required-data manifest with SHA-256 + provenance",
+  "stage_root": "/work/nvme/bgmo/sramasubramanian/pie_data/",
+  "stage_date": "2026-05-19",
+  "stage_host": "gh152.hsn.cm.delta.internal.ncsa.edu",
+  "raw_jsonls": {
+    "raw/train.jsonl": {
+      "schema": "LearningOpt/pie",
+      "records": 77967,
+      "unique_problem_ids": 1474,
+      "size_bytes": null,
+      "sha256": "114d595edfc4186b8151da983289bd3ad1082931544e14c18bbe121a3d6c810e",
+      "role": "RL training source"
+    },
+    "raw/train_hq_only.jsonl": {
+      "schema": "LearningOpt/pie",
+      "records": 4085,
+      "unique_problem_ids": 1474,
+      "size_bytes": null,
+      "sha256": "5befaa190928d67aa5b5988e986d948fc6a11ac54ce5afa31179a9f2b1fd187c",
+      "role": "SFT cold-start source"
+    },
+    "raw/train_hq_and_synthetic.jsonl": {
+      "schema": "LearningOpt/pie",
+      "records": 5570,
+      "size_bytes": null,
+      "sha256": "19016968d16244f9bb4ff344ae0eff3aea2e5cf2ef3f314c7c592b1d8b2486df",
+      "role": "not used in current scope"
+    },
+    "raw/train_with_synthetic.jsonl": {
+      "schema": "LearningOpt/pie",
+      "size_bytes": null,
+      "sha256": "a5d26ab13438cdaee32e0b0b4add66e75919bf5d800fd5ba813114a4471f0182",
+      "role": "not used in current scope"
+    },
+    "raw/val.jsonl": {
+      "schema": "LearningOpt/pie",
+      "records": 2544,
+      "unique_problem_ids": 77,
+      "size_bytes": null,
+      "sha256": "6608a303c5c6ab61e7936599f3aa8cbde67bc36007e1a9739d7868665c531dab",
+      "role": "insitu_eval + post-hoc §8.4 eval source"
+    },
+    "raw/test.jsonl": {
+      "schema": "madaan/pie-perf (richer; has 'tests' column + 'n_tests' + 'test_accuracy' fields)",
+      "records": 978,
+      "unique_problem_ids": 41,
+      "size_bytes": null,
+      "sha256": "e0b1ef26a22c0c60022acd469cffffac91fd55304a8161b333ae5aa51005d10b",
+      "role": "test set (paper-faithful eval if needed beyond val)"
+    }
+  },
+  "downloaded_archives": {
+    "Project_CodeNet.tar.gz": {
+      "source_url": "https://codait-cos-dax.s3.us.cloud-object-storage.appdomain.cloud/dax-project-codenet/1.0.0/Project_CodeNet.tar.gz",
+      "size_bytes_announced": 8343137473,
+      "server_last_modified": "Wed, 05 May 2021 21:13:40 GMT",
+      "sha256": null,
+      "status": "DELETED 2026-05-19 (user-authorised) after extracting only Project_CodeNet/derived/input_output/. Re-download from source_url to restore.",
+      "extracted_to": "Project_CodeNet/derived/input_output/",
+      "extracted_role": "fallback test-case source (precedence #3); 3867 problems × 1 test/problem"
+    },
+    "pie_public_test_cases.zip": {
+      "source_url": "https://drive.google.com/file/d/1RcUpZMOR8L2xYYWDZx7I0tHFzFgg7COO/view",
+      "downloaded_via": "gdown 6.0.0",
+      "size_bytes": 5923327,
+      "drive_last_modified": "2023-01-17",
+      "sha256": "8dbeebaa02b3d7cb462cd848caf8f9a0b9f4674427f6a78c3b8ce8b5d6123135",
+      "extracted_to": "pie_perf_tests/codenet/public_test_cases/",
+      "extracted_role": "Public test cases — precedence #2; 1141 problems × ~2.9 tests/problem"
+    },
+    "pie_generated_test_cases.zip": {
+      "source_url": "https://drive.google.com/file/d/1migwX4wpED0gDDxn7gS6q55vWeXIDgId/view",
+      "downloaded_via": "gdown 6.0.0",
+      "source_attribution": "alphacode (google-deepmind/code_contests) via pie-perf",
+      "size_bytes": 172528316,
+      "drive_last_modified": "2022-12-27",
+      "sha256": "f856895cf2bf55d732c4756c5c147ad67c2e149da135c21616706f251d99aa39",
+      "extracted_to": "pie_perf_generated/codenet/generated_test_cases/",
+      "extracted_role": "Generated test cases — precedence #1 (richest); 247 problems × ~100 tests/problem"
+    }
+  },
+  "unified_test_archive": {
+    "path": "tests/",
+    "manifest_file": "tests/MANIFEST.json",
+    "built_by": "experiment11_code_optim/precompute/build_unified_test_cases.py",
+    "build_date": "2026-05-19",
+    "layout": "tests/{problem_id}/input.<i>.txt + output.<i>.txt with i = 0..n_tests-1 contiguous, regardless of source",
+    "precedence": ["generated", "public", "codenet"],
+    "summary": {
+      "total_problems": 1592,
+      "total_tests": 21758,
+      "mean_tests_per_problem": 13.67,
+      "by_source": {"generated": 178, "public": 1414, "codenet": 0, "missing": 0}
+    },
+    "per_split_coverage_percent": {
+      "train.jsonl": 100.0,
+      "train_hq_only.jsonl": 100.0,
+      "val.jsonl": 100.0,
+      "test.jsonl": 100.0
+    }
+  },
+  "integrity_invariants": {
+    "isolation_guard_must_assert": [
+      "every problem_id in the RL train parquet has a directory at tests/{problem_id}/",
+      "len(glob 'tests/{pid}/input.*.txt') == manifest['per_problem'][pid]['n_tests']",
+      "len(input.<i>.txt files) == len(output.<i>.txt files) for every pid",
+      "indices are contiguous from 0 (no gaps)"
+    ]
+  }
+}
