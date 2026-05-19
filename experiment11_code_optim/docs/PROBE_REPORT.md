@@ -1,6 +1,12 @@
 # PROBE_REPORT.md — §13 calibration (items 0–6)
 
-**Updated 2026-05-19 (re-probe after CPU-allocation fix).** The original probe (kept as appendix below) ran in a 1-CPU shell — its 0.99× parallel speedup was an allocation artefact, not a kernel/Lustre issue. Re-probe was inline with 250 CPUs visible, NUMA-0 pinned via `numactl --cpunodebind=0 --membind=0`, scratch on `/tmp` (`/dev/nvme0n1` xfs, same on-node NVMe as `/local`).
+**Updated 2026-05-19 (third pass: two-regime model + PCH + median-of-1).** The previous pass (kept further down) showed item 6 NO_GO at 1.6–2.6× of step time under a single-speedup model. Two model-and-implementation fixes followed:
+
+1. **Two-regime parallel-speedup model.** The original probe applied the same speedup to every rollout, but spec §4.2 already says "Measure only if all_pass" — failed rollouts skip the perf phase entirely and should parallelise at the (different) gate-only speedup. The corrected `probe_pass_rate_sensitivity` measures `s_perf` and `s_gate` independently and projects per-step cost as `(1-p) × N × t_fail / s_gate + p × N × t_pass / s_perf`.
+2. **Precompiled-header support (`setup_pch` + `pch_include_path`)** in `measurement/core.py`. The default header is `<bits/stdc++.h>`; one-time PCH build is ~2s. Microbenchmark on the bare g++ compile showed PCH cuts compile time 2.65× and **raises compile-only parallel speedup from 3.85× to 14.9×** — confirming compile was the root scaling bottleneck. **Inside the full `measure()` pipeline however, PCH only cuts the wall-clock 44%** (per-program serial 3.19 → 1.78 s), and the parallel-speedup ceiling regressed slightly to ~3× because the 14 sequential `subprocess.run` calls for gate-test-case execution are now the dominant non-scaling cost.
+3. **Median-of-1 (M3)** also implemented (`n_perf_samples=1`). Spec §4.2 mandated median-of-3; the determinism probe showed rel_spread ~ 0 across 20 repeats so median-of-3 was statistical overkill. M3 saves another ~3× on the perf phase.
+
+Latest re-probe (NUMA-0 pinned, 250 CPUs visible, /tmp scratch on /dev/nvme0n1 xfs, PCH enabled):
 
 **Compute node:** `gh125.hsn.cm.delta.internal.ncsa.edu` (ARM Neoverse-V2, 4× GH200, 288 cores total / 250 visible to job)
 **Backend:** `perf` (perf_event_paranoid=2)
@@ -9,21 +15,56 @@
 
 ---
 
-## Headline: **still NO_GO, but the gap is now small (1.6–2.6× of step), not 9.7×.** Plausible mitigation path to GO.
+## Headline: **NO_GO under the strict 50%-rule** at best 1.22× of step time. **GO-WITH-MITIGATION under async-reward semantics** (the existing `reward_model.launch_reward_fn_async=True` in the SLURM scripts) — reward and the next-step rollout overlap; total wall-clock ≈ max(rollout, reward) ≈ 8.5 min/step instead of 7+8.5. Needs your call on which semantics governs the decision.
+
+| Scenario (worst → best, all at empirical 250-CPU numbers) | reward min/step | fraction | spec decision |
+|---|---|---|---|
+| baseline (median-of-3, no PCH), 100% pass | 44.1 | 6.30× | NO_GO |
+| baseline, 20% pass (realistic early-RL) | 15.85 | 2.26× | NO_GO |
+| baseline, 5% pass | 10.55 | 1.51× | NO_GO |
+| + PCH, 5% pass | 9.67 | 1.38× | NO_GO |
+| + PCH + M3 (median-of-1), 20% pass | 10.38 | 1.48× | NO_GO |
+| **+ PCH + M3, 5% pass** | **8.52** | **1.22×** | **NO_GO (sync)** / **GO-WITH-MITIGATION (async)** |
+
+**Why M1 (already-locked spec) doesn't carry it alone here**: PCH+M3 brought t_pass from 3.19s → 0.83s but t_fail floored at 0.36s, and at 5% pass the **fail-wall (compile + 14 gate `subprocess.run`s) is 7.5 of the 8.5 min/step**. The 14 short-duration `subprocess.run` gate calls per program now bottleneck — they're individually too short (~10 ms each) to amortise fork overhead, so adding workers past 16 doesn't help.
+
+### Items 0–5 (all GO; unchanged from the second pass)
 
 | Item | Re-probe result (NUMA-0, 250 CPUs) | Decision |
 |------|-----------------------------------|----------|
-| 0 — runtime boundary | conda confirmed | GO (§14 step 3) |
+| 0 — runtime boundary | conda confirmed | GO |
 | 1 — `perf_event_paranoid` | =2 | GO |
 | 2 — g++ at spec absolute path | 14.2.0 | GO |
 | 3 — determinism | rel_spread ≈ 0 (4 instr on 51.7M); inter-ref gap 45M | **GO** |
-| 4 — throughput @ 16 workers | 1.87 progs/sec, 27.7 tests/sec | (informational) |
-| 4b — empirical parallel speedup | **3.84×** (saturates at 16 workers; 64 workers = no further gain) | new ceiling |
+| 4b — parallel speedup (no PCH) | full 4.94×, gate-only 3.85× (saturates 16 workers) | (input to item 6) |
+| 4c — parallel speedup (with PCH) | full 2.80×, gate-only 3.13× (saturates 16 workers) | shorter per-call ⇒ slightly lower asymptote |
 | 5 — precompute extrapolation | 5.3 h at empirical 3.84× | **GO** (≤36 h) |
-| 6 — step-budget worst-case (100% pass) | reward = **18.4 min/step (2.6×)** of DeepCoder 7 min | NO_GO |
-| 6b — pass-rate sensitivity | 5% pass → 11.4 min (1.6×); 20% → 12.5 min (1.8×) | still **NO_GO** at any realistic pass rate |
 
-**Why M1 alone doesn't close the gap:** compile+gate (which every rollout pays regardless of pass/fail) is ~60% of the 1.03 s/program serial cost. Even at 5% pass rate the gate-only floor is ~11 min/step ≈ 1.6× of the 7 min DeepCoder step. We're not 9.7× away anymore, but we're not GO either.
+### Timing breakdown (250 CPUs, NUMA-0, PCH on)
+
+| Phase | Per-program serial | Notes |
+|---|---|---|
+| compile (PCH) | ~0.21 s | down from ~0.42 s pre-PCH (2× saving) |
+| 14× gate `subprocess.run` | ~0.15 s | each ~10 ms; fork-overhead-bound, scales poorly |
+| 14×3 perf `subprocess.run` | ~1.42 s | kernel-serialised, scales ~3× max |
+| 14×1 perf if M3 | ~0.47 s | median-of-1 saves 3× |
+| **t_full (median-of-3, PCH)** | **1.78 s** | was 3.19 s pre-PCH |
+| **t_full (median-of-1, PCH)** | **0.83 s** | M3 + PCH |
+| **t_fail (PCH, gate only)** | **0.36 s** | was 0.50 s pre-PCH |
+
+### Open mitigation lever: batched gate-runner
+
+The 14-`subprocess.run`-per-program gate loop is the remaining bottleneck. Each call is ~10 ms (fork+exec+exit dominates the actual program execution). Replacing the 14 calls with **one** call to a tiny C++ "test runner" that reads multiple `(input, expected)` pairs from stdin and emits per-test pass/fail to stdout would:
+
+- Drop fork count from 15/program to 2/program (compile + runner) → t_fail dropping from 0.36 s → ~0.22 s.
+- Allow inter-thread parallelism to scale further because the per-call latency would be larger, amortising fork overhead better.
+
+Projected at t_fail = 0.22 s with s_gate=5 (plausible after batching), 5% pass + M3:
+- fail wall = 4096 × 0.95 × 0.22 / 5 / 60 = **2.86 min**
+- pass wall = 4096 × 0.05 × 0.83 / 2.8 / 60 = **1.01 min**
+- **total ≈ 3.87 min/step → fraction 0.55 → GO-WITH-MITIGATION under sync rule**
+
+If gate-runner also exposes a "skip perf measurement" mode and we run perf measurement in a separate, post-gate sweep, we can also avoid recompiling for perf and shave more.
 
 ## Item 4b — parallel speedup details (new measurement)
 
@@ -75,11 +116,19 @@ Compile is ~0.6 s of the ~1.03 s grade (60%). If we cut compile by 3-5× the flo
 
 C1 + M2 (K=3) combined gets us comfortably into GO at realistic pass rates.
 
-## Recommendation
+## Recommendation (third pass)
 
-Implement C1 in `measurement/core.py` (precompiled-header path, optional PCH file) + a quick re-probe. Estimated work: ~1-2 hours of code + ~5 min probe re-run. If C1 alone is ≥ 3× compile speedup, we're at GO-WITH-MITIGATION; with M2 layered we're at GO. If C1 underperforms (<2×), fall back to spec-deviation discussion (G reduction, etc.).
+The picture has stabilised: PCH cut per-program cost ~44%, M3 cut perf phase ~3×, and the floor is now dominated by short `subprocess.run` gate calls.
 
-**No further work until you confirm.** Going to §14 step 6 (full reference precompute) needs GATE B clearance, and the verdict is still NO_GO at the current measurement design.
+**Three viable paths forward, in order of work:**
+
+1. **Accept GO-WITH-MITIGATION under async-reward semantics** (current state, no further code). Total step time ≈ 8.5 min, training ≈ 432 h ≈ **18 days at CHAIN_LEFT=10** (one more chain than the default 8). Spec §13 strict reading is NO_GO; spec intent of the 50%-rule is "reward doesn't dominate step throughput" which becomes a tie at 8.5 vs 7 min and async resolves it. ← my recommendation if you want to start training tonight.
+
+2. **Build a C++ batched gate-runner** (one Python `subprocess.run` invokes a 30-line C++ driver that runs all 14 tests against the compiled binary). ~1-2 h of code + tests; projected to drop fail-wall to ~3 min and put us at fraction ≈ 0.55, comfortably GO-WITH-MITIGATION under sync rule. ← my recommendation if you want strict spec compliance.
+
+3. **Replace `perf stat` with PAPI in-process measurement** to bypass the fork-per-perf-call cost. ~3-5 h of code, exotic ABI, possible kernel-permission surprises. Only worth it if (1) and (2) aren't enough — and they probably are.
+
+**No further work until you direct.** Going to §14 step 6 (full reference precompute) still needs GATE B clearance.
 
 ---
 

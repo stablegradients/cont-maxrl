@@ -210,6 +210,26 @@ int main() {
 """.strip()
 
 
+def test_setup_pch_then_measure_with_pch_passes():
+    """setup_pch() must build a precompiled <bits/stdc++.h> header and return
+    a path. Passing that path back into measure() as pch_include_path must
+    preserve the strict-gate semantics (same result on a known-good program)
+    while exercising the new g++ '-include' flag plumbing."""
+    from experiment11_code_optim.measurement.core import measure, setup_pch
+
+    pch_path = setup_pch()
+    assert pch_path is not None and len(pch_path) > 0
+    import os
+    assert os.path.exists(pch_path), f"PCH header source missing at {pch_path!r}"
+    assert os.path.exists(pch_path + ".gch"), f"PCH .gch missing at {pch_path!r}.gch"
+
+    result = measure(HELLO_PROGRAM, [("", "hi\n")], pch_include_path=pch_path)
+    assert result["compiled"] is True
+    assert result["all_pass"] is True
+    assert result["n_tests_passed"] == 1
+    assert result["instr_count"] is not None and result["instr_count"] > 100
+
+
 def test_repeated_measurement_is_near_deterministic():
     """Spec §4.2: 'near-deterministic, median-stabilized.' Two back-to-back measurements
     of the same fixed-work program should agree within 1% (median-of-3 alone makes this

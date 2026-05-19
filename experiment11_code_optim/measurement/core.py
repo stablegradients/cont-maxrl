@@ -55,14 +55,55 @@ MEASUREMENT_BACKEND = "perf"
 _INSTR_RE = re.compile(r"([\d,]+)\s+instructions:u")
 
 
-def _compile(code_str: str, tmpdir: str) -> tuple[str | None, str | None]:
+def setup_pch(scratch_dir: str | None = None,
+              header_text: str = "#include <bits/stdc++.h>\n") -> str:
+    """Build a precompiled header for the standard C++ stdlib once, and return
+    the path to the header source. Passing the returned path back as
+    `pch_include_path` to `measure()` cuts per-compile time substantially
+    (~2.65x on typical PIE programs, empirically) and — more importantly —
+    raises the parallel-compile speedup ceiling from ~4x to ~15x on this
+    node, because each compile no longer re-parses the full stdlib.
+
+    g++ resolves an `-include foo.hpp` flag against `foo.hpp.gch` if present.
+
+    The default header pulls in <bits/stdc++.h>, the GNU "everything stdlib"
+    header used in competitive-programming code (which PIE programs are).
+    Callers wanting tighter coverage can pass their own `header_text`.
+
+    Caller must invoke this once before training/probe loops. The build is
+    O(~2s) and is wasted if `measure()` is then called without
+    `pch_include_path`.
+    """
+    scratch_dir = scratch_dir or _scratch_dir() or tempfile.gettempdir()
+    pch_dir = os.path.join(scratch_dir, "pie_pch")
+    os.makedirs(pch_dir, exist_ok=True)
+    hpp_path = os.path.join(pch_dir, "common.hpp")
+    with open(hpp_path, "w") as f:
+        f.write(header_text)
+    proc = subprocess.run(
+        [GPP_PATH, *COMPILE_FLAGS, "-x", "c++-header", hpp_path, "-o", hpp_path + ".gch"],
+        capture_output=True, text=True, timeout=60.0,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"PCH build failed (rc={proc.returncode}): {proc.stderr.strip()}"
+        )
+    return hpp_path
+
+
+def _compile(code_str: str, tmpdir: str, pch_include_path: str | None = None
+             ) -> tuple[str | None, str | None]:
     """Compile C++ source. Returns (executable_path, error_str). On failure exe is None."""
     src_path = os.path.join(tmpdir, "prog.cpp")
     exe_path = os.path.join(tmpdir, "prog")
     with open(src_path, "w") as f:
         f.write(code_str)
+    args = [GPP_PATH, *COMPILE_FLAGS]
+    if pch_include_path:
+        args += ["-include", pch_include_path]
+    args += ["-o", exe_path, src_path]
     proc = subprocess.run(
-        [GPP_PATH, *COMPILE_FLAGS, "-o", exe_path, src_path],
+        args,
         capture_output=True,
         text=True,
         timeout=30.0,
@@ -123,6 +164,9 @@ def measure(
     test_cases: list[tuple[str, str]],
     *,
     per_test_timeout_s: float = 10.0,
+    n_perf_samples: int = 3,
+    skip_measurement: bool = False,
+    pch_include_path: str | None = None,
 ) -> dict:
     """Compile, gate (strict all-pass), then measure retired instructions.
 
@@ -131,6 +175,16 @@ def measure(
         test_cases: list of (stdin_input, expected_stdout) pairs. Each pair is
             graded independently; the gate is satisfied only if EVERY pair passes.
         per_test_timeout_s: per-test execution wall-clock cap (spec §4.2 default 10s).
+        n_perf_samples: how many perf runs per test case for the median. Spec §4.2
+            mandates median-of-3 (default); 1 is the M3 mitigation (free 3x on the
+            perf phase, supported empirically by item 3 determinism showing rel_spread
+            ~ 0 across 20 runs of the same program — median-of-3 brings no statistical
+            benefit when the underlying variance is essentially zero).
+        skip_measurement: when True, skip the perf phase entirely (compile + gate
+            only). Used by the probe to measure the parallel speedup of the gate-only
+            workload — the perf phase has its own kernel-level serialisation ceiling
+            (~3.84x) while compile+gate should scale much further. Returns the same
+            dict shape; instr_count is None.
 
     Returns:
         {
@@ -138,7 +192,7 @@ def measure(
             "all_pass": bool,
             "n_tests_run": int,
             "n_tests_passed": int,
-            "instr_count": int | None,    # None unless all_pass
+            "instr_count": int | None,    # None unless all_pass and not skip_measurement
             "measurement_backend": str,    # "perf" or "papi"
             "error": str | None,
         }
@@ -153,8 +207,14 @@ def measure(
         "error": None,
     }
 
+    # Allow env-var fallback so SLURM scripts can supply PCH without threading
+    # the param through every caller (notably insitu_eval, which calls measure()
+    # via the redirect shim).
+    if pch_include_path is None:
+        pch_include_path = os.environ.get("PIE_PCH_INCLUDE_PATH") or None
+
     with tempfile.TemporaryDirectory(dir=_scratch_dir(), prefix="pie_meas_") as tmpdir:
-        exe_path, err = _compile(code_str, tmpdir)
+        exe_path, err = _compile(code_str, tmpdir, pch_include_path=pch_include_path)
         if exe_path is None:
             result["error"] = err
             return result
@@ -172,16 +232,23 @@ def measure(
             return result
         result["all_pass"] = True
 
-        # Spec §4.2 measurement: median-of-3 per test case; instr_count = sum of medians.
+        if skip_measurement:
+            # Gate-only mode: caller signalled they want the all_pass signal but not
+            # the cost of perf. Used by the probe's two-regime speedup model.
+            return result
+
+        # Spec §4.2 measurement: median-of-N per test case; instr_count = sum of medians.
+        # Default N=3 matches the spec; the probe / mitigation stack may pass N=1.
         per_case_medians: list[int] = []
         for input_str, _expected in test_cases:
-            samples = [_perf_count_instructions(exe_path, input_str) for _ in range(3)]
+            samples = [_perf_count_instructions(exe_path, input_str)
+                       for _ in range(n_perf_samples)]
             if any(s is None for s in samples):
                 # perf failed mid-batch; leave instr_count=None and abandon measurement.
                 result["instr_count"] = None
                 break
             samples.sort()
-            per_case_medians.append(samples[1])
+            per_case_medians.append(samples[len(samples) // 2])  # median
         else:
             result["instr_count"] = sum(per_case_medians)
 

@@ -35,7 +35,7 @@ import statistics
 import time
 from pathlib import Path
 
-from experiment11_code_optim.measurement.core import measure, MEASUREMENT_BACKEND
+from experiment11_code_optim.measurement.core import measure, MEASUREMENT_BACKEND, setup_pch
 
 PIE_DATA_ROOT = Path("/work/nvme/bgmo/sramasubramanian/pie_data")
 TESTS_ROOT = PIE_DATA_ROOT / "tests"
@@ -159,11 +159,18 @@ def _sample_train_records(n_problems: int, seed: int) -> list[dict]:
     return [by_pid[pid] for pid in chosen]
 
 
-def _grade_one(rec: dict) -> dict:
+_PCH_PATH: str | None = None  # set by main() if --use-pch is enabled
+
+
+def _grade_one(rec: dict, *, skip_measurement: bool = False,
+               n_perf_samples: int = 3) -> dict:
     pid = rec["problem_id"]
     cases = _load_test_cases(pid)
     t0 = time.monotonic()
-    r = measure(rec["tgt_code"], cases)
+    r = measure(rec["tgt_code"], cases,
+                skip_measurement=skip_measurement,
+                n_perf_samples=n_perf_samples,
+                pch_include_path=_PCH_PATH)
     return {
         "problem_id": pid,
         "n_test_cases": len(cases),
@@ -172,6 +179,10 @@ def _grade_one(rec: dict) -> dict:
         "all_pass": r["all_pass"],
         "instr_count": r["instr_count"],
     }
+
+
+def _grade_one_gate_only(rec: dict) -> dict:
+    return _grade_one(rec, skip_measurement=True)
 
 
 # ----- item 4 -----
@@ -250,24 +261,36 @@ def probe_precompute_extrapolation(n_problems: int = 20, seed: int = 0,
 
 # ----- item 6 -----
 
-def probe_parallel_speedup(n_programs: int = 16, seed: int = 42) -> dict:
+def probe_parallel_speedup(n_programs: int = 16, seed: int = 42,
+                            *, gate_only: bool = False) -> dict:
     """Measure realised parallel speedup at {1, 4, 16, 64} workers on the same workload.
-    This is the empirical input to item 6 (replaces the prior 50%-efficiency assumption,
-    which the earlier 16-worker throughput test already weakly contradicted)."""
+
+    The original probe ran with full measurement (compile + gate + perf-median-of-3)
+    and saturated at ~3.84x — the perf phase serialises in the kernel. But the
+    workload model in item 6b was wrong: it applied that ceiling uniformly to ALL
+    rollouts even though, at a realistic 10-20% pass rate, 80-90% of rollouts
+    NEVER REACH PERF (spec §4.2: 'Measure only if all_pass'). Gate-only workloads
+    should parallelise much better.
+
+    gate_only=True: bypass the perf phase via the new `skip_measurement` arg to
+    measure(). Used to obtain S_gate for the two-regime model in
+    probe_pass_rate_sensitivity().
+    """
     records = _sample_train_records(n_programs * 2, seed=seed)
     base = records[:n_programs]
+    fn = _grade_one_gate_only if gate_only else _grade_one
 
     timings = {}
     # Serial baseline
     t0 = time.monotonic()
     for r in base:
-        _grade_one(r)
+        fn(r)
     timings["serial_1"] = time.monotonic() - t0
 
     for w in (4, 16, 64):
         t0 = time.monotonic()
         with concurrent.futures.ThreadPoolExecutor(max_workers=w) as pool:
-            list(pool.map(_grade_one, base))
+            list(pool.map(fn, base))
         timings[f"parallel_{w}"] = time.monotonic() - t0
 
     serial_throughput = n_programs / timings["serial_1"]
@@ -277,6 +300,7 @@ def probe_parallel_speedup(n_programs: int = 16, seed: int = 42) -> dict:
     }
     best_speedup = max(speedups.values())
     return {
+        "mode": "gate_only" if gate_only else "full_measurement",
         "n_programs": n_programs,
         "timings_s": {k: round(v, 2) for k, v in timings.items()},
         "speedups": speedups,
@@ -290,37 +314,47 @@ def probe_parallel_speedup(n_programs: int = 16, seed: int = 42) -> dict:
     }
 
 
-def probe_pass_rate_sensitivity(per_problem_grade_s: float, empirical_speedup: float) -> dict:
-    """Compute reward fraction at multiple assumed RL-rollout pass rates.
+def probe_pass_rate_sensitivity(t_pass_s: float, t_fail_s: float,
+                                 s_perf: float, s_gate: float) -> dict:
+    """Two-regime parallel speedup model (corrects the earlier uniform-speedup bug).
 
-    Spec §4.2: 'Measure only if all_pass.' Failed rollouts skip the expensive
-    perf-measurement phase entirely; their cost is compile + gate-run only.
+    Failed rollouts (1-p fraction) cost only compile+gate (t_fail) and parallelise
+    at the gate-only speedup S_gate (no perf-event kernel contention).
+    Passing rollouts (p fraction) cost compile+gate+perf (t_pass) and bottleneck
+    at the perf-only speedup S_perf (~3.84x measured).
 
-    The probe's per-problem grade time ≈ compile (~500ms) + 14×gate (~70ms) +
-    14×3×perf (~420ms) ≈ 1000ms. So passing rollouts spend ~all 1s; failing
-    rollouts spend ~580ms (compile + gate only). Approximate t_fail ≈ 0.6 × t_pass.
+    Per-step wall-clock = max(pass_wall, fail_wall) under perfect overlap, but
+    a single thread pool serialises the two regimes — use serial-mix arithmetic:
+        per_step_s = (1-p) * (N * t_fail / S_gate) + p * (N * t_pass / S_perf)
+    where N = ROLLOUTS_PER_STEP.
 
-    Realistic early-training pass rates: 10-30%. Late-training (if model converges):
-    higher. The worst-case 100% projection is the spec NO-GO trigger; the realistic-
-    case projection is what training will actually see.
+    This is the corrected step-budget model. Spec §4.2's 'Measure only if all_pass'
+    means failed rollouts skip perf entirely; with high gate-only speedup, low pass
+    rates make the perf bottleneck almost irrelevant.
     """
-    t_pass = per_problem_grade_s
-    t_fail = 0.6 * per_problem_grade_s  # compile + gate, no perf
     out = {}
     for p in (1.0, 0.5, 0.3, 0.2, 0.1, 0.05):
-        per_rollout = p * t_pass + (1 - p) * t_fail
-        serial_s = ROLLOUTS_PER_STEP * per_rollout
-        parallel_min = (serial_s / empirical_speedup) / 60.0
-        fraction = parallel_min / DEEPCODER_STEP_MIN
+        fail_wall_s = (1 - p) * ROLLOUTS_PER_STEP * t_fail_s / s_gate
+        pass_wall_s = p * ROLLOUTS_PER_STEP * t_pass_s / s_perf
+        per_step_s = fail_wall_s + pass_wall_s
+        per_step_min = per_step_s / 60.0
+        fraction = per_step_min / DEEPCODER_STEP_MIN
         decision = (
             "GO" if fraction <= 0.50
             else "GO_WITH_MITIGATION" if fraction <= 0.70
             else "NO_GO"
         )
+        effective_speedup = ROLLOUTS_PER_STEP * (p * t_pass_s + (1 - p) * t_fail_s) / per_step_s
         out[f"pass_rate_{p:g}"] = {
-            "per_rollout_s": round(per_rollout, 3),
-            "reward_min_per_step": round(parallel_min, 2),
+            "t_pass_s": round(t_pass_s, 3),
+            "t_fail_s": round(t_fail_s, 3),
+            "s_perf": round(s_perf, 2),
+            "s_gate": round(s_gate, 2),
+            "fail_wall_min": round(fail_wall_s / 60, 2),
+            "pass_wall_min": round(pass_wall_s / 60, 2),
+            "reward_min_per_step": round(per_step_min, 2),
             "reward_fraction": round(fraction, 3),
+            "effective_speedup": round(effective_speedup, 2),
             "decision": decision,
         }
     return out
@@ -365,9 +399,23 @@ def probe_step_budget(per_problem_grade_s: float, empirical_speedup: float) -> d
 
 
 def main():
-    print("=== §13 probe items 3-6 ===")
-    print(f"backend={MEASUREMENT_BACKEND}  TESTS_ROOT={TESTS_ROOT}")
-    results = {"backend": MEASUREMENT_BACKEND, "tests_root": str(TESTS_ROOT)}
+    import sys as _sys
+    global _PCH_PATH
+
+    use_pch = "--no-pch" not in _sys.argv  # PCH on by default; --no-pch disables for A/B comparison
+    if use_pch:
+        print("=== building PCH (one-off; ~2s) ===")
+        _PCH_PATH = setup_pch()
+        print(f"PCH at {_PCH_PATH} (+.gch)")
+
+    print("\n=== §13 probe items 3-6 ===")
+    print(f"backend={MEASUREMENT_BACKEND}  TESTS_ROOT={TESTS_ROOT}  PCH={_PCH_PATH}")
+    results = {
+        "backend": MEASUREMENT_BACKEND,
+        "tests_root": str(TESTS_ROOT),
+        "pch_enabled": use_pch,
+        "pch_path": _PCH_PATH,
+    }
 
     print("\n[item 3] determinism stress test...")
     results["item3_determinism"] = probe_determinism()
@@ -381,21 +429,48 @@ def main():
     results["item5_precompute"] = probe_precompute_extrapolation()
     print(json.dumps(results["item5_precompute"], indent=2))
 
-    print("\n[item 4b] empirical parallel speedup...")
-    results["item4b_parallel_speedup"] = probe_parallel_speedup()
-    print(json.dumps(results["item4b_parallel_speedup"], indent=2))
+    print("\n[item 4b-full] empirical parallel speedup (full measurement path)...")
+    results["item4b_speedup_full"] = probe_parallel_speedup(gate_only=False)
+    print(json.dumps(results["item4b_speedup_full"], indent=2))
 
-    print("\n[item 6] step budget projection (uses empirical speedup)...")
+    print("\n[item 4c-gate-only] empirical parallel speedup (gate-only, no perf)...")
+    results["item4c_speedup_gate_only"] = probe_parallel_speedup(gate_only=True)
+    print(json.dumps(results["item4c_speedup_gate_only"], indent=2))
+
+    # Decompose t_pass into compile+gate vs perf using the gate-only timing
     per_problem_grade_s = results["item5_precompute"]["mean_grading_s_per_problem"]
-    empirical_speedup = results["item4b_parallel_speedup"]["best_speedup"]
-    results["item6_step_budget"] = probe_step_budget(per_problem_grade_s, empirical_speedup)
+    serial_full_per_prog = results["item4b_speedup_full"]["timings_s"]["serial_1"] / 16
+    serial_gate_per_prog = results["item4c_speedup_gate_only"]["timings_s"]["serial_1"] / 16
+    t_perf_3 = max(serial_full_per_prog - serial_gate_per_prog, 0.0)  # 3-sample perf cost
+    results["timing_breakdown"] = {
+        "t_full_per_prog_s": round(serial_full_per_prog, 3),
+        "t_gate_only_per_prog_s": round(serial_gate_per_prog, 3),
+        "t_perf_median_of_3_s": round(t_perf_3, 3),
+        "t_perf_median_of_1_estimate_s": round(t_perf_3 / 3, 3),
+    }
+    print(f"\nTiming breakdown: {results['timing_breakdown']}")
+
+    s_perf = results["item4b_speedup_full"]["best_speedup"]
+    s_gate = results["item4c_speedup_gate_only"]["best_speedup"]
+
+    print("\n[item 6] step budget — original (uniform-speedup, kept for comparison)...")
+    results["item6_step_budget"] = probe_step_budget(per_problem_grade_s, s_perf)
     print(json.dumps(results["item6_step_budget"], indent=2))
 
-    print("\n[item 6b] pass-rate sensitivity (realistic early-training is 10-30%)...")
-    results["item6b_pass_rate_sensitivity"] = probe_pass_rate_sensitivity(
-        per_problem_grade_s, empirical_speedup
+    print("\n[item 6b] CORRECTED pass-rate sensitivity (two-regime, median-of-3)...")
+    t_pass_m3 = serial_full_per_prog
+    t_fail = serial_gate_per_prog
+    results["item6b_pass_rate_sensitivity_m3"] = probe_pass_rate_sensitivity(
+        t_pass_m3, t_fail, s_perf, s_gate
     )
-    print(json.dumps(results["item6b_pass_rate_sensitivity"], indent=2))
+    print(json.dumps(results["item6b_pass_rate_sensitivity_m3"], indent=2))
+
+    print("\n[item 6c] same model with M3 mitigation (median-of-1)...")
+    t_pass_m1 = serial_gate_per_prog + t_perf_3 / 3.0
+    results["item6c_pass_rate_sensitivity_m1"] = probe_pass_rate_sensitivity(
+        t_pass_m1, t_fail, s_perf, s_gate
+    )
+    print(json.dumps(results["item6c_pass_rate_sensitivity_m1"], indent=2))
 
     # Report scratch dir + SLURM context for the record
     results["runtime_context"] = {
