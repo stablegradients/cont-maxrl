@@ -20,13 +20,10 @@ public surface (`compute_score`, `compute_scores_batch`, `extract_code`) MUST
 mirror the existing DeepCoder reward_function so that `insitu_eval.py`'s
 hardcoded imports work transparently under the sys.modules shim.
 
-TODO(step 7): the sys.modules shim itself does NOT yet exist. Until it lands,
-insitu_eval will silently import the DeepCoder reward function and grade C++
-programs as Python — every rollout will score 0 with no error. The §14 step 7
-implementation MUST include both (a) the redirect, and (b) a smoke test that
-proves insitu_eval returns non-zero on a known-good C++ program. Tracked at
-docs/DEFERRED_FIXES.md "F6" — this is the silent-failure trap spec §8 warns
-about repeatedly.
+The shim itself is installed in `experiment11_code_optim/train.py` when
+`PIE_MODE=1` (closed F6). A subprocess smoke test in
+`tests/test_pie_reward_fn.py::test_pie_mode_shim_grades_cpp_via_insitu_eval_import_path`
+verifies the redirect end-to-end on a known-good C++ program.
 """
 from __future__ import annotations
 

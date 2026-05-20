@@ -191,7 +191,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   +custom_reward_function.reward_kwargs.reference_table_dir="${PIE_REFERENCE_TABLE_DIR}" \
   +custom_reward_function.reward_kwargs.test_case_dir="${PIE_TEST_CASE_DIR}" \
   trainer.total_training_steps=${PIE_TOTAL_STEPS} \
-  trainer.total_epochs=10 \
+  trainer.total_epochs=3 \
   trainer.project_name=cont-maxrl-pie \
   trainer.experiment_name="${EXPERIMENT_NAME}" \
   "trainer.logger=['console','wandb']" \
