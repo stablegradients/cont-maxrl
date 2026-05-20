@@ -30,7 +30,7 @@ conda activate /work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl
 set -euo pipefail
 
 REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
-STORAGE_ROOT="/work/nvme/bgmo/sramasubramanian/cont-maxrl"
+STORAGE_ROOT="/work/nvme/bgtu/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 export PYTHONNOUSERSITE=1
 
@@ -68,7 +68,7 @@ PIE_EVAL_STEPS="${PIE_EVAL_STEPS:-[289,578,867]}"
 # If PIE_SFT_CKPT unset, falls back to base model with loud warning
 # (spec sft.mode=none; expected to fail §9 GO/NO-GO).
 # ============================================================
-PIE_SFT_CKPT="${PIE_SFT_CKPT:-/work/nvme/bgmo/sramasubramanian/cont-maxrl/sft_ckpts/qwen3_1.7b_pie_sft_1ep_fulltrain_s3/final}"
+PIE_SFT_CKPT="${PIE_SFT_CKPT:-/work/nvme/bgtu/sramasubramanian/cont-maxrl/sft_ckpts/qwen3_1.7b_pie_sft_1ep_fulltrain_s3/final}"
 MODEL_PATH="${PIE_SFT_CKPT}"
 if [[ ! -d "${MODEL_PATH}" ]]; then
     echo "FATAL: PIE_SFT_CKPT directory missing: ${MODEL_PATH}"
