@@ -133,7 +133,9 @@ echo "Epoch arithmetic: steps_per_epoch=${PIE_STEPS_PER_EPOCH} total=${PIE_TOTAL
 # Upfront chaining
 NEXT_CHAIN=$((CHAIN_LEFT - 1))
 if [[ ${NEXT_CHAIN} -gt 0 ]]; then
-    NEXT_JOB=$(sbatch --dependency=afterany:${SLURM_JOB_ID} \
+    NEXT_JOB=$(sbatch \
+        --account="${SLURM_JOB_ACCOUNT}" \
+        --dependency=afterany:${SLURM_JOB_ID} \
         "${REPO_ROOT}/experiment11_code_optim/scripts/qwen3_1.7b_base_pie_rloo_g16.sh" \
         "${SEED}" "${NEXT_CHAIN}")
     echo "Upfront-chained next job: ${NEXT_JOB} (chains_left=${NEXT_CHAIN})"
