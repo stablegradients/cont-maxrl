@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 
 from experiment11_code_optim.measurement.core import measure, MEASUREMENT_BACKEND, setup_pch
+from experiment11_code_optim.reward.pie_reward_fn import compute_scores_batch, dedup_stats, preload_test_cases
 
 PIE_DATA_ROOT = Path("/work/nvme/bgmo/sramasubramanian/pie_data")
 TESTS_ROOT = PIE_DATA_ROOT / "tests"
@@ -259,6 +260,119 @@ def probe_precompute_extrapolation(n_problems: int = 20, seed: int = 0,
     }
 
 
+# ----- item 7: speed-fix end-to-end (dedup + batched gate via pie_reward_fn) -----
+
+def probe_speedfix_throughput(n_problems: int = 16, g: int = 16,
+                              dedup_ratio: float = 4.0,
+                              pass_fraction: float = 0.5,
+                              measurement_max_tests: int | None = None,
+                              seed: int = 11) -> dict:
+    """Measure compute_scores_batch wall-clock on a synthetic step-shape batch.
+
+    Build a `n_problems × g` rollout batch where each prompt's G rollouts have
+    `g / dedup_ratio` unique codes (rest are copies). Pass_fraction of unique
+    codes are real Accepted programs from val.jsonl; the rest are syntactically
+    valid but wrong (will fail the gate). The whole batch is fed to
+    compute_scores_batch, exercising:
+
+      - extract_code parser
+      - hash(code, problem_id) dedup
+      - measure_from_disk → gate_runner.sh batched gate
+      - perf phase on all_pass rollouts
+      - scatter back
+
+    Reports wall-clock, dedup stats, and a per-step projection scaled to
+    ROLLOUTS_PER_STEP=4096.
+    """
+    import random
+    rng = random.Random(seed)
+    # Sample problems we know have val.jsonl tgt_code available
+    pids = []
+    pid_to_code = {}
+    with open("/work/nvme/bgmo/sramasubramanian/pie_data/raw/val.jsonl") as f:
+        for line in f:
+            rec = json.loads(line)
+            if rec["problem_id"] in pid_to_code:
+                continue
+            pid_to_code[rec["problem_id"]] = rec["tgt_code"]
+            pids.append(rec["problem_id"])
+    rng.shuffle(pids)
+    chosen = pids[:n_problems]
+
+    n_unique_per_prompt = max(1, int(g / dedup_ratio))
+
+    # Build reward_inputs in (problem, rollout) order
+    reward_inputs = []
+    for pid in chosen:
+        tgt = pid_to_code[pid]
+        # Construct `n_unique_per_prompt` distinct codes per prompt:
+        # - first ceil(n_unique * pass_fraction) are the real tgt_code variants (passing)
+        # - rest are perturbed (failing)
+        n_pass_unique = max(1, int(round(n_unique_per_prompt * pass_fraction)))
+        unique_codes = []
+        # Passing variants: tgt_code with trivial cosmetic differences (newline at end varies)
+        # — kept "trivial" so each is a DIFFERENT hash but all still all-pass.
+        for k in range(n_pass_unique):
+            unique_codes.append(tgt + ("\n" * (k + 1)))  # different trailing newlines → different hashes
+        # Failing variants: a clearly-wrong replacement
+        for k in range(n_unique_per_prompt - n_pass_unique):
+            unique_codes.append(
+                f"#include <iostream>\nint main(){{ std::cout << {k} << \"\\n\"; return 0; }}"
+            )
+        # Distribute g rollouts across these unique codes (round-robin → dedup)
+        for j in range(g):
+            code = unique_codes[j % len(unique_codes)]
+            reward_inputs.append({
+                "solution_str": f"```cpp\n{code}\n```",
+                "ground_truth": json.dumps({"problem_id": pid, "split": "val"}),
+            })
+
+    # Dedup stats (cheap, pure Python)
+    stats = dedup_stats(reward_inputs)
+    test_case_dir = str(TESTS_ROOT)
+
+    t0 = time.monotonic()
+    results = compute_scores_batch(
+        reward_inputs,
+        test_case_dir=test_case_dir,
+        timeout_per_test=6,
+        num_workers=64,
+        measurement_max_tests=measurement_max_tests,
+    )
+    elapsed = time.monotonic() - t0
+
+    n_acc = sum(1 for r in results if r["acc"] == 1.0)
+    actual_pass_fraction = n_acc / max(len(results), 1)
+    per_rollout_s = elapsed / max(len(reward_inputs), 1)
+
+    # Project to per-step at 4096 rollouts
+    projected_step_s = per_rollout_s * ROLLOUTS_PER_STEP
+    projected_step_min = projected_step_s / 60.0
+    fraction = projected_step_min / DEEPCODER_STEP_MIN
+    decision = (
+        "GO" if fraction <= 0.50
+        else "GO_WITH_MITIGATION" if fraction <= 0.70
+        else "NO_GO"
+    )
+
+    return {
+        "n_problems": n_problems,
+        "g": g,
+        "n_unique_per_prompt": n_unique_per_prompt,
+        "measurement_max_tests": measurement_max_tests,
+        "configured_pass_fraction": pass_fraction,
+        "actual_pass_fraction": round(actual_pass_fraction, 3),
+        "n_total_rollouts": len(reward_inputs),
+        "dedup_stats": stats,
+        "elapsed_s": round(elapsed, 3),
+        "per_rollout_s": round(per_rollout_s, 4),
+        "projected_step_min": round(projected_step_min, 2),
+        "deepcoder_step_min": DEEPCODER_STEP_MIN,
+        "reward_fraction": round(fraction, 3),
+        "decision": decision,
+    }
+
+
 # ----- item 6 -----
 
 def probe_parallel_speedup(n_programs: int = 16, seed: int = 42,
@@ -471,6 +585,43 @@ def main():
         t_pass_m1, t_fail, s_perf, s_gate
     )
     print(json.dumps(results["item6c_pass_rate_sensitivity_m1"], indent=2))
+
+    # ----- item 7: speed-fix end-to-end (dedup + in-memory grading) -----
+    # Force median-of-1 via env var (the speed_fix.md spec said keep n_perf_samples=1).
+    os.environ["PIE_PERF_SAMPLES"] = "1"
+    if _PCH_PATH:
+        os.environ["PIE_PCH_INCLUDE_PATH"] = _PCH_PATH
+
+    print("\n[preload] reading 21,758 test cases from Lustre into RAM (one-off)...")
+    t0 = time.monotonic()
+    n_cached = preload_test_cases(str(TESTS_ROOT))
+    preload_s = time.monotonic() - t0
+    print(f"preloaded {n_cached} test cases in {preload_s:.2f}s "
+          f"(~{n_cached/preload_s:.0f} files/s)")
+    results["test_case_preload_s"] = round(preload_s, 2)
+    results["test_cases_in_cache"] = n_cached
+
+    # walltime backend (perf dropped) + M2(K=5) + dedup_4 — the GO config
+    print("\n[item 7a] walltime + dedup_4 + K=5 (GO config)...")
+    results["item7a_walltime_dr4_K5"] = probe_speedfix_throughput(
+        n_problems=16, g=16, dedup_ratio=4, pass_fraction=0.2,
+        measurement_max_tests=5,
+    )
+    print(json.dumps(results["item7a_walltime_dr4_K5"], indent=2))
+
+    print("\n[item 7b] walltime + dedup_2 + K=10 (more tests/problem)...")
+    results["item7b_walltime_dr2_K10"] = probe_speedfix_throughput(
+        n_problems=16, g=16, dedup_ratio=2, pass_fraction=0.2,
+        measurement_max_tests=10,
+    )
+    print(json.dumps(results["item7b_walltime_dr2_K10"], indent=2))
+
+    print("\n[item 7c] walltime + no dedup + no cap (worst case)...")
+    results["item7c_walltime_nocap_nodedup"] = probe_speedfix_throughput(
+        n_problems=16, g=16, dedup_ratio=1, pass_fraction=0.2,
+        measurement_max_tests=None,
+    )
+    print(json.dumps(results["item7c_walltime_nocap_nodedup"], indent=2))
 
     # Report scratch dir + SLURM context for the record
     results["runtime_context"] = {

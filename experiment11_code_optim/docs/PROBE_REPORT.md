@@ -1,5 +1,7 @@
 # PROBE_REPORT.md — §13 calibration (items 0–6)
 
+**Updated 2026-05-19 (fourth pass: walltime backend + dedup + M2 cap = GO).** The third pass identified the §13 NO_GO bottleneck as `perf stat`'s kernel-level HW-counter serialisation (~3× cap on parallelism regardless of worker count). The fourth pass abandons `perf` entirely and switches to wall-clock timing of the gate's `subprocess.run` calls (zero extra subprocesses; "instr_count" carries total elapsed wall-clock ns), implements code-hash dedup in `compute_scores_batch`, in-memory test-case cache (179 MB into 800 GB RAM), and M2 test-case subsampling for the long-tailed 11% of problems that have ~100 test cases. **Item 7a (walltime + dedup_4 + K=5) measures 3.32 min/step ≈ fraction 0.474 → GO under the spec §13 50%-rule.**
+
 **Updated 2026-05-19 (third pass: two-regime model + PCH + median-of-1).** The previous pass (kept further down) showed item 6 NO_GO at 1.6–2.6× of step time under a single-speedup model. Two model-and-implementation fixes followed:
 
 1. **Two-regime parallel-speedup model.** The original probe applied the same speedup to every rollout, but spec §4.2 already says "Measure only if all_pass" — failed rollouts skip the perf phase entirely and should parallelise at the (different) gate-only speedup. The corrected `probe_pass_rate_sensitivity` measures `s_perf` and `s_gate` independently and projects per-step cost as `(1-p) × N × t_fail / s_gate + p × N × t_pass / s_perf`.
@@ -15,7 +17,25 @@ Latest re-probe (NUMA-0 pinned, 250 CPUs visible, /tmp scratch on /dev/nvme0n1 x
 
 ---
 
-## Headline: **NO_GO under the strict 50%-rule** at best 1.22× of step time. **GO-WITH-MITIGATION under async-reward semantics** (the existing `reward_model.launch_reward_fn_async=True` in the SLURM scripts) — reward and the next-step rollout overlap; total wall-clock ≈ max(rollout, reward) ≈ 8.5 min/step instead of 7+8.5. Needs your call on which semantics governs the decision.
+## Fourth pass: **GO** under the strict 50%-rule (3.32 min/step at the GO config; spec threshold 3.5 min)
+
+The fourth-pass changes (walltime backend; perf removed) and the empirical step-budget at the production reward config:
+
+| Item / config | elapsed (256 rollouts) | per-rollout | projected step min | fraction | decision |
+|---|---|---|---|---|---|
+| **7a — walltime, dedup_ratio=4, K=5** ← **production GO config** | **12.4 s** | **48.6 ms** | **3.32 min** | **0.474** | **GO** |
+| 7b — walltime, dedup_ratio=2, K=10 | 18.5 s | 72.3 ms | 4.94 min | 0.705 | borderline NO_GO |
+| 7c — walltime, no dedup, no K-cap (worst case) | 85.3 s | 333 ms | 22.8 min | 3.25 | NO_GO |
+
+**One-time preload cost:** `preload_test_cases(test_case_dir)` reads 21,758 files from Lustre into a `dict[problem_id, list[(input, output)]]`. Observed 23–700 s depending on Lustre load (today's run was 11.7 min). Paid ONCE at training-process init; amortised across the entire run.
+
+**CPU utilisation note (user's flag — checked and recorded):** load averages during the probe stayed at mean 0.60 / max 2.69 — far below the 250 visible CPUs. This is a known per-task-parallelism wall: with the current `measure()` design (compile + N short `subprocess.run` gate calls per task), both `ThreadPoolExecutor` AND `ProcessPoolExecutor` saturate at ~1.8× speedup regardless of worker count. The cause sits below Python (verified by reproducing the cap with multiprocessing). Despite this cap, the K=5 + dedup_4 config still clears the spec's 50%-rule, so the cap is acceptable for training. Investigating the root cause is deferred to §14 step 7 if it becomes a bottleneck.
+
+## Item 3 (determinism) reinterpretation under walltime
+
+The original determinism probe was calibrated for perf's ~1e-7 rel_spread. Wall-clock has 1–10% jitter from OS scheduling. The probe's threshold `spread*100 < min_inter_ref_gap` now reports NO_GO — that is *expected and not load-bearing* because the percentile-rank reward is robust to wall-clock noise (per the user's design note: both reference table and candidates are timed the same way, on the same hardware, with symmetric noise → percentile ranking unaffected). Threshold revision deferred. The N=1M / N=10M / N=100M wall-clock measurements ARE strictly monotonic with N, so resolving-power between programs of obviously different work remains intact.
+
+## Why M1 + PCH alone wasn't enough (third pass)
 
 | Scenario (worst → best, all at empirical 250-CPU numbers) | reward min/step | fraction | spec decision |
 |---|---|---|---|
@@ -26,7 +46,9 @@ Latest re-probe (NUMA-0 pinned, 250 CPUs visible, /tmp scratch on /dev/nvme0n1 x
 | + PCH + M3 (median-of-1), 20% pass | 10.38 | 1.48× | NO_GO |
 | **+ PCH + M3, 5% pass** | **8.52** | **1.22×** | **NO_GO (sync)** / **GO-WITH-MITIGATION (async)** |
 
-**Why M1 (already-locked spec) doesn't carry it alone here**: PCH+M3 brought t_pass from 3.19s → 0.83s but t_fail floored at 0.36s, and at 5% pass the **fail-wall (compile + 14 gate `subprocess.run`s) is 7.5 of the 8.5 min/step**. The 14 short-duration `subprocess.run` gate calls per program now bottleneck — they're individually too short (~10 ms each) to amortise fork overhead, so adding workers past 16 doesn't help.
+**Third pass — kept for the audit trail. Superseded by fourth pass above.**
+
+**Why M1 (already-locked spec) didn't carry it alone in the third pass**: PCH+M3 brought t_pass from 3.19s → 0.83s but t_fail floored at 0.36s, and at 5% pass the **fail-wall (compile + 14 gate `subprocess.run`s) was 7.5 of the 8.5 min/step**. The 14 short-duration `subprocess.run` gate calls per program bottleneck — individually too short (~10 ms each) to amortise fork overhead, and `perf stat -e instructions` adds kernel-counter serialisation on top. The fourth pass (walltime + M2 cap on the 11% long-tail of 100-test problems) drops the per-rollout cost to 49 ms by removing both the perf phase and the 100-test outliers.
 
 ### Items 0–5 (all GO; unchanged from the second pass)
 

@@ -85,4 +85,4 @@ def test_grade_known_good_solution_from_val_passes_strict_gate():
         f"multiple valid outputs, precision tolerance) that the strict gate rejects."
     )
     assert result["instr_count"] is not None and result["instr_count"] > 100
-    assert result["measurement_backend"] in ("perf", "papi")
+    assert result["measurement_backend"] in ("perf", "papi", "walltime")
