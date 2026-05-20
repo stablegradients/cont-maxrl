@@ -144,12 +144,12 @@ def extract_code(solution_str: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _percentile_from_reference_table(
-    instr_count: int,
+    elapsed_ns: int,
     problem_id: str,
     split: str,
     reference_table_dir: str | None,
 ) -> float:
-    """Midrank percentile of `instr_count` against the per-problem reference
+    """Midrank percentile of `elapsed_ns` against the per-problem reference
     distribution. Spec §8.2:
         lo = bisect_left(refs, instr); hi = bisect_right(refs, instr)
         score = 1.0 - (lo + hi) / 2.0 / n_refs
@@ -157,23 +157,17 @@ def _percentile_from_reference_table(
     Until §14 step 6 produces real reference tables, return a stub 0.5 on
     all_pass so downstream callers see the right dict shape. The probe doesn't
     care about the numeric score; it cares about throughput.
-
-    TODO(step 6): rename JSON key "instr_counts" → "elapsed_ns_values" when
-    the reference-table precompute writes the first real schema. The value
-    semantics are wall-clock ns under the walltime backend (see
-    docs/DEFERRED_FIXES.md "F1"). Rename must be coordinated with the
-    precompute writer so the reference-table schema and reader move in lockstep.
     """
     if reference_table_dir is None:
         return 0.5
     ref_path = os.path.join(reference_table_dir, split, f"{problem_id}.json")
     try:
         with open(ref_path) as f:
-            refs = json.load(f)["instr_counts"]  # TODO(step 6): "elapsed_ns_values"
+            refs = json.load(f)["elapsed_ns_values"]
         if not refs:
             return 0.5
-        lo = bisect.bisect_left(refs, instr_count)
-        hi = bisect.bisect_right(refs, instr_count)
+        lo = bisect.bisect_left(refs, elapsed_ns)
+        hi = bisect.bisect_right(refs, elapsed_ns)
         return max(0.0, min(1.0, 1.0 - (lo + hi) / 2.0 / len(refs)))
     except (OSError, KeyError, ValueError):
         return 0.5
@@ -373,7 +367,7 @@ def compute_scores_batch(
             dedup_results[key] = {
                 "compiled": False, "all_pass": False,
                 "n_tests_run": 0, "n_tests_passed": 0,
-                "instr_count": None,
+                "elapsed_ns": None,
                 "measurement_backend": MEASUREMENT_BACKEND,
                 "error": f"no test cases for {dedup_tasks[key]['problem_id']}",
             }
@@ -383,7 +377,7 @@ def compute_scores_batch(
                 dedup_results[key] = {
                     "compiled": False, "all_pass": False,
                     "n_tests_run": 0, "n_tests_passed": 0,
-                    "instr_count": None,
+                    "elapsed_ns": None,
                     "measurement_backend": MEASUREMENT_BACKEND,
                     "error": err,
                 }
@@ -398,7 +392,7 @@ def compute_scores_batch(
                 "all_pass": all_pass,
                 "n_tests_run": len(cases),
                 "n_tests_passed": n_pass,
-                "instr_count": sum(elapsed.values()) if all_pass else None,
+                "elapsed_ns": sum(elapsed.values()) if all_pass else None,
                 "measurement_backend": MEASUREMENT_BACKEND,
                 "error": None,
             }
@@ -408,19 +402,19 @@ def compute_scores_batch(
             if td and os.path.isdir(td):
                 shutil.rmtree(td, ignore_errors=True)
 
-    # ---- Phase 3: scatter, compute score from instr_count ----
+    # ---- Phase 3: scatter, compute score from elapsed_ns ----
     out: list[dict] = []
     for i, key in enumerate(completion_keys):
         if key is None:
             out.append(dict(_ZERO))
             continue
         r = dedup_results[key]
-        if not r["all_pass"] or r["instr_count"] is None:
+        if not r["all_pass"] or r["elapsed_ns"] is None:
             out.append(dict(_ZERO))
             continue
         task = dedup_tasks[key]
         score = _percentile_from_reference_table(
-            r["instr_count"], task["problem_id"], task["split"], reference_table_dir
+            r["elapsed_ns"], task["problem_id"], task["split"], reference_table_dir
         )
         out.append({"score": float(score), "acc": 1.0})
 

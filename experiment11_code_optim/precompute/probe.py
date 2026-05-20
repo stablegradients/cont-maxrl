@@ -1,7 +1,7 @@
 """
 §13 probe items 3-6 (the rest of the calibration after item 0).
 
-Item 3: determinism stress test — fixed C++ program × 20, instr_count statistics
+Item 3: determinism stress test — fixed C++ program × 20, elapsed_ns statistics
         and comparison against "inter-ref gaps" (gap between programs of obviously
         different work, which is the resolving-power floor a reference table relies on).
 
@@ -82,7 +82,7 @@ def _expected_n_loop_output(n: int) -> str:
 # ----- item 3 -----
 
 def probe_determinism() -> dict:
-    """Run N_LOOP_PROGRAM with N=10M ×20, summarize instr_count distribution, and
+    """Run N_LOOP_PROGRAM with N=10M ×20, summarize elapsed_ns distribution, and
     compare against runs of the SAME program with N=1M and N=100M.
 
     Using N-from-stdin defeats g++ -O3 constant-folding of pure-numeric loops:
@@ -97,7 +97,7 @@ def probe_determinism() -> dict:
     for _ in range(20):
         r = measure(N_LOOP_PROGRAM, [(f"{n_fixed}\n", expected_fixed)])
         assert r["all_pass"], f"N_LOOP_PROGRAM (N={n_fixed}) failed gate: {r}"
-        samples.append(r["instr_count"])
+        samples.append(r["elapsed_ns"])
     elapsed = time.monotonic() - t0
 
     mean = statistics.mean(samples)
@@ -110,8 +110,8 @@ def probe_determinism() -> dict:
     r_large = measure(N_LOOP_PROGRAM, [(f"{n_large}\n", _expected_n_loop_output(n_large))])
     assert r_small["all_pass"] and r_large["all_pass"]
 
-    inter_ref_gap_small = abs(mean - r_small["instr_count"])
-    inter_ref_gap_large = abs(r_large["instr_count"] - mean)
+    inter_ref_gap_small = abs(mean - r_small["elapsed_ns"])
+    inter_ref_gap_large = abs(r_large["elapsed_ns"] - mean)
     min_inter_ref_gap = min(inter_ref_gap_small, inter_ref_gap_large)
 
     # Spec §13: jitter≈inter-ref gaps → stop+hand back. Use spread (max-min over 20 runs)
@@ -120,13 +120,13 @@ def probe_determinism() -> dict:
     return {
         "n_runs": len(samples),
         "elapsed_s": round(elapsed, 3),
-        "instr_count_mean": int(mean),
-        "instr_count_stdev": int(stdev),
-        "instr_count_spread": int(spread),
+        "elapsed_ns_mean": int(mean),
+        "elapsed_ns_stdev": int(stdev),
+        "elapsed_ns_spread": int(spread),
         "rel_stdev": round(rel_stdev, 6),
         "rel_spread": round(rel_spread, 6),
-        "smaller_program_instr_count": r_small["instr_count"],
-        "larger_program_instr_count": r_large["instr_count"],
+        "smaller_program_elapsed_ns": r_small["elapsed_ns"],
+        "larger_program_elapsed_ns": r_large["elapsed_ns"],
         "inter_ref_gap_to_smaller": int(inter_ref_gap_small),
         "inter_ref_gap_to_larger": int(inter_ref_gap_large),
         "min_inter_ref_gap": int(min_inter_ref_gap),
@@ -178,7 +178,7 @@ def _grade_one(rec: dict, *, skip_measurement: bool = False,
         "elapsed_s": time.monotonic() - t0,
         "compiled": r["compiled"],
         "all_pass": r["all_pass"],
-        "instr_count": r["instr_count"],
+        "elapsed_ns": r["elapsed_ns"],
     }
 
 

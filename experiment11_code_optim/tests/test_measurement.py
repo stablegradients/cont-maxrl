@@ -55,15 +55,15 @@ def test_hello_world_all_pass():
     assert result["all_pass"] is True, f"strict gate did not pass: {result!r}"
     assert result["n_tests_run"] == 1
     assert result["n_tests_passed"] == 1
-    assert result["instr_count"] is not None, "instr_count must be set when all_pass=True"
-    assert result["instr_count"] > 100, (
-        f"instr_count={result['instr_count']} suspiciously low — a real C++ Hello World "
+    assert result["elapsed_ns"] is not None, "elapsed_ns must be set when all_pass=True"
+    assert result["elapsed_ns"] > 100, (
+        f"elapsed_ns={result['elapsed_ns']} suspiciously low — a real C++ Hello World "
         f"prints via libstdc++ and runs millions of instructions; values below 100 indicate "
         f"a stub or a broken perf invocation"
     )
     # Backend was switched from "perf" to "walltime" after the §13 probe
     # showed perf-event kernel contention capped reward throughput at ~3x and
-    # made training infeasible. instr_count now carries total wall-clock ns
+    # made training infeasible. elapsed_ns now carries total wall-clock ns
     # of the gate runs (~ms range) rather than perf-counted instructions
     # (~M range), so the > 100 floor still holds trivially.
     assert result["measurement_backend"] in ("perf", "papi", "walltime"), (
@@ -81,13 +81,13 @@ def test_compile_failure_reports_clearly():
 
     assert result["compiled"] is False
     assert result["all_pass"] is False
-    assert result["instr_count"] is None
+    assert result["elapsed_ns"] is None
     assert result["error"] is not None and len(result["error"]) > 0
 
 
 def test_wrong_output_fails_gate():
     """A compilable program that prints the wrong thing must fail the strict gate
-    and not produce an instr_count (spec §4.2: measure only if all_pass)."""
+    and not produce an elapsed_ns (spec §4.2: measure only if all_pass)."""
     from experiment11_code_optim.measurement.core import measure
 
     result = measure(WRONG_OUTPUT_PROGRAM, [("", "right\n")])
@@ -96,12 +96,12 @@ def test_wrong_output_fails_gate():
     assert result["all_pass"] is False
     assert result["n_tests_run"] == 1
     assert result["n_tests_passed"] == 0
-    assert result["instr_count"] is None
+    assert result["elapsed_ns"] is None
 
 
 def test_segfault_fails_gate():
     """A compilable program that segfaults at runtime must fail the strict gate
-    (nonzero exit) without raising and without producing an instr_count."""
+    (nonzero exit) without raising and without producing an elapsed_ns."""
     from experiment11_code_optim.measurement.core import measure
 
     result = measure(SEGFAULT_PROGRAM, [("", "ok")])
@@ -110,7 +110,7 @@ def test_segfault_fails_gate():
     assert result["all_pass"] is False
     assert result["n_tests_run"] == 1
     assert result["n_tests_passed"] == 0
-    assert result["instr_count"] is None
+    assert result["elapsed_ns"] is None
 
 
 def test_empty_test_cases_degenerate():
@@ -124,7 +124,7 @@ def test_empty_test_cases_degenerate():
     assert result["all_pass"] is False
     assert result["n_tests_run"] == 0
     assert result["n_tests_passed"] == 0
-    assert result["instr_count"] is None
+    assert result["elapsed_ns"] is None
 
 
 def test_backend_selected_at_module_init():
@@ -161,7 +161,7 @@ def test_timeout_fails_gate_within_budget():
 
     assert result["compiled"] is True
     assert result["all_pass"] is False
-    assert result["instr_count"] is None
+    assert result["elapsed_ns"] is None
     # Allow generous slack for compile + perf-launch overhead, but if the call
     # took >5s the timeout wasn't being honoured.
     assert elapsed < 5.0, f"timeout not honoured; elapsed={elapsed:.1f}s"
@@ -180,11 +180,20 @@ int main() {
 """.strip()
 
 
-def test_multi_test_instr_count_is_sum_of_per_case_medians():
-    """Spec §4.2: instr_count = sum over test cases of per-test medians.
-    Running the same program with three identical test cases must yield ~3x the
-    instruction count of the same program with one test case (the per-case
-    instruction counts should be similar; the sum should scale linearly)."""
+def test_multi_test_elapsed_ns_is_sum_of_per_case_medians():
+    """Spec §4.2: elapsed_ns = sum over test cases.
+
+    Under the legacy perf backend this scaled cleanly at ~3.0x exactly.
+    Under the walltime backend (current), cold-cache amortization biases
+    the single-run measurement high — the first subprocess.run pays
+    kernel page-fault + ld.so + icache costs that subsequent runs in the
+    three-test batch reuse — so the empirical ratio runs in ~1.8-3.0×.
+
+    The test's purpose is to catch the bug "only one test contributes"
+    (ratio ~1.0) vs. "all tests contribute" (ratio > 1.5). Use a
+    correspondingly relaxed bound; this is unrelated to spec §4.2
+    correctness, only walltime jitter.
+    """
     from experiment11_code_optim.measurement.core import measure
 
     one = measure(ECHO_FIRST_LINE_PROGRAM, [("a\n", "a\n")])
@@ -196,11 +205,12 @@ def test_multi_test_instr_count_is_sum_of_per_case_medians():
     assert one["all_pass"] is True and three["all_pass"] is True
     assert three["n_tests_run"] == 3 and three["n_tests_passed"] == 3
 
-    ratio = three["instr_count"] / one["instr_count"]
-    assert 2.5 < ratio < 3.5, (
-        f"multi-test instr_count={three['instr_count']} should be ~3x single's "
-        f"{one['instr_count']} (ratio={ratio:.2f}); the implementation is NOT "
-        f"summing per-test-case instruction counts as spec §4.2 requires"
+    ratio = three["elapsed_ns"] / one["elapsed_ns"]
+    assert 1.5 < ratio < 4.0, (
+        f"multi-test elapsed_ns={three['elapsed_ns']} should be >1.5x single's "
+        f"{one['elapsed_ns']} (ratio={ratio:.2f}) — ratio ~1.0 means only one "
+        f"test was counted; ratio >4 means duplicates/leak. Bounds wide enough "
+        f"for walltime cold-cache amortization."
     )
 
 
@@ -218,7 +228,7 @@ int main() {
 def test_measure_from_disk_uses_batched_gate_runner_and_matches_in_memory_path():
     """measure_from_disk() reads test cases from <test_case_dir>/<problem_id>/
     via the gate_runner.sh batched script. It must report the same all_pass /
-    n_tests_passed / instr_count semantics as the in-memory measure() path
+    n_tests_passed / elapsed_ns semantics as the in-memory measure() path
     when given the same data."""
     import tempfile
     from experiment11_code_optim.measurement.core import measure, measure_from_disk
@@ -247,9 +257,9 @@ def test_measure_from_disk_uses_batched_gate_runner_and_matches_in_memory_path()
         assert r_disk["error"] is None
 
 
-def test_measure_from_disk_all_pass_produces_instr_count():
+def test_measure_from_disk_all_pass_produces_elapsed_ns():
     """When every test case matches, measure_from_disk must enter the perf
-    phase and emit a real instr_count (proves disk + perf path composes)."""
+    phase and emit a real elapsed_ns (proves disk + perf path composes)."""
     import tempfile, os
     from experiment11_code_optim.measurement.core import measure_from_disk
 
@@ -265,7 +275,7 @@ def test_measure_from_disk_all_pass_produces_instr_count():
         assert r["all_pass"] is True
         assert r["n_tests_run"] == 3
         assert r["n_tests_passed"] == 3
-        assert r["instr_count"] is not None and r["instr_count"] > 100
+        assert r["elapsed_ns"] is not None and r["elapsed_ns"] > 100
 
 
 def test_setup_pch_then_measure_with_pch_passes():
@@ -285,7 +295,7 @@ def test_setup_pch_then_measure_with_pch_passes():
     assert result["compiled"] is True
     assert result["all_pass"] is True
     assert result["n_tests_passed"] == 1
-    assert result["instr_count"] is not None and result["instr_count"] > 100
+    assert result["elapsed_ns"] is not None and result["elapsed_ns"] > 100
 
 
 def test_repeated_measurement_is_near_deterministic():
@@ -300,7 +310,7 @@ def test_repeated_measurement_is_near_deterministic():
     r2 = measure(DETERMINISTIC_LOOP, [("", expected)])
 
     assert r1["all_pass"] is True and r2["all_pass"] is True
-    a, b = r1["instr_count"], r2["instr_count"]
+    a, b = r1["elapsed_ns"], r2["elapsed_ns"]
     rel_diff = abs(a - b) / max(a, b)
     # Walltime backend: wall-clock has more jitter than perf instr counts
     # (1-10% typical from OS scheduling). The percentile-rank reward absorbs

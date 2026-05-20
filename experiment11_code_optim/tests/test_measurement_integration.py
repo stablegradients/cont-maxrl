@@ -56,7 +56,7 @@ def _first_val_record_with_problem(problem_id: str) -> dict:
 def test_grade_known_good_solution_from_val_passes_strict_gate():
     """End-to-end: a known-good fast solution from val.jsonl, graded against the unified
     test-case archive for the same problem_id, must pass the strict all-pass gate and
-    produce a real instr_count > 0. Validates the whole measurement → data pipeline."""
+    produce a real elapsed_ns > 0. Validates the whole measurement → data pipeline."""
     from experiment11_code_optim.measurement.core import measure
 
     # Use p02587 as the canonical example: it appears in val.jsonl AND in pie-perf Public,
@@ -84,5 +84,5 @@ def test_grade_known_good_solution_from_val_passes_strict_gate():
         f"Public test-case set encodes a problem-specific output convention (e.g. "
         f"multiple valid outputs, precision tolerance) that the strict gate rejects."
     )
-    assert result["instr_count"] is not None and result["instr_count"] > 100
+    assert result["elapsed_ns"] is not None and result["elapsed_ns"] > 100
     assert result["measurement_backend"] in ("perf", "papi", "walltime")

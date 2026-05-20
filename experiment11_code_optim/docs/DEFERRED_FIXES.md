@@ -13,7 +13,8 @@ every `F#` tagged to that step is `CLOSED`.
 ---
 
 ## F1 — `instr_count` → `elapsed_ns` rename
-**Status:** OPEN
+**Status:** CLOSED (landed in the F1 commit, ahead of the precompute commit;
+the reference-table precompute writes `"elapsed_ns_values"` from the start)
 **Target step:** §14 step 6 (reference-table precompute)
 **Severity:** Medium — semantic mismatch; not a bug because both sides of the
 percentile comparison use the same units, but the name is misleading.

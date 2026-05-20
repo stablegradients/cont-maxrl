@@ -12,10 +12,9 @@ rank reward is robust to wall-clock noise (both reference table and
 candidate are measured identically), so the cost-of-zero-throughput
 trade-off favoured walltime. See PROBE_REPORT.md for the data.
 
-The dict field is still named `instr_count` for backward compatibility with
-callers and the reference-table JSON schema; it now carries ns under the
-walltime backend. Rename to `elapsed_ns` is tracked for the §14 step 6
-reference-precompute commit.
+The dict field is named `elapsed_ns` and carries total wall-clock ns
+summed across the gate runs. The reference-table JSON key is
+`"elapsed_ns_values"` (a sorted list of these ns values per problem).
 
 Public entrypoints:
 
@@ -246,7 +245,7 @@ def measure_from_disk(
         "all_pass": False,
         "n_tests_run": 0,
         "n_tests_passed": 0,
-        "instr_count": None,
+        "elapsed_ns": None,
         "measurement_backend": MEASUREMENT_BACKEND,
         "error": None,
     }
@@ -290,7 +289,7 @@ def measure_from_disk(
         result["all_pass"] = True
         if skip_measurement:
             return result
-        result["instr_count"] = total_elapsed_ns
+        result["elapsed_ns"] = total_elapsed_ns
 
     return result
 
@@ -320,7 +319,7 @@ def measure(
             only). Used by the probe to measure the parallel speedup of the gate-only
             workload — the perf phase has its own kernel-level serialisation ceiling
             (~3.84x) while compile+gate should scale much further. Returns the same
-            dict shape; instr_count is None.
+            dict shape; elapsed_ns is None.
 
     Returns:
         {
@@ -328,12 +327,9 @@ def measure(
             "all_pass": bool,
             "n_tests_run": int,
             "n_tests_passed": int,
-            "instr_count": int | None,    # cost; None unless all_pass and not skip_measurement.
+            "elapsed_ns": int | None,    # cost; None unless all_pass and not skip_measurement.
                                           # Under "walltime" backend (current), this is total
                                           # wall-clock ns summed across the gate runs.
-                                          # TODO(step 6): rename to "elapsed_ns" alongside the
-                                          # reference-table JSON key rename. See
-                                          # docs/DEFERRED_FIXES.md "F1".
             "measurement_backend": str,    # "perf" | "papi" | "walltime" (current)
             "error": str | None,
         }
@@ -343,7 +339,7 @@ def measure(
         "all_pass": False,
         "n_tests_run": 0,
         "n_tests_passed": 0,
-        "instr_count": None,
+        "elapsed_ns": None,
         "measurement_backend": MEASUREMENT_BACKEND,
         "error": None,
     }
@@ -385,6 +381,6 @@ def measure(
         result["all_pass"] = True
         if skip_measurement:
             return result
-        result["instr_count"] = total_elapsed_ns
+        result["elapsed_ns"] = total_elapsed_ns
 
     return result
