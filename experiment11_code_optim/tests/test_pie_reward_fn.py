@@ -13,11 +13,17 @@ import pytest
 PIE_DATA_ROOT = Path("/work/nvme/bgmo/sramasubramanian/pie_data")
 TESTS_ROOT = PIE_DATA_ROOT / "tests"
 VAL_JSONL = PIE_DATA_ROOT / "raw" / "val.jsonl"
+REFERENCE_TABLE_ROOT = PIE_DATA_ROOT / "reference_table"
 
 _data_ready = TESTS_ROOT.is_dir() and (TESTS_ROOT / "MANIFEST.json").exists()
 _skip_no_data = pytest.mark.skipif(
     not _data_ready,
     reason="PIE unified test-case archive not built; see precompute/build_unified_test_cases.py",
+)
+_ref_ready = (REFERENCE_TABLE_ROOT / "MANIFEST.json").exists()
+_skip_no_ref = pytest.mark.skipif(
+    not _ref_ready,
+    reason="PIE reference table not built; see precompute/build_reference_table.py",
 )
 
 
@@ -173,3 +179,35 @@ def test_compute_score_single_rollout_matches_batch():
                            test_case_dir=str(TESTS_ROOT))
     batched = compute_scores_batch([item], test_case_dir=str(TESTS_ROOT))[0]
     assert single == batched
+
+
+# ---------------------------------------------------------------------------
+# GATE C: end-to-end with the §14 step 6 reference table.
+# Permanent regression on the percentile-rank lookup wired through
+# compute_scores_batch + the on-disk reference table written by
+# precompute/build_reference_table.py.
+# ---------------------------------------------------------------------------
+
+@_skip_no_data
+@_skip_no_ref
+def test_compute_scores_batch_with_reference_table_gives_nonzero_percentile():
+    """GATE C: when reference_table_dir points at a real precomputed table,
+    a known-good val.jsonl tgt_code must round-trip to a non-zero score in
+    (0, 1] (percentile rank, not stub 0.5). This proves the whole pipeline
+    composes: precompute → reference JSON → percentile lookup → reward dict."""
+    from experiment11_code_optim.reward.pie_reward_fn import compute_scores_batch
+
+    pid = "p02587"
+    code = _tgt_code_for(pid)
+    results = compute_scores_batch(
+        [{"solution_str": f"```cpp\n{code}\n```", "ground_truth": _gt(pid, split="val")}],
+        test_case_dir=str(TESTS_ROOT),
+        reference_table_dir=str(REFERENCE_TABLE_ROOT),
+    )
+    r = results[0]
+    assert r["acc"] == 1.0, f"acc must be 1.0 on known-good code; got {r}"
+    assert 0.0 < r["score"] <= 1.0, (
+        f"score must be in (0, 1] when ref table is wired; got {r['score']}. "
+        f"score==0.5 exactly suggests the stub fallback fired (ref table "
+        f"missing or empty for {pid})."
+    )

@@ -143,8 +143,14 @@ def _run_and_compare(
     even when `passed` is False so callers can compute a fail-safe metric;
     `measure()` only uses it on the all-pass path.
 
-    Failures (nonzero exit, timeout, OS error) all return (False, _) — never
-    raise — so the strict-gate loop can keep going.
+    Failures (nonzero exit, timeout, OS error, undecodable output) all return
+    (False, _) — never raise — so the strict-gate loop can keep going.
+
+    `errors='replace'` is load-bearing: some training programs print
+    uninitialized memory (e.g., a stray 0xff byte) to stdout. Without it,
+    subprocess.run's text decoder raises UnicodeDecodeError and aborts the
+    whole batch. With `replace`, the bad bytes become U+FFFD and the gate
+    rejects the program for output mismatch — the correct outcome.
     """
     t0 = time.monotonic_ns()
     try:
@@ -153,6 +159,7 @@ def _run_and_compare(
             input=input_str,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout_s,
         )
     except (subprocess.TimeoutExpired, OSError):

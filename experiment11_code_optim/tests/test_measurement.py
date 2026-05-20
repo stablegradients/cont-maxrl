@@ -44,6 +44,16 @@ int main() {
 """.strip()
 
 
+NON_UTF8_OUTPUT_PROGRAM = r"""
+#include <iostream>
+int main() {
+    char c = (char)0xff;
+    std::cout << c << "\n";
+    return 0;
+}
+""".strip()
+
+
 def test_hello_world_all_pass():
     """A trivial program with a single matching test case should compile,
     pass the strict gate, and produce a real (>0) retired-instruction count."""
@@ -111,6 +121,22 @@ def test_segfault_fails_gate():
     assert result["n_tests_run"] == 1
     assert result["n_tests_passed"] == 0
     assert result["elapsed_ns"] is None
+
+
+def test_non_utf8_output_does_not_raise():
+    """A program emitting non-UTF-8 bytes to stdout must NOT crash measure().
+    Real PIE programs occasionally print uninitialized memory or a stray
+    byte cast to char; subprocess.run with text=True needs errors='replace'
+    to keep the strict-gate loop going. The gate then rejects the program
+    for output mismatch — the correct outcome. Surfaced during the §14
+    step 6 reference-precompute (a real program in train.jsonl tripped this)."""
+    from experiment11_code_optim.measurement.core import measure
+
+    result = measure(NON_UTF8_OUTPUT_PROGRAM, [("", "anything")])
+    assert result["compiled"] is True
+    assert result["all_pass"] is False
+    assert result["elapsed_ns"] is None
+    # Crucially: no UnicodeDecodeError was raised here.
 
 
 def test_empty_test_cases_degenerate():

@@ -232,69 +232,53 @@ def _subsample_cases(
     return random.Random(seed).sample(cases, k)
 
 
-def compute_scores_batch(
-    reward_inputs: list[dict],
-    timeout_per_test: int = 6,
-    memory_limit_mb: int = 512,
+def grade_dedup_batch(
+    dedup_tasks: dict[str, dict],
+    test_case_dir: str,
+    *,
+    timeout_per_test: float = 6.0,
     num_workers: int | None = None,
-    global_timeout: int = 60,  # TODO(step 7): wire as wall-clock cap on the batch
-                               # (concurrent.futures wait+cancel). Currently accepted
-                               # but not enforced — see docs/DEFERRED_FIXES.md "F5".
     measurement_max_tests: int | None = None,
-    **kwargs,
-) -> list[dict]:
-    """Batch reward with code-dedup. Returns one dict per input in the original
-    order, each `{"score": float, "acc": float}`.
+    pch_include_path: str | None = None,
+) -> dict[str, dict]:
+    """Run the two-level scheduler on already-deduped (code, problem_id) tasks.
 
-    Dedup key = `md5(code + "::" + problem_id)`. Per the speed_fix.md design
-    note: the key MUST include problem_id because two identical C++ programs
-    submitted for different problems must be graded against different test
-    cases. Two rollouts with identical code for the SAME problem_id collapse
-    to one compile/gate/measure cycle.
+    This is the shared core between `compute_scores_batch` (RL hot path) and
+    `precompute/build_reference_table.py` (offline reference-table build).
+    Both call sites benefit identically from the speed-fix gains.
+
+    Args:
+        dedup_tasks: {key: {"code": str, "problem_id": str, "split": str?}}.
+            `key` is the caller's stable identifier;
+            `md5(code + "::" + pid)` is the convention but any unique string
+            works.
+        test_case_dir: root of the unified test-case archive (see
+            build_unified_test_cases.py output).
+        timeout_per_test: per-test wall-clock cap.
+        num_workers: pool size; defaults to VERL_REWARD_WORKERS env (64).
+        measurement_max_tests: K-cap on test cases per problem. None disables
+            the cap; if None, the PIE_MEASUREMENT_MAX_TESTS env var is read.
+        pch_include_path: forwarded to `_compile`; falls back to
+            PIE_PCH_INCLUDE_PATH env.
+
+    Returns:
+        {key: result_dict} where result_dict matches `measure()`'s shape:
+            {"compiled": bool, "all_pass": bool, "n_tests_run": int,
+             "n_tests_passed": int, "elapsed_ns": int | None,
+             "measurement_backend": str, "error": str | None}.
+
+    Implementation:
+        2a. Pre-pass: collect cases per key; partition by has-data.
+        2b. Parallel compile (one tmpdir per unique code; scheduling unit = code).
+        2c. Build flat list of (key, test_idx) run jobs.
+        2d. Parallel test execution (scheduling unit = ONE test run; this is
+            what unlocks the 21x speedup vs. the old per-grade dispatch — see
+            PROBE_REPORT.md for the straggler-ceiling diagnosis).
+        2e. Aggregate per grade. Explicit tmpdir cleanup in finally.
     """
-    if not reward_inputs:
-        return []
-
-    test_case_dir, reference_table_dir = _resolve_paths(kwargs)
-    pch_include = os.environ.get("PIE_PCH_INCLUDE_PATH") or None
-
-    # ---- Phase 1: extract + dedup ----
-    # completion_keys[i] = dedup key for rollout i (or None if unparseable)
-    completion_keys: list[str | None] = []
-    dedup_tasks: dict[str, dict] = {}  # key → {"code", "problem_id", "split"}
-
-    for item in reward_inputs:
-        code = extract_code(item["solution_str"])
-        if not code:
-            completion_keys.append(None)
-            continue
-        try:
-            gt = json.loads(item["ground_truth"])
-        except (json.JSONDecodeError, TypeError, KeyError):
-            completion_keys.append(None)
-            continue
-        problem_id = gt.get("problem_id")
-        if not problem_id:
-            completion_keys.append(None)
-            continue
-        split = gt.get("split", "train")
-        key = hashlib.md5(f"{code}::{problem_id}".encode()).hexdigest()
-        completion_keys.append(key)
-        if key not in dedup_tasks:
-            dedup_tasks[key] = {"code": code, "problem_id": problem_id, "split": split}
-
-    # ---- Phase 2: two-level scheduler ----
-    # The previous single-level dispatch (one worker per unique grade)
-    # capped at ~1.8x parallel speedup on varied-problem batches because a
-    # single slow grade (compile + K sequential test runs) held a worker for
-    # ~20s while 63 others idled. Replace with two phases:
-    #   2a. Compile all unique codes in parallel (scheduling unit = one code).
-    #   2b. Fan out (key, test_idx) jobs across the pool (unit = ONE test run).
-    # This shrinks the tail from "slowest grade" to "slowest single test run"
-    # and saturates the pool throughout the batch. See PROBE_REPORT.md for the
-    # straggler-ceiling diagnosis.
+    if pch_include_path is None:
+        pch_include_path = os.environ.get("PIE_PCH_INCLUDE_PATH") or None
     n_workers = num_workers or int(os.environ.get("VERL_REWARD_WORKERS", "64"))
-
     if measurement_max_tests is None:
         env_cap = os.environ.get("PIE_MEASUREMENT_MAX_TESTS")
         if env_cap:
@@ -319,7 +303,7 @@ def compute_scores_batch(
     def _compile_one(item: tuple[str, dict]) -> tuple[str, str | None, str, str | None]:
         key, task = item
         td = tempfile.mkdtemp(dir=compile_dir, prefix="pie_meas_")
-        exe, err = _compile(task["code"], td, pch_include_path=pch_include)
+        exe, err = _compile(task["code"], td, pch_include_path=pch_include_path)
         return key, exe, td, err
 
     def _run_one(job: tuple[str, int, str, str, str]) -> tuple[str, int, bool, int]:
@@ -401,6 +385,72 @@ def compute_scores_batch(
         for _exe, td, _err in compiled.values():
             if td and os.path.isdir(td):
                 shutil.rmtree(td, ignore_errors=True)
+
+    return dedup_results
+
+
+def compute_scores_batch(
+    reward_inputs: list[dict],
+    timeout_per_test: int = 6,
+    memory_limit_mb: int = 512,
+    num_workers: int | None = None,
+    global_timeout: int = 60,  # TODO(step 7): wire as wall-clock cap on the batch
+                               # (concurrent.futures wait+cancel). Currently accepted
+                               # but not enforced — see docs/DEFERRED_FIXES.md "F5".
+    measurement_max_tests: int | None = None,
+    **kwargs,
+) -> list[dict]:
+    """Batch reward with code-dedup. Returns one dict per input in the original
+    order, each `{"score": float, "acc": float}`.
+
+    Dedup key = `md5(code + "::" + problem_id)`. Per the speed_fix.md design
+    note: the key MUST include problem_id because two identical C++ programs
+    submitted for different problems must be graded against different test
+    cases. Two rollouts with identical code for the SAME problem_id collapse
+    to one compile/gate/measure cycle.
+
+    The heavy lifting lives in `grade_dedup_batch`; this fn is the rollout-
+    indexed wrapper that handles parse + dedup at the front and percentile-
+    rank scoring at the back.
+    """
+    if not reward_inputs:
+        return []
+
+    test_case_dir, reference_table_dir = _resolve_paths(kwargs)
+
+    # ---- Phase 1: extract + dedup ----
+    # completion_keys[i] = dedup key for rollout i (or None if unparseable)
+    completion_keys: list[str | None] = []
+    dedup_tasks: dict[str, dict] = {}  # key → {"code", "problem_id", "split"}
+
+    for item in reward_inputs:
+        code = extract_code(item["solution_str"])
+        if not code:
+            completion_keys.append(None)
+            continue
+        try:
+            gt = json.loads(item["ground_truth"])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            completion_keys.append(None)
+            continue
+        problem_id = gt.get("problem_id")
+        if not problem_id:
+            completion_keys.append(None)
+            continue
+        split = gt.get("split", "train")
+        key = hashlib.md5(f"{code}::{problem_id}".encode()).hexdigest()
+        completion_keys.append(key)
+        if key not in dedup_tasks:
+            dedup_tasks[key] = {"code": code, "problem_id": problem_id, "split": split}
+
+    # ---- Phase 2: grade (two-level scheduler) ----
+    dedup_results = grade_dedup_batch(
+        dedup_tasks,
+        test_case_dir=test_case_dir,
+        timeout_per_test=float(timeout_per_test),
+        num_workers=num_workers,
+        measurement_max_tests=measurement_max_tests,
+    )
 
     # ---- Phase 3: scatter, compute score from elapsed_ns ----
     out: list[dict] = []
