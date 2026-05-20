@@ -331,6 +331,9 @@ def measure(
             "instr_count": int | None,    # cost; None unless all_pass and not skip_measurement.
                                           # Under "walltime" backend (current), this is total
                                           # wall-clock ns summed across the gate runs.
+                                          # TODO(step 6): rename to "elapsed_ns" alongside the
+                                          # reference-table JSON key rename. See
+                                          # docs/DEFERRED_FIXES.md "F1".
             "measurement_backend": str,    # "perf" | "papi" | "walltime" (current)
             "error": str | None,
         }

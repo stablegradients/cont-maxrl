@@ -19,6 +19,14 @@ when `PIE_MODE=1` (see PARITY_CONFIG.md §8.6 redirect mechanism). Therefore the
 public surface (`compute_score`, `compute_scores_batch`, `extract_code`) MUST
 mirror the existing DeepCoder reward_function so that `insitu_eval.py`'s
 hardcoded imports work transparently under the sys.modules shim.
+
+TODO(step 7): the sys.modules shim itself does NOT yet exist. Until it lands,
+insitu_eval will silently import the DeepCoder reward function and grade C++
+programs as Python — every rollout will score 0 with no error. The §14 step 7
+implementation MUST include both (a) the redirect, and (b) a smoke test that
+proves insitu_eval returns non-zero on a known-good C++ program. Tracked at
+docs/DEFERRED_FIXES.md "F6" — this is the silent-failure trap spec §8 warns
+about repeatedly.
 """
 from __future__ import annotations
 
@@ -149,13 +157,19 @@ def _percentile_from_reference_table(
     Until §14 step 6 produces real reference tables, return a stub 0.5 on
     all_pass so downstream callers see the right dict shape. The probe doesn't
     care about the numeric score; it cares about throughput.
+
+    TODO(step 6): rename JSON key "instr_counts" → "elapsed_ns_values" when
+    the reference-table precompute writes the first real schema. The value
+    semantics are wall-clock ns under the walltime backend (see
+    docs/DEFERRED_FIXES.md "F1"). Rename must be coordinated with the
+    precompute writer so the reference-table schema and reader move in lockstep.
     """
     if reference_table_dir is None:
         return 0.5
     ref_path = os.path.join(reference_table_dir, split, f"{problem_id}.json")
     try:
         with open(ref_path) as f:
-            refs = json.load(f)["instr_counts"]
+            refs = json.load(f)["instr_counts"]  # TODO(step 6): "elapsed_ns_values"
         if not refs:
             return 0.5
         lo = bisect.bisect_left(refs, instr_count)
@@ -229,7 +243,9 @@ def compute_scores_batch(
     timeout_per_test: int = 6,
     memory_limit_mb: int = 512,
     num_workers: int | None = None,
-    global_timeout: int = 60,
+    global_timeout: int = 60,  # TODO(step 7): wire as wall-clock cap on the batch
+                               # (concurrent.futures wait+cancel). Currently accepted
+                               # but not enforced — see docs/DEFERRED_FIXES.md "F5".
     measurement_max_tests: int | None = None,
     **kwargs,
 ) -> list[dict]:
