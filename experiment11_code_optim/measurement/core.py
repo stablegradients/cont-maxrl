@@ -2,14 +2,26 @@
 C++ measurement core (spec §4.2).
 
 Compiles C++ programs with g++ -O3 -std=c++17 (absolute path per spec §1),
-gates them against expected outputs (strict all-pass), and measures retired
-instruction count via `perf stat -e instructions` (PAPI fallback) when the
-program passes. Per spec: wall-clock is forbidden; median-of-3 per test case;
-NUMA-0 pinning + ASLR disable via setarch -R for the counted runs.
+gates them against expected outputs (strict all-pass), and on all-pass
+records a "cost" — currently wall-clock nanoseconds summed across the gate
+runs (MEASUREMENT_BACKEND="walltime"). Spec §1 originally forbade wall-clock
+in favor of `perf stat -e instructions`, but the §13 probe demonstrated that
+perf-event HW counters serialise at the kernel level under concurrency,
+capping reward throughput at ~3x regardless of worker count. The percentile-
+rank reward is robust to wall-clock noise (both reference table and
+candidate are measured identically), so the cost-of-zero-throughput
+trade-off favoured walltime. See PROBE_REPORT.md for the data.
 
-Public entrypoint:
+The dict field is still named `instr_count` for backward compatibility with
+callers and the reference-table JSON schema; it now carries ns under the
+walltime backend. Rename to `elapsed_ns` is tracked for the §14 step 6
+reference-precompute commit.
+
+Public entrypoints:
 
     measure(code_str, test_cases) -> dict
+    measure_from_disk(code_str, test_case_dir, problem_id) -> dict
+    setup_pch(scratch_dir) -> str       # one-shot, used at SLURM script start
 
 This module is grown by test-driven development. The implementation here is
 the minimum to satisfy the currently-passing test suite; extensions land only
@@ -316,8 +328,10 @@ def measure(
             "all_pass": bool,
             "n_tests_run": int,
             "n_tests_passed": int,
-            "instr_count": int | None,    # None unless all_pass and not skip_measurement
-            "measurement_backend": str,    # "perf" or "papi"
+            "instr_count": int | None,    # cost; None unless all_pass and not skip_measurement.
+                                          # Under "walltime" backend (current), this is total
+                                          # wall-clock ns summed across the gate runs.
+            "measurement_backend": str,    # "perf" | "papi" | "walltime" (current)
             "error": str | None,
         }
     """
@@ -344,7 +358,6 @@ def measure(
             return result
         result["compiled"] = True
 
-        n_pass = 0
         # Walltime gate: time each subprocess.run, accumulate on all-pass.
         # No separate perf phase. Spec §1's "wall-clock forbidden as reward"
         # constraint was relaxed by the user when empirical perf-event kernel

@@ -7,10 +7,12 @@ Public interface:
   - `compute_scores_batch(reward_inputs, ...)`               batch with dedup
   - `extract_code(solution_str)`                             shared parser
 
-`compute_scores_batch` is the hot path: dedup-by-(code, problem_id), then grade
-unique tasks via `measurement.core.measure_from_disk` (which uses gate_runner.sh
-to run all test cases for a binary in ONE subprocess). Results are scattered
-back to the original rollout indices.
+`compute_scores_batch` is the hot path: dedup-by-(code, problem_id), then a
+two-level scheduler (compile-in-parallel + per-test-case run-in-parallel)
+calls `measurement.core._compile` and `_run_and_compare` directly. Results
+are scattered back to the original rollout indices. `measurement.core.
+measure_from_disk` and `gate_runner.sh` are used only by the offline
+reference-table precompute (latency-insensitive), not the RL hot path.
 
 This module is the redirect target for `experiment4_llm.src.reward_function`
 when `PIE_MODE=1` (see PARITY_CONFIG.md §8.6 redirect mechanism). Therefore the
