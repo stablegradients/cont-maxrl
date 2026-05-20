@@ -188,6 +188,140 @@ def test_compute_score_single_rollout_matches_batch():
 # precompute/build_reference_table.py.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# F6: PIE_MODE sys.modules shim — proves train.py's redirect works.
+# Runs in a subprocess so the Python interpreter starts cold and sees only
+# our shim (pytest's already-imported sys.modules don't pollute).
+# ---------------------------------------------------------------------------
+
+@_skip_no_data
+def test_pie_mode_shim_grades_cpp_via_insitu_eval_import_path():
+    """F6: train.py installs `sys.modules["experiment4_llm.src.reward_function"]
+    = pie_reward_fn` when PIE_MODE=1. insitu_eval.py's hardcoded
+        from experiment4_llm.src.reward_function import compute_scores_batch
+    must therefore resolve to PIE's reward fn, so its C++ programs grade
+    correctly. Without this, insitu_eval grades C++ as Python → every
+    rollout scores 0 silently. This test runs as a subprocess so it
+    exercises the exact import order train.py uses at launch."""
+    import subprocess
+    import sys as _sys
+    import textwrap
+
+    script = textwrap.dedent(
+        '''
+        import os, sys, json
+        sys.path.insert(0, "/projects/bgmo/sramasubramanian/cont-maxrl")
+
+        assert os.environ.get("PIE_MODE") == "1", "PIE_MODE not set in env"
+
+        # Mimic train.py's shim install (the actual under-test contract).
+        from experiment11_code_optim.reward import pie_reward_fn
+        sys.modules["experiment4_llm.src.reward_function"] = pie_reward_fn
+
+        # Now mimic insitu_eval's hardcoded import.
+        from experiment4_llm.src.reward_function import (
+            compute_score, compute_scores_batch, extract_code,
+        )
+
+        # Verify provenance — must be PIE's, not DeepCoder's.
+        for fn in (compute_score, compute_scores_batch, extract_code):
+            assert fn.__module__.endswith("pie_reward_fn"), (
+                f"shim NOT installed: {fn.__name__} is {fn.__module__}"
+            )
+
+        # End-to-end: grade a known-good C++ program through the shimmed import.
+        pid = "p02587"
+        code = None
+        with open("/work/nvme/bgmo/sramasubramanian/pie_data/raw/val.jsonl") as f:
+            for line in f:
+                rec = json.loads(line)
+                if rec["problem_id"] == pid:
+                    code = rec["tgt_code"]
+                    break
+        assert code, "could not load p02587 tgt_code"
+
+        gt = json.dumps({"problem_id": pid, "split": "val"})
+        result = compute_score(
+            f"```cpp\\n{code}\\n```", gt,
+            test_case_dir="/work/nvme/bgmo/sramasubramanian/pie_data/tests",
+        )
+        assert result["acc"] == 1.0, (
+            f"shim wired but reward fn fails on known-good C++: {result}"
+        )
+        print("OK", result)
+        '''
+    )
+    env = {**os.environ, "PIE_MODE": "1"}
+    proc = subprocess.run(
+        [_sys.executable, "-c", script],
+        env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode == 0, (
+        f"F6 shim subprocess failed (rc={proc.returncode}):\n"
+        f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+    )
+    assert proc.stdout.startswith("OK"), f"unexpected stdout: {proc.stdout!r}"
+
+
+# ---------------------------------------------------------------------------
+# F5: global_timeout enforcement
+# ---------------------------------------------------------------------------
+
+_SLEEP_PROGRAM = (
+    "```cpp\n"
+    "#include <chrono>\n"
+    "#include <iostream>\n"
+    "#include <thread>\n"
+    "int main() {\n"
+    "    std::this_thread::sleep_for(std::chrono::seconds(20));\n"
+    "    std::cout << \"hi\\n\";\n"
+    "    return 0;\n"
+    "}\n"
+    "```"
+)
+
+
+@_skip_no_data
+def test_global_timeout_caps_batch_and_passes_other_grades():
+    """F5: a pathological program (sleeps 20s) in the batch must not block
+    the rest. With global_timeout=3 and per_test_timeout=30 (so per-test
+    timeout does NOT save us), the batch must return within ~4s; the slow
+    grade must return score=0 with error="batch timeout"; the good grade
+    (known-Accepted p02587 code) must return its normal non-zero result."""
+    import time
+    from experiment11_code_optim.reward.pie_reward_fn import (
+        compute_scores_batch, preload_test_cases,
+    )
+
+    # Warm the test-case cache (~22s cold). Without this the test mis-attributes
+    # cold-cache preload time to the timeout path.
+    preload_test_cases(str(TESTS_ROOT))
+
+    pid = "p02587"
+    good_code = _tgt_code_for(pid)
+    reward_inputs = [
+        {"solution_str": f"```cpp\n{good_code}\n```", "ground_truth": _gt(pid)},
+        {"solution_str": _SLEEP_PROGRAM, "ground_truth": _gt(pid)},
+    ]
+
+    t0 = time.monotonic()
+    results = compute_scores_batch(
+        reward_inputs,
+        test_case_dir=str(TESTS_ROOT),
+        timeout_per_test=30,  # high, so per-test timeout cannot kick in first
+        global_timeout=3.0,
+        measurement_max_tests=5,  # bound case count regardless of env
+    )
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 8.0, (
+        f"global_timeout=3s not honoured; batch took {elapsed:.1f}s. "
+        f"The sleep(20) grade must NOT hold the pool past the cap."
+    )
+    assert results[0]["acc"] == 1.0, f"good grade must still pass; got {results[0]}"
+    assert results[1]["acc"] == 0.0, f"sleep grade must fail; got {results[1]}"
+
+
 @_skip_no_data
 @_skip_no_ref
 def test_compute_scores_batch_with_reference_table_gives_nonzero_percentile():

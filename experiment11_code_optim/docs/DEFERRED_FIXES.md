@@ -42,7 +42,7 @@ percentile comparison use the same units, but the name is misleading.
 ---
 
 ## F5 — `global_timeout` is accepted but never enforced
-**Status:** OPEN
+**Status:** CLOSED (commit landing this with the SFT/step-7 work)
 **Target step:** §14 step 7 (verl integration / isolation guard)
 **Severity:** Medium — current code accepts `global_timeout=60` and silently
 ignores it. A pathological program at 9.9s/test × K=5 = 49.5s would block
@@ -65,7 +65,7 @@ grades' results as `all_pass=False, error="batch timeout"`.
 ---
 
 ## F6 — `insitu_eval` redirect (PIE_MODE shim) NOT IMPLEMENTED
-**Status:** OPEN
+**Status:** CLOSED (commit landing this with the SFT/step-7 work)
 **Target step:** §14 step 7
 **Severity:** High — this is the silent-failure trap spec §8 warns about.
 

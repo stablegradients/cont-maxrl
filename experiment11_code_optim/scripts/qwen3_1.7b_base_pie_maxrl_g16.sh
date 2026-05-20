@@ -97,6 +97,12 @@ export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
 export VERL_REWARD_WORKERS=64
 
+# F6: must precede the python launch so train.py's sys.modules shim fires
+# and insitu_eval's hardcoded experiment4_llm.src.reward_function import
+# routes to PIE's reward fn. Without it, insitu_eval silently scores
+# every rollout as 0 (spec §8 silent-failure trap; DEFERRED_FIXES.md "F6").
+export PIE_MODE=1
+
 # ============================================================
 # §13 GO probe config — required for the reward fn to hit GATE B targets.
 # Without these the K=5 cap is off (long-tail problems blow the step budget),

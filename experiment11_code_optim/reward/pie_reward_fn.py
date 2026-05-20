@@ -38,7 +38,7 @@ import random
 import re
 import shutil
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait as cf_wait
 from typing import Any
 
 from experiment11_code_optim.measurement.core import (
@@ -240,6 +240,7 @@ def grade_dedup_batch(
     num_workers: int | None = None,
     measurement_max_tests: int | None = None,
     pch_include_path: str | None = None,
+    global_timeout: float | None = None,
 ) -> dict[str, dict]:
     """Run the two-level scheduler on already-deduped (code, problem_id) tasks.
 
@@ -260,6 +261,13 @@ def grade_dedup_batch(
             the cap; if None, the PIE_MEASUREMENT_MAX_TESTS env var is read.
         pch_include_path: forwarded to `_compile`; falls back to
             PIE_PCH_INCLUDE_PATH env.
+        global_timeout: wall-clock cap (seconds) on the phase-3 test-run pool.
+            None disables the cap (precompute uses None). Under the cap,
+            test-run futures that don't complete in time are cancelled
+            (if not yet started) or abandoned (if running); their grades
+            are marked all_pass=False with error="batch timeout". One bad
+            program in a batch therefore cannot hold the rest of the batch
+            past the cap — closes deferred fix F5.
 
     Returns:
         {key: result_dict} where result_dict matches `measure()`'s shape:
@@ -274,6 +282,7 @@ def grade_dedup_batch(
         2d. Parallel test execution (scheduling unit = ONE test run; this is
             what unlocks the 21x speedup vs. the old per-grade dispatch — see
             PROBE_REPORT.md for the straggler-ceiling diagnosis).
+            global_timeout, if set, caps phase 2d wall-clock.
         2e. Aggregate per grade. Explicit tmpdir cleanup in finally.
     """
     if pch_include_path is None:
@@ -334,11 +343,30 @@ def grade_dedup_batch(
             for idx, (inp, exp) in enumerate(cases_per_key[key]):
                 run_jobs.append((key, idx, exe, inp, exp))
 
-        # ---- 2d. Parallel test execution ----
+        # ---- 2d. Parallel test execution (with optional global_timeout) ----
         run_results: list[tuple[str, int, bool, int]] = []
+        timed_out_keys: set[str] = set()
         if run_jobs:
-            with ThreadPoolExecutor(max_workers=min(n_workers, len(run_jobs))) as pool:
-                run_results = list(pool.map(_run_one, run_jobs))
+            pool = ThreadPoolExecutor(max_workers=min(n_workers, len(run_jobs)))
+            try:
+                fut_to_job = {pool.submit(_run_one, j): j for j in run_jobs}
+                if global_timeout is None:
+                    for f in fut_to_job:
+                        run_results.append(f.result())
+                else:
+                    done, not_done = cf_wait(
+                        fut_to_job.keys(), timeout=float(global_timeout)
+                    )
+                    for f in done:
+                        run_results.append(f.result())
+                    for f in not_done:
+                        f.cancel()
+                        # job tuple = (key, idx, exe_path, inp, exp); index 0 = key
+                        timed_out_keys.add(fut_to_job[f][0])
+            finally:
+                # cancel_futures requires Python 3.9+; wait=False lets running
+                # subprocess.runs finish in the background while we return.
+                pool.shutdown(wait=False, cancel_futures=True)
 
         # ---- 2e. Aggregate per grade ----
         per_grade_pass: dict[str, dict[int, bool]] = {}
@@ -371,6 +399,10 @@ def grade_dedup_batch(
             elapsed = per_grade_elapsed.get(key, {})
             n_pass = sum(1 for p in passes.values() if p)
             all_pass = (len(cases) > 0) and (n_pass == len(cases))
+            err: str | None = None
+            if key in timed_out_keys and not all_pass:
+                n_done = len(passes)
+                err = f"batch timeout ({n_done}/{len(cases)} tests completed)"
             dedup_results[key] = {
                 "compiled": True,
                 "all_pass": all_pass,
@@ -378,7 +410,7 @@ def grade_dedup_batch(
                 "n_tests_passed": n_pass,
                 "elapsed_ns": sum(elapsed.values()) if all_pass else None,
                 "measurement_backend": MEASUREMENT_BACKEND,
-                "error": None,
+                "error": err,
             }
     finally:
         # Explicit tmpdir cleanup (mkdtemp doesn't auto-clean).
@@ -394,9 +426,10 @@ def compute_scores_batch(
     timeout_per_test: int = 6,
     memory_limit_mb: int = 512,
     num_workers: int | None = None,
-    global_timeout: int = 60,  # TODO(step 7): wire as wall-clock cap on the batch
-                               # (concurrent.futures wait+cancel). Currently accepted
-                               # but not enforced — see docs/DEFERRED_FIXES.md "F5".
+    global_timeout: float = 60.0,  # wall-clock cap on the phase-3 test-run pool
+                                   # (see grade_dedup_batch). One pathological program
+                                   # cannot hold the batch past this; un-completed
+                                   # grades return score 0 with error="batch timeout".
     measurement_max_tests: int | None = None,
     **kwargs,
 ) -> list[dict]:
@@ -450,6 +483,7 @@ def compute_scores_batch(
         timeout_per_test=float(timeout_per_test),
         num_workers=num_workers,
         measurement_max_tests=measurement_max_tests,
+        global_timeout=float(global_timeout) if global_timeout else None,
     )
 
     # ---- Phase 3: scatter, compute score from elapsed_ns ----
