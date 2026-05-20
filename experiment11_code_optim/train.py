@@ -32,6 +32,14 @@ if os.environ.get("PIE_MODE") == "1":
     from experiment11_code_optim.reward import pie_reward_fn
     sys.modules["experiment4_llm.src.reward_function"] = pie_reward_fn
 
+# §8.3 actor carve-out: persist every saved checkpoint as a hard-linked
+# snapshot under PIE_ACTOR_CARVEOUT_DIR so the §8.5 post-hoc best@K eval
+# has the full trajectory even with verl's max_actor_ckpt_to_keep=1.
+# Hard-links are zero-cost and survive verl's rolling delete. Hook is a
+# no-op if PIE_ACTOR_CARVEOUT_DIR is unset.
+from experiment11_code_optim.guards.actor_carveout import install_actor_carveout_hook  # noqa: E402
+install_actor_carveout_hook()
+
 from experiment4_llm.src.train import main  # noqa: E402 — must follow shim install
 
 if __name__ == "__main__":

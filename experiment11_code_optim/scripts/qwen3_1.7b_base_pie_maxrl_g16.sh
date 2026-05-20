@@ -71,6 +71,9 @@ fi
 OUTPUT_DIR="${STORAGE_ROOT}/results/qwen3_1.7b_pie_maxrl_unnorm_g16_s${SEED}"
 ACTOR_CKPT_DIR="${OUTPUT_DIR}/actor_ckpts"
 mkdir -p "${OUTPUT_DIR}" "${ACTOR_CKPT_DIR}"
+# §8.3 actor carve-out target: train.py installs a hook that hard-links
+# every verl save into this dir under step_<N>/. Zero space cost.
+export PIE_ACTOR_CARVEOUT_DIR="${ACTOR_CKPT_DIR}"
 
 # Conda CUDA (not system CUDA)
 export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
