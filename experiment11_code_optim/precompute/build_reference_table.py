@@ -224,6 +224,19 @@ def main() -> int:
     with open(output_root / "MANIFEST.json", "w") as f:
         json.dump(manifest, f, indent=2)
 
+    # Serialize the whole table to one pickle so the reward fn can load
+    # all 1592 reference distributions via ONE open()+read() instead of
+    # opening a JSON file per (split, problem_id) at every reward call.
+    # Same Lustre-storm avoidance as tests.pkl.
+    import pickle as _pickle
+    pkl_path = output_root.with_suffix(".pkl")
+    refs: dict[tuple[str, str], list[int]] = {}
+    for (split, pid), bucket in per_problem.items():
+        refs[(split, pid)] = sorted(bucket["elapsed_ns_values"])
+    with open(pkl_path, "wb") as f:
+        _pickle.dump(refs, f)
+    print(f"  pickle:                   {pkl_path} ({pkl_path.stat().st_size/1e6:.2f} MB)")
+
     # ---- Summary ----
     print()
     print(f"=== SUMMARY ===")

@@ -23,7 +23,7 @@
 # ============================================================
 
 SEED=${1:-0}
-CHAIN_LEFT=${2:-8}
+CHAIN_LEFT=${2:-4}
 
 module load python/miniforge3_pytorch/2.10.0
 eval "$(conda shell.bash hook)"
@@ -46,15 +46,17 @@ export PIE_REFERENCE_TABLE_DIR
 export PIE_TEST_CASE_DIR
 
 # Epoch arithmetic (spec §3.1a; computed from N_pie_train)
-: "${PIE_STEPS_PER_EPOCH:?PIE_STEPS_PER_EPOCH must be set (=ceil(N_pie_train/256), spec §3.1a)}"
-: "${PIE_TOTAL_STEPS:?PIE_TOTAL_STEPS must be set (=10*PIE_STEPS_PER_EPOCH, spec §3.1a)}"
-: "${PIE_EVAL_STEPS:?PIE_EVAL_STEPS must be set (=[k*PIE_STEPS_PER_EPOCH for k=1..10], spec §3.1a)}"
+# Defaults from the §9-GO 1ep full-train SFT (N_train=73,893; 3 epochs).
+PIE_STEPS_PER_EPOCH="${PIE_STEPS_PER_EPOCH:-289}"
+PIE_TOTAL_STEPS="${PIE_TOTAL_STEPS:-867}"
+PIE_EVAL_STEPS="${PIE_EVAL_STEPS:-[289,578,867]}"
 
 # Model init (spec §6)
-MODEL_PATH="${PIE_SFT_CKPT:-Qwen/Qwen3-1.7B-Base}"
-if [[ "${MODEL_PATH}" == "Qwen/Qwen3-1.7B-Base" ]]; then
-    echo "WARN: PIE_SFT_CKPT not set; using base model directly (spec §6 sft.mode=none)."
-    echo "      §9 GO/NO-GO gate is expected to fail without SFT cold-start."
+PIE_SFT_CKPT="${PIE_SFT_CKPT:-/work/nvme/bgmo/sramasubramanian/cont-maxrl/sft_ckpts/qwen3_1.7b_pie_sft_1ep_fulltrain_s3/final}"
+MODEL_PATH="${PIE_SFT_CKPT}"
+if [[ ! -d "${MODEL_PATH}" ]]; then
+    echo "FATAL: PIE_SFT_CKPT directory missing: ${MODEL_PATH}"
+    exit 2
 fi
 
 OUTPUT_DIR="${STORAGE_ROOT}/results/qwen3_1.7b_pie_grpo_g16_s${SEED}"
@@ -141,7 +143,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   data.train_files="${PIE_TRAIN_PARQUET}" \
   data.val_files="${PIE_TRAIN_PARQUET}" \
   data.train_batch_size=256 \
-  data.max_prompt_length=1024 \
+  data.max_prompt_length=2560 \
   data.max_response_length=4096 \
   data.shuffle=True \
   data.filter_overlong_prompts=True \

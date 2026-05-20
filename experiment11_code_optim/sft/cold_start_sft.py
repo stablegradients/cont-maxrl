@@ -107,7 +107,11 @@ def main() -> None:
     ap.add_argument("--per_device_train_batch_size", type=int, default=4)
     ap.add_argument("--gradient_accumulation_steps", type=int, default=16)
     ap.add_argument("--learning_rate", type=float, default=1e-5)
-    ap.add_argument("--max_length", type=int, default=4096)
+    ap.add_argument("--max_length", type=int, default=8192,
+                    help="Max prompt+completion token length. 8192 covers SFT p99 "
+                         "(7,597 tokens) so >97% of (src_code, tgt_code) pairs are "
+                         "NOT truncated, ensuring the model always sees the closing "
+                         "``` fence which is critical for learning stop behavior.")
     ap.add_argument("--warmup_ratio", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--save_steps", type=int, default=0,

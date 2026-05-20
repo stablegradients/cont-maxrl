@@ -83,7 +83,7 @@ torchrun --nproc_per_node=${N_GPUS} --master_port=29501 \
     --per_device_train_batch_size 4 \
     --gradient_accumulation_steps 16 \
     --learning_rate 1e-5 \
-    --max_length 4096 \
+    --max_length 8192 \
     --seed ${SEED}
 
 echo ""

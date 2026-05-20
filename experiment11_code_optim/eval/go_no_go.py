@@ -44,6 +44,16 @@ def main() -> int:
     ap.add_argument("--top_p", type=float, default=1.0)
     ap.add_argument("--max_tokens", type=int, default=4096)
     ap.add_argument("--tensor_parallel_size", type=int, default=4)
+    ap.add_argument("--max_model_len", type=int, default=8192,
+                    help="vLLM context cap. Prompts that exceed this get DROPPED "
+                         "(see scheduler.py:1106). val_200 max prompt is 3330 tok, "
+                         "so 8192 = 3330 + 4096 + headroom fits everything.")
+    ap.add_argument("--max_num_seqs", type=int, default=128,
+                    help="vLLM max concurrent sequences. 128 = ~user-requested batch size.")
+    ap.add_argument("--stop_strings", type=str, nargs="*",
+                    default=None,
+                    help="Optional sampling stop strings (recommended for base models that "
+                         "don't terminate naturally, e.g., ['\\n```\\n', '\\n\\n###']).")
     ap.add_argument("--pass_threshold", type=int, default=8,
                     help="A problem 'passes' if ≥ this many of n_completions pass.")
     ap.add_argument("--go_fraction", type=float, default=0.20,
@@ -91,15 +101,19 @@ def main() -> int:
         trust_remote_code=True,
         tensor_parallel_size=args.tensor_parallel_size,
         gpu_memory_utilization=0.9,
-        max_model_len=args.max_tokens + 1024,
+        max_model_len=args.max_model_len,
+        max_num_seqs=args.max_num_seqs,
         enforce_eager=True,
     )
-    sp = SamplingParams(
+    sp_kwargs = dict(
         n=args.n_completions,
         temperature=args.temperature,
         top_p=args.top_p,
         max_tokens=args.max_tokens,
     )
+    if args.stop_strings:
+        sp_kwargs["stop"] = args.stop_strings
+    sp = SamplingParams(**sp_kwargs)
     t0 = time.monotonic()
     print(f"[go_no_go] Generating {args.n_completions} x {n_problems} completions "
           f"@ T={args.temperature}...")

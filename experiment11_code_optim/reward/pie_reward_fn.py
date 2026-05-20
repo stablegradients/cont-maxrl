@@ -34,6 +34,7 @@ import bisect
 import hashlib
 import json
 import os
+import pickle
 import random
 import re
 import shutil
@@ -60,14 +61,38 @@ _TEST_CASE_CACHE_DIR: str | None = None
 
 
 def preload_test_cases(test_case_dir: str) -> int:
-    """Read every input.<i>.txt + output.<i>.txt pair under test_case_dir/<pid>/
-    into memory. Returns the total number of (input, output) pairs cached.
-    Idempotent: re-calls for the same dir are no-ops; calls for a different
-    dir invalidate and re-fill the cache.
+    """Populate the in-memory cache of test cases keyed by problem_id.
+    Idempotent: re-calls for the same dir are no-ops.
+
+    Fast path (preferred): a sibling `<test_case_dir>.pkl` file holds a
+    pre-serialized {problem_id: [(input, output)]} dict. Loading it is
+    one open(), one read(), <1s — works identically on Lustre/NVMe/tmpfs/NFS.
+
+    Slow path (fallback): walk the directory tree and read 21k+ files. On
+    Lustre this is metadata-server-bound and serialises under concurrent
+    invocations (the trap we hit in §9 GO/NO-GO eval). Always prefer the
+    pickle; the slow path stays for fresh environments where the pickle
+    hasn't been built yet.
+
+    Override the pickle path via PIE_TEST_CASE_PICKLE env var if you want
+    a non-default location.
     """
     global _TEST_CASE_CACHE_DIR
     if _TEST_CASE_CACHE_DIR == test_case_dir and _TEST_CASE_CACHE:
         return sum(len(v) for v in _TEST_CASE_CACHE.values())
+
+    pickle_path = (
+        os.environ.get("PIE_TEST_CASE_PICKLE")
+        or (test_case_dir.rstrip("/") + ".pkl")
+    )
+    if os.path.isfile(pickle_path):
+        with open(pickle_path, "rb") as f:
+            _TEST_CASE_CACHE.clear()
+            _TEST_CASE_CACHE.update(pickle.load(f))
+        _TEST_CASE_CACHE_DIR = test_case_dir
+        return sum(len(v) for v in _TEST_CASE_CACHE.values())
+
+    # Fallback: walk the tree (slow on cold Lustre under concurrency).
     _TEST_CASE_CACHE.clear()
     for pid in os.listdir(test_case_dir):
         pdir = os.path.join(test_case_dir, pid)
@@ -143,6 +168,56 @@ def extract_code(solution_str: str) -> str:
 # reference-table precompute is wired in.
 # ---------------------------------------------------------------------------
 
+# Reference-table RAM cache: {(split, problem_id) -> sorted list of elapsed_ns}.
+# Loaded once per process via preload_reference_table(); identical Lustre-
+# avoidance design as _TEST_CASE_CACHE above.
+_REF_TABLE_CACHE: dict[tuple[str, str], list[int]] = {}
+_REF_TABLE_CACHE_DIR: str | None = None
+
+
+def preload_reference_table(reference_table_dir: str) -> int:
+    """Populate the in-memory cache {(split, pid): elapsed_ns_values} for
+    percentile-rank scoring. Idempotent.
+
+    Fast path: load `<reference_table_dir>.pkl` if it exists (one read).
+    Slow path: walk the dir tree (~1592 JSON files). Override the pickle
+    path via PIE_REFERENCE_TABLE_PICKLE env var.
+    """
+    global _REF_TABLE_CACHE_DIR
+    if _REF_TABLE_CACHE_DIR == reference_table_dir and _REF_TABLE_CACHE:
+        return len(_REF_TABLE_CACHE)
+
+    pickle_path = (
+        os.environ.get("PIE_REFERENCE_TABLE_PICKLE")
+        or (reference_table_dir.rstrip("/") + ".pkl")
+    )
+    if os.path.isfile(pickle_path):
+        with open(pickle_path, "rb") as f:
+            _REF_TABLE_CACHE.clear()
+            _REF_TABLE_CACHE.update(pickle.load(f))
+        _REF_TABLE_CACHE_DIR = reference_table_dir
+        return len(_REF_TABLE_CACHE)
+
+    # Fallback: walk the tree.
+    _REF_TABLE_CACHE.clear()
+    for split in ("train", "val", "test"):
+        sdir = os.path.join(reference_table_dir, split)
+        if not os.path.isdir(sdir):
+            continue
+        for fn in os.listdir(sdir):
+            if not fn.endswith(".json"):
+                continue
+            pid = fn[:-5]
+            try:
+                with open(os.path.join(sdir, fn)) as f:
+                    d = json.load(f)
+                _REF_TABLE_CACHE[(split, pid)] = d.get("elapsed_ns_values", [])
+            except (OSError, json.JSONDecodeError):
+                pass
+    _REF_TABLE_CACHE_DIR = reference_table_dir
+    return len(_REF_TABLE_CACHE)
+
+
 def _percentile_from_reference_table(
     elapsed_ns: int,
     problem_id: str,
@@ -154,23 +229,21 @@ def _percentile_from_reference_table(
         lo = bisect_left(refs, instr); hi = bisect_right(refs, instr)
         score = 1.0 - (lo + hi) / 2.0 / n_refs
 
-    Until §14 step 6 produces real reference tables, return a stub 0.5 on
-    all_pass so downstream callers see the right dict shape. The probe doesn't
-    care about the numeric score; it cares about throughput.
+    Loads the reference table from the in-process cache (populated by
+    `preload_reference_table` on first call, idempotent). Returns 0.5 stub
+    when reference_table_dir is None or the (split, pid) entry has no
+    references (e.g., problems excluded from the precompute).
     """
     if reference_table_dir is None:
         return 0.5
-    ref_path = os.path.join(reference_table_dir, split, f"{problem_id}.json")
-    try:
-        with open(ref_path) as f:
-            refs = json.load(f)["elapsed_ns_values"]
-        if not refs:
-            return 0.5
-        lo = bisect.bisect_left(refs, elapsed_ns)
-        hi = bisect.bisect_right(refs, elapsed_ns)
-        return max(0.0, min(1.0, 1.0 - (lo + hi) / 2.0 / len(refs)))
-    except (OSError, KeyError, ValueError):
+    if _REF_TABLE_CACHE_DIR != reference_table_dir or not _REF_TABLE_CACHE:
+        preload_reference_table(reference_table_dir)
+    refs = _REF_TABLE_CACHE.get((split, problem_id))
+    if not refs:
         return 0.5
+    lo = bisect.bisect_left(refs, elapsed_ns)
+    hi = bisect.bisect_right(refs, elapsed_ns)
+    return max(0.0, min(1.0, 1.0 - (lo + hi) / 2.0 / len(refs)))
 
 
 # ---------------------------------------------------------------------------

@@ -50,23 +50,43 @@ def check_d1_slurm_account() -> None:
     )
 
 
-def check_d2_epoch_arithmetic(total_steps: int, steps_per_epoch: int, n_train: int) -> None:
+def check_d2_epoch_arithmetic(
+    total_steps: int,
+    steps_per_epoch: int,
+    n_train: int,
+    batch_size: int = 256,
+    expected_epochs: int | None = None,
+) -> None:
     """D2: PIE epoch arithmetic must be computed from N_pie_train,
     NOT inherited from DeepCoder's 83/1000/996.
+
+    Originally the spec hardcoded 10 epochs; the §9-GO 1ep-full-train SFT
+    cleared the gate so we now run 3 epochs of RL (867 steps). The check
+    enforces (a) steps_per_epoch matches ceil(n_train/batch_size), (b)
+    total_steps is a positive integer multiple of steps_per_epoch, and (c)
+    total_steps doesn't match DeepCoder's 996/1000 default. Optionally
+    asserts an exact epoch count via `expected_epochs`.
     """
     import math
-    expected_spe = math.ceil(n_train / 256)
+    expected_spe = math.ceil(n_train / batch_size)
     _assert(
         steps_per_epoch == expected_spe,
         "D2",
-        f"steps_per_epoch={steps_per_epoch} != ceil({n_train}/256)={expected_spe}",
+        f"steps_per_epoch={steps_per_epoch} != ceil({n_train}/{batch_size})={expected_spe}",
     )
+    _assert(total_steps > 0, "D2", "total_steps must be > 0")
     _assert(
-        total_steps == 10 * steps_per_epoch,
+        total_steps % steps_per_epoch == 0,
         "D2",
-        f"total_steps={total_steps} != 10 * steps_per_epoch={steps_per_epoch} = "
-        f"{10*steps_per_epoch}",
+        f"total_steps={total_steps} is not a multiple of steps_per_epoch={steps_per_epoch}",
     )
+    if expected_epochs is not None:
+        actual_epochs = total_steps // steps_per_epoch
+        _assert(
+            actual_epochs == expected_epochs,
+            "D2",
+            f"epochs={actual_epochs} != expected={expected_epochs}",
+        )
     # DeepCoder values that MUST NOT leak in
     _assert(
         total_steps not in (996, 1000),
@@ -148,18 +168,25 @@ def check_d10_go_probe_config() -> None:
     )
 
 
-def assert_all_pie_invariants(
+def run_all_guards(
     *,
+    n_train: int | None = None,
+    batch_size: int = 256,
+    steps_per_epoch: int | None = None,
+    total_steps: int | None = None,
+    expected_epochs: int | None = None,
     train_parquet: str | None = None,
     val_parquet: str | None = None,
     reference_table_dir: str | None = None,
     test_case_dir: str | None = None,
-    total_steps: int | None = None,
-    steps_per_epoch: int | None = None,
     is_rl: bool = True,
 ) -> None:
-    """Run every applicable D1-D10 check. Raises IsolationViolation on first
-    failure with a precise message."""
+    """Run every applicable D1-D10 invariant check. Raises IsolationViolation
+    on first failure with a precise message.
+
+    Pass either `n_train` directly OR `train_parquet` (pyarrow num_rows is read).
+    The pickle/pyarrow path is lazy so the module doesn't impose hard deps.
+    """
     check_d1_slurm_account()
     check_d4_wandb_key()
     check_d6_pie_mode_for_rl(is_rl)
@@ -167,16 +194,26 @@ def assert_all_pie_invariants(
     check_d8_test_case_dir(test_case_dir)
     check_d10_go_probe_config()
 
-    if total_steps is not None and steps_per_epoch is not None and train_parquet is not None:
-        # n_train read lazily — we don't want to depend on pyarrow at module load.
-        try:
-            import pyarrow.parquet as pq
-            n_train = pq.read_metadata(train_parquet).num_rows
-        except Exception as e:
-            raise IsolationViolation(
-                f"[D2] could not read num_rows from {train_parquet!r}: {e}"
-            )
-        check_d2_epoch_arithmetic(total_steps, steps_per_epoch, n_train)
+    if total_steps is not None and steps_per_epoch is not None:
+        if n_train is None:
+            if train_parquet is None:
+                raise IsolationViolation(
+                    "[D2] need either n_train or train_parquet to verify epoch arithmetic"
+                )
+            try:
+                import pyarrow.parquet as pq
+                n_train = pq.read_metadata(train_parquet).num_rows
+            except Exception as e:
+                raise IsolationViolation(
+                    f"[D2] could not read num_rows from {train_parquet!r}: {e}"
+                )
+        check_d2_epoch_arithmetic(
+            total_steps, steps_per_epoch, n_train, batch_size, expected_epochs
+        )
+
+
+# Backward-compat alias used by older callers.
+assert_all_pie_invariants = run_all_guards
 
 
 def main() -> int:

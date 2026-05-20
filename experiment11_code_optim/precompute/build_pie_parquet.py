@@ -90,13 +90,18 @@ def build_split_records(
     jsonl_path: Path,
     split: str,
     excluded: set[str],
+    tokenizer,
+    max_prompt_tokens: int,
 ) -> tuple[list[dict], dict]:
-    """Read every row, drop excluded `<split>/<pid>` entries, return verl records
-    + stats dict."""
+    """Read every row, drop excluded `<split>/<pid>` entries AND prompts whose
+    tokenized length exceeds `max_prompt_tokens` (pathological 100k-token
+    outliers in the raw data). Returns verl records + stats dict."""
     kept = []
     n_total = 0
     n_excluded = 0
     n_missing_src = 0
+    n_overlong = 0
+    overlong_examples: list[tuple[str, int]] = []
     with open(jsonl_path) as f:
         for line in f:
             n_total += 1
@@ -109,12 +114,23 @@ def build_split_records(
             if f"{split}/{pid}" in excluded:
                 n_excluded += 1
                 continue
+            # Filter on tokenized prompt length, not character count: that's the
+            # number verl's max_prompt_length compares against at training time.
+            prompt_text = PROMPT_TEMPLATE.format(src_code=src)
+            n_tokens = len(tokenizer(prompt_text, add_special_tokens=False)["input_ids"])
+            if n_tokens > max_prompt_tokens:
+                n_overlong += 1
+                if len(overlong_examples) < 5:
+                    overlong_examples.append((pid, n_tokens))
+                continue
             kept.append(_format_record(src, pid, split))
     stats = {
         "n_total_rows": n_total,
         "n_kept": len(kept),
         "n_excluded": n_excluded,
         "n_missing_src": n_missing_src,
+        "n_overlong": n_overlong,
+        "overlong_examples": overlong_examples,
     }
     return kept, stats
 
@@ -142,11 +158,23 @@ def main() -> int:
     ap.add_argument("--val_seed", type=int, default=0,
                     help="Seed for the val subsample so the GO/NO-GO set is "
                          "stable across runs.")
+    ap.add_argument("--tokenizer", default="Qwen/Qwen3-1.7B-Base",
+                    help="Tokenizer used for prompt-length filtering.")
+    ap.add_argument("--max_prompt_tokens", type=int, default=6144,
+                    help="Drop rows whose tokenized prompt exceeds this. The "
+                         "raw PIE JSONLs contain pathological 100k+ token "
+                         "rows (>p99.9) that bloat verl's overlong filter and "
+                         "skew batching. 6144 covers >99.9 percent of real "
+                         "data while excising the noise.")
     args = ap.parse_args()
 
     output_root = Path(args.output_root)
     excluded = load_excluded_problem_ids(REFERENCE_TABLE_ROOT)
     print(f"[load] {len(excluded)} (split, problem_id) entries excluded from reference table")
+
+    print(f"[tokenizer] loading {args.tokenizer}...")
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, trust_remote_code=True)
 
     summary: dict[str, dict] = {}
     for split, in_jsonl, out_name in [
@@ -156,14 +184,18 @@ def main() -> int:
     ]:
         in_path = RAW_ROOT / in_jsonl
         out_path = output_root / out_name
-        records, stats = build_split_records(in_path, split, excluded)
+        records, stats = build_split_records(
+            in_path, split, excluded, tokenizer, args.max_prompt_tokens
+        )
         write_parquet(records, out_path)
         summary[split] = {**stats, "out_path": str(out_path)}
         print(
             f"[{split}] kept {stats['n_kept']:>6} / {stats['n_total_rows']:>6} rows "
-            f"(excluded={stats['n_excluded']}, missing_src={stats['n_missing_src']}) "
-            f"-> {out_path}"
+            f"(excluded={stats['n_excluded']}, missing_src={stats['n_missing_src']}, "
+            f"overlong>{args.max_prompt_tokens}={stats['n_overlong']}) -> {out_path}"
         )
+        if stats["overlong_examples"]:
+            print(f"  overlong examples: {stats['overlong_examples']}")
 
     # Subsample val to 200 rows for in-situ eval (§9 GO/NO-GO requires this fixed set).
     val_full = output_root / "pie_val_full.parquet"

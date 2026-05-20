@@ -213,6 +213,45 @@ def main() -> int:
               f"public={bs['public']:4d}  codenet={bs['codenet']:4d}  missing={bs['missing']:4d}  "
               f"coverage={cov*100:.1f}%  mean_tests={st['mean_tests_per_problem']:.1f}")
 
+    # Serialize the whole tree to a single pickle so the reward fn can load
+    # all 21k+ test cases via ONE open()+read() instead of walking the tree.
+    # On Lustre, the walk version was the GO/NO-GO hang root cause: 4 shards
+    # walking 21k files simultaneously hit a metadata-server storm. The
+    # 21k-file tree stays on disk as canonical source; the pickle is a
+    # derived artifact for fast loading.
+    import pickle, time
+    pkl_path = TARGET_ROOT.with_suffix(".pkl")
+    t0 = time.monotonic()
+    cache: dict[str, list[tuple[str, str]]] = {}
+    for pid in sorted(os.listdir(TARGET_ROOT)):
+        pdir = TARGET_ROOT / pid
+        if not pdir.is_dir():
+            continue
+        indices: list[int] = []
+        for fn in os.listdir(pdir):
+            if fn.startswith("input.") and fn.endswith(".txt"):
+                try:
+                    indices.append(int(fn[len("input."):-len(".txt")]))
+                except ValueError:
+                    pass
+        indices.sort()
+        pairs: list[tuple[str, str]] = []
+        for i in indices:
+            op = pdir / f"output.{i}.txt"
+            if not op.exists():
+                continue
+            with open(pdir / f"input.{i}.txt") as fi, open(op) as fo:
+                pairs.append((fi.read(), fo.read()))
+        if pairs:
+            cache[pid] = pairs
+    with open(pkl_path, "wb") as f:
+        pickle.dump(cache, f)
+    print(f"  pickle:     {pkl_path} "
+          f"({pkl_path.stat().st_size/1e6:.1f} MB, "
+          f"{len(cache)} problems, "
+          f"{sum(len(v) for v in cache.values())} cases) "
+          f"in {time.monotonic()-t0:.1f}s")
+
     return 0 if counts["missing"] == 0 else 2
 
 
