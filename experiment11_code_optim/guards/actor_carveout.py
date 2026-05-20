@@ -29,10 +29,20 @@ from pathlib import Path
 _INSTALLED = False
 
 
-def _hardlink_tree(src: str, dst: str) -> None:
+def _hardlink_tree(
+    src: str,
+    dst: str,
+    skip_predicate=None,
+) -> None:
     """Mirror `src` to `dst` using os.link() on files (zero-copy, same FS
     only) and os.makedirs on directories. Falls back to copytree if the
-    destination filesystem doesn't support hardlinks."""
+    destination filesystem doesn't support hardlinks.
+
+    `skip_predicate(filename) -> bool` skips files when truthy. Used by
+    the actor carve-out to drop ~14GB of optimizer shards per save (not
+    needed for post-hoc eval or vLLM-load), keeping only the resume-
+    irrelevant `model_*.pt`, `huggingface/`, and tokenizer/config files.
+    """
     src = os.path.abspath(src)
     dst = os.path.abspath(dst)
     if os.path.exists(dst):
@@ -45,6 +55,8 @@ def _hardlink_tree(src: str, dst: str) -> None:
             tgt_root = os.path.join(dst, rel) if rel != "." else dst
             os.makedirs(tgt_root, exist_ok=True)
             for fn in files:
+                if skip_predicate is not None and skip_predicate(fn):
+                    continue
                 src_p = os.path.join(root, fn)
                 tgt_p = os.path.join(tgt_root, fn)
                 os.link(src_p, tgt_p)
@@ -55,7 +67,27 @@ def _hardlink_tree(src: str, dst: str) -> None:
             file=sys.stderr,
         )
         shutil.rmtree(dst, ignore_errors=True)
-        shutil.copytree(src, dst)
+        if skip_predicate is None:
+            shutil.copytree(src, dst)
+        else:
+            # Recursive copy honoring the same skip predicate.
+            for root, _dirs, files in os.walk(src):
+                rel = os.path.relpath(root, src)
+                tgt_root = os.path.join(dst, rel) if rel != "." else dst
+                os.makedirs(tgt_root, exist_ok=True)
+                for fn in files:
+                    if skip_predicate(fn):
+                        continue
+                    shutil.copy2(os.path.join(root, fn),
+                                 os.path.join(tgt_root, fn))
+
+
+def _skip_optimizer_shards(filename: str) -> bool:
+    """Skip verl's optim_world_size_*_rank_*.pt files during carve-out.
+    Saves ~14GB / 1.7B-param model / save. The verl rolling ckpt keeps
+    the optimizer for resume integrity; only the long-lived snapshots
+    drop it."""
+    return filename.startswith("optim_world_size_") and filename.endswith(".pt")
 
 
 def install_actor_carveout_hook() -> bool:
@@ -99,7 +131,7 @@ def install_actor_carveout_hook() -> bool:
             return
         target = os.path.join(carveout_dir, f"step_{global_step}")
         try:
-            _hardlink_tree(local_path, target)
+            _hardlink_tree(local_path, target, skip_predicate=_skip_optimizer_shards)
             print(
                 f"[carveout] step={global_step} -> {target} (hardlinked)",
                 file=sys.stderr,
