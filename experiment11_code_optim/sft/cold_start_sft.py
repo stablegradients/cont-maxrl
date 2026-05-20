@@ -39,7 +39,7 @@ from datasets import Dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    DataCollatorForLanguageModeling,
+    DataCollatorForSeq2Seq,
     Trainer,
     TrainingArguments,
 )
@@ -163,7 +163,13 @@ def main() -> None:
         fsdp_transformer_layer_cls_to_wrap="Qwen3DecoderLayer",
     )
 
-    collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    # DataCollatorForSeq2Seq pads variable-length sequences: input_ids with
+    # pad_token_id, attention_mask with 0, labels with -100 (ignore index).
+    # DataCollatorForLanguageModeling assumes uniform-length input — wrong
+    # for instruction-tuned SFT with masked-prompt labels.
+    collator = DataCollatorForSeq2Seq(
+        tokenizer=tokenizer, padding=True, label_pad_token_id=-100, return_tensors="pt",
+    )
     trainer = Trainer(
         model=model,
         args=targs,
