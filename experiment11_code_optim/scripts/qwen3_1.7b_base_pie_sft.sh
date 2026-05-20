@@ -51,6 +51,7 @@ export NCCL_PLUGIN_P2P=0
 # W&B (env-only)
 : "${WANDB_API_KEY:?WANDB_API_KEY must be set in submission env}"
 export WANDB_ENTITY="${WANDB_ENTITY:-stablegradients}"
+export WANDB_PROJECT="${WANDB_PROJECT:-cont-maxrl-pie}"
 export WANDB_RUN_GROUP="qwen3-1.7b-base_pie_sft"
 
 # Caches
