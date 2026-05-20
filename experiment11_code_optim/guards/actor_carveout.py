@@ -104,8 +104,30 @@ def install_actor_carveout_hook() -> bool:
                 f"[carveout] step={global_step} -> {target} (hardlinked)",
                 file=sys.stderr,
             )
-            # Write a sentinel so the post-hoc eval can tell which carve-outs
-            # are complete (vs. mid-write at process crash).
+            # Sidecar info.json records provenance (run / algo / init / step)
+            # so any downstream consumer of actor_ckpts/step_<N>/ knows where
+            # it came from without having to walk back through SLURM env.
+            import json as _json
+            from datetime import datetime as _dt
+            info = {
+                "global_step": int(global_step),
+                "run_id": os.environ.get("PIE_RUN_ID"),
+                "algorithm": os.environ.get("PIE_ALGO"),
+                "init_ckpt": os.environ.get("PIE_INIT_CKPT"),
+                "seed": os.environ.get("SEED") or os.environ.get("PIE_SEED"),
+                "wandb_run_group": os.environ.get("WANDB_RUN_GROUP"),
+                "experiment_name": os.environ.get("EXPERIMENT_NAME"),
+                "saved_at": _dt.utcnow().isoformat() + "Z",
+                "source_local_path": local_path,
+            }
+            try:
+                with open(os.path.join(target, "info.json"), "w") as f:
+                    _json.dump(info, f, indent=2)
+            except OSError as e:
+                print(f"[carveout] WARN: failed to write info.json: {e}",
+                      file=sys.stderr)
+            # Sentinel — written LAST so post-hoc eval can filter half-written
+            # carve-outs on resume after a crash.
             Path(target, ".carveout_complete").touch()
         except (OSError, RuntimeError) as e:
             print(

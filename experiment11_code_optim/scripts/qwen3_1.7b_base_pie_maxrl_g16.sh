@@ -114,6 +114,17 @@ export VERL_REWARD_WORKERS=64
 # every rollout as 0 (spec §8 silent-failure trap; DEFERRED_FIXES.md "F6").
 export PIE_MODE=1
 
+# Insitu eval metrics: report pass@k AND best@k at K∈{1,4,16,64,256}.
+# insitu_eval.py reads these env vars; ray_trainer.py logs both to W&B
+# under insitu_eval/<label>/{pass_at_k, best_at_k}.
+export INSITU_EVAL_K_VALUES='[1,4,16,64,256]'
+export INSITU_EVAL_BEST_AT_K=1
+
+# Carve-out sidecar metadata (consumed by guards/actor_carveout.py).
+export PIE_RUN_ID="qwen3_1.7b_pie_maxrl_unnorm_g16_s${SEED}"
+export PIE_ALGO="maxrl_unnorm"
+export PIE_INIT_CKPT="${PIE_SFT_CKPT}"
+
 # ============================================================
 # §13 GO probe config — required for the reward fn to hit GATE B targets.
 # Without these the K=5 cap is off (long-tail problems blow the step budget),
@@ -220,7 +231,8 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   trainer.default_local_dir="${OUTPUT_DIR}" \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
-  trainer.save_freq=${PIE_STEPS_PER_EPOCH} \
+  trainer.save_freq=100 \
+  "+actor_rollout_ref.actor.checkpoint.contents=['model','optimizer','extra','hf_model']" \
   trainer.test_freq=-1 \
   trainer.resume_mode=auto \
   trainer.max_actor_ckpt_to_keep=1 \

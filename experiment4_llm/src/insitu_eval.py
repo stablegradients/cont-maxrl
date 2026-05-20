@@ -19,6 +19,39 @@ from experiment4_llm.src.evaluate import pass_at_k
 from experiment4_llm.src.reward_function import compute_scores_batch, extract_code
 
 
+def _best_at_k_unbiased(scores: list[float], k: int) -> float:
+    """Unbiased estimator of E[max(K random samples from n scores)]. See
+    experiment11_code_optim/eval/post_hoc_eval.py::best_at_k for full math.
+    For binary {0,1} scores this equals pass@k."""
+    n = len(scores)
+    if n == 0:
+        return 0.0
+    if k >= n:
+        return max(scores)
+    s = sorted(scores, reverse=True)
+    denom = math.comb(n, k)
+    total = 0.0
+    for i, x in enumerate(s, start=1):
+        rem = n - i
+        if rem < k - 1:
+            break
+        total += x * math.comb(rem, k - 1)
+    return total / denom
+
+
+def _env_k_values(default: list[int]) -> list[int]:
+    v = os.environ.get("INSITU_EVAL_K_VALUES")
+    if not v:
+        return default
+    try:
+        out = json.loads(v)
+        assert isinstance(out, list) and all(isinstance(x, int) for x in out)
+        return out
+    except (json.JSONDecodeError, AssertionError):
+        print(f"[insitu_eval] WARN: INSITU_EVAL_K_VALUES={v!r} invalid; using {default}")
+        return default
+
+
 def score_and_save(
     completions: list[list[str]],
     ground_truths: list[str],
@@ -47,7 +80,8 @@ def score_and_save(
         dict with pass_at_k, per_problem, summary
     """
     if k_values is None:
-        k_values = [1, 2, 5, 10, 20, 50, 100, 200]
+        k_values = _env_k_values(default=[1, 2, 5, 10, 20, 50, 100, 200])
+    compute_best_at_k = bool(int(os.environ.get("INSITU_EVAL_BEST_AT_K", "0")))
 
     n_problems = len(completions)
     print(f"  In-situ eval: scoring {n_problems} problems, {n_target} completions each...")
@@ -96,12 +130,17 @@ def score_and_save(
         n = problem_total_counts[i]
         c = problem_pass_counts[i]
         problem_pass_at_k = {}
+        problem_best_at_k = {}
         for k in k_values:
             if k <= n:
                 problem_pass_at_k[str(k)] = pass_at_k(n, c, k)
+                if compute_best_at_k:
+                    problem_best_at_k[str(k)] = _best_at_k_unbiased(problem_scores_list[i], k)
             else:
                 problem_pass_at_k[str(k)] = None
-        per_problem_results.append({
+                if compute_best_at_k:
+                    problem_best_at_k[str(k)] = None
+        entry = {
             "problem_idx": i,
             "n": n,
             "c": c,
@@ -109,7 +148,10 @@ def score_and_save(
             "mean_score": sum(problem_scores_list[i]) / max(len(problem_scores_list[i]), 1),
             "unique_solution_rate": problem_unique_rates[i],
             "mean_output_length": problem_mean_lengths[i],
-        })
+        }
+        if compute_best_at_k:
+            entry["best_at_k"] = problem_best_at_k
+        per_problem_results.append(entry)
 
     # Macro-average pass@k
     avg_pass_at_k = {}
@@ -135,10 +177,23 @@ def score_and_save(
         all_codes.extend(extract_code(c) for c in completions[i][:n_target])
     unique_code_rate_global = len(set(all_codes)) / max(len(all_codes), 1)
 
+    # Macro-average best@k (only when enabled via INSITU_EVAL_BEST_AT_K=1)
+    avg_best_at_k = None
+    if compute_best_at_k:
+        avg_best_at_k = {}
+        for k in k_values:
+            values = [
+                r["best_at_k"][str(k)]
+                for r in per_problem_results
+                if r["best_at_k"][str(k)] is not None
+            ]
+            avg_best_at_k[str(k)] = sum(values) / len(values) if values else None
+
     metrics = {
         "epoch": epoch,
         "global_step": global_step,
         "pass_at_k": avg_pass_at_k,
+        "best_at_k": avg_best_at_k,  # None when INSITU_EVAL_BEST_AT_K is unset
         "per_problem": per_problem_results,
         "summary": {
             "total_problems": n_problems,

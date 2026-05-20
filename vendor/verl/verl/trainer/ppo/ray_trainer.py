@@ -895,6 +895,13 @@ class RayPPOTrainer:
         for k, v in pass_at_k.items():
             if v is not None:
                 metric_dict[f"{prefix}/pass_at_{k}"] = v
+        # best_at_k: present only when INSITU_EVAL_BEST_AT_K=1 in env (PIE uses this).
+        # For binary-correctness setups (DeepCoder), best_at_k equals pass_at_k by
+        # construction, so it's gated to avoid noise.
+        best_at_k = metrics.get("best_at_k") or {}
+        for k, v in best_at_k.items():
+            if v is not None:
+                metric_dict[f"{prefix}/best_at_{k}"] = v
         summary = metrics.get("summary", {})
         for key in ["mean_score", "mean_pass_rate", "mean_unique_solution_rate", "mean_output_length",
                      "n_problems_solved", "unique_code_rate_global"]:
