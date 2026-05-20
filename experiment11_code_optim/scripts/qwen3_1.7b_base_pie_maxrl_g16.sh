@@ -96,6 +96,19 @@ export HF_HOME="${REPO_ROOT}/.cache/huggingface"
 export TORCH_HOME="${REPO_ROOT}/.cache/torch"
 export VLLM_CACHE_ROOT="${REPO_ROOT}/.cache/vllm"
 export VERL_REWARD_WORKERS=64
+
+# ============================================================
+# §13 GO probe config — required for the reward fn to hit GATE B targets.
+# Without these the K=5 cap is off (long-tail problems blow the step budget),
+# PCH isn't used (~2.65× slower per-compile), and compile tmpdirs may land on
+# Lustre (~10× metadata overhead). PCH is rebuilt once per job (~2s).
+# ============================================================
+export PIE_MEASUREMENT_MAX_TESTS=5
+export PIE_COMPILE_SCRATCH="${TMPDIR}"
+mkdir -p "${PIE_COMPILE_SCRATCH}"
+PIE_PCH_INCLUDE_PATH=$(${PYTHON} -c "import sys; sys.path.insert(0, '${REPO_ROOT}'); from experiment11_code_optim.measurement.core import setup_pch; print(setup_pch())")
+export PIE_PCH_INCLUDE_PATH
+echo "PIE reward config: MAX_TESTS=${PIE_MEASUREMENT_MAX_TESTS} PCH=${PIE_PCH_INCLUDE_PATH} SCRATCH=${PIE_COMPILE_SCRATCH}"
 export VLLM_USE_V1=0
 export RAY_OBJECT_STORE_MEMORY=32000000000
 export RAY_TMPDIR="/tmp/ray_${USER}"

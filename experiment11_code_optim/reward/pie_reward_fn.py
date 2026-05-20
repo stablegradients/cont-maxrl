@@ -26,10 +26,15 @@ import json
 import os
 import random
 import re
+import shutil
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from experiment11_code_optim.measurement.core import measure, measure_from_disk
+from experiment11_code_optim.measurement.core import (
+    measure, measure_from_disk,  # kept for re-export compatibility
+    _compile, _run_and_compare, MEASUREMENT_BACKEND, _scratch_dir,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -266,41 +271,124 @@ def compute_scores_batch(
         if key not in dedup_tasks:
             dedup_tasks[key] = {"code": code, "problem_id": problem_id, "split": split}
 
-    # ---- Phase 2: grade unique tasks in parallel ----
+    # ---- Phase 2: two-level scheduler ----
+    # The previous single-level dispatch (one worker per unique grade)
+    # capped at ~1.8x parallel speedup on varied-problem batches because a
+    # single slow grade (compile + K sequential test runs) held a worker for
+    # ~20s while 63 others idled. Replace with two phases:
+    #   2a. Compile all unique codes in parallel (scheduling unit = one code).
+    #   2b. Fan out (key, test_idx) jobs across the pool (unit = ONE test run).
+    # This shrinks the tail from "slowest grade" to "slowest single test run"
+    # and saturates the pool throughout the batch. See PROBE_REPORT.md for the
+    # straggler-ceiling diagnosis.
     n_workers = num_workers or int(os.environ.get("VERL_REWARD_WORKERS", "64"))
 
-    n_perf_samples = int(os.environ.get("PIE_PERF_SAMPLES", "3"))
     if measurement_max_tests is None:
         env_cap = os.environ.get("PIE_MEASUREMENT_MAX_TESTS")
         if env_cap:
             measurement_max_tests = int(env_cap)
 
-    def _grade(item: tuple[str, dict]) -> tuple[str, dict]:
-        key, task = item
+    # ---- 2a. Pre-pass: collect cases per key; partition by has-data ----
+    cases_per_key: dict[str, list[tuple[str, str]]] = {}
+    keys_with_cases: list[str] = []
+    keys_no_cases: list[str] = []
+    for key, task in dedup_tasks.items():
         cases = _get_test_cases(test_case_dir, task["problem_id"])
         if not cases:
-            return key, {
-                "compiled": False, "all_pass": False,
-                "n_tests_run": 0, "n_tests_passed": 0,
-                "instr_count": None, "measurement_backend": "perf",
-                "error": f"no test cases for {task['problem_id']}",
-            }
+            keys_no_cases.append(key)
+            continue
         if measurement_max_tests is not None and len(cases) > measurement_max_tests:
             cases = _subsample_cases(cases, measurement_max_tests, task["problem_id"])
-        r = measure(
-            task["code"],
-            cases,
-            per_test_timeout_s=float(timeout_per_test),
-            n_perf_samples=n_perf_samples,
-            pch_include_path=pch_include,
-        )
-        return key, r
+        cases_per_key[key] = cases
+        keys_with_cases.append(key)
 
+    compile_dir = _scratch_dir() or tempfile.gettempdir()
+
+    def _compile_one(item: tuple[str, dict]) -> tuple[str, str | None, str, str | None]:
+        key, task = item
+        td = tempfile.mkdtemp(dir=compile_dir, prefix="pie_meas_")
+        exe, err = _compile(task["code"], td, pch_include_path=pch_include)
+        return key, exe, td, err
+
+    def _run_one(job: tuple[str, int, str, str, str]) -> tuple[str, int, bool, int]:
+        key, idx, exe_path, inp, exp = job
+        passed, elapsed_ns = _run_and_compare(
+            exe_path, inp, exp, float(timeout_per_test)
+        )
+        return key, idx, passed, elapsed_ns
+
+    # key -> (exe_path or None, tmpdir, error or None)
+    compiled: dict[str, tuple[str | None, str, str | None]] = {}
     dedup_results: dict[str, dict] = {}
-    if dedup_tasks:
-        with ThreadPoolExecutor(max_workers=min(n_workers, len(dedup_tasks))) as pool:
-            for key, r in pool.map(_grade, dedup_tasks.items()):
-                dedup_results[key] = r
+
+    try:
+        # ---- 2b. Parallel compile ----
+        if keys_with_cases:
+            sub_tasks = [(k, dedup_tasks[k]) for k in keys_with_cases]
+            with ThreadPoolExecutor(max_workers=min(n_workers, len(sub_tasks))) as pool:
+                for key, exe, td, err in pool.map(_compile_one, sub_tasks):
+                    compiled[key] = (exe, td, err)
+
+        # ---- 2c. Build per-test-case run jobs ----
+        run_jobs: list[tuple[str, int, str, str, str]] = []
+        for key in keys_with_cases:
+            exe, _td, _err = compiled[key]
+            if exe is None:
+                continue
+            for idx, (inp, exp) in enumerate(cases_per_key[key]):
+                run_jobs.append((key, idx, exe, inp, exp))
+
+        # ---- 2d. Parallel test execution ----
+        run_results: list[tuple[str, int, bool, int]] = []
+        if run_jobs:
+            with ThreadPoolExecutor(max_workers=min(n_workers, len(run_jobs))) as pool:
+                run_results = list(pool.map(_run_one, run_jobs))
+
+        # ---- 2e. Aggregate per grade ----
+        per_grade_pass: dict[str, dict[int, bool]] = {}
+        per_grade_elapsed: dict[str, dict[int, int]] = {}
+        for key, idx, passed, elapsed_ns in run_results:
+            per_grade_pass.setdefault(key, {})[idx] = passed
+            per_grade_elapsed.setdefault(key, {})[idx] = elapsed_ns
+
+        for key in keys_no_cases:
+            dedup_results[key] = {
+                "compiled": False, "all_pass": False,
+                "n_tests_run": 0, "n_tests_passed": 0,
+                "instr_count": None,
+                "measurement_backend": MEASUREMENT_BACKEND,
+                "error": f"no test cases for {dedup_tasks[key]['problem_id']}",
+            }
+        for key in keys_with_cases:
+            exe, _td, err = compiled.get(key, (None, "", "compile not attempted"))
+            if exe is None:
+                dedup_results[key] = {
+                    "compiled": False, "all_pass": False,
+                    "n_tests_run": 0, "n_tests_passed": 0,
+                    "instr_count": None,
+                    "measurement_backend": MEASUREMENT_BACKEND,
+                    "error": err,
+                }
+                continue
+            cases = cases_per_key[key]
+            passes = per_grade_pass.get(key, {})
+            elapsed = per_grade_elapsed.get(key, {})
+            n_pass = sum(1 for p in passes.values() if p)
+            all_pass = (len(cases) > 0) and (n_pass == len(cases))
+            dedup_results[key] = {
+                "compiled": True,
+                "all_pass": all_pass,
+                "n_tests_run": len(cases),
+                "n_tests_passed": n_pass,
+                "instr_count": sum(elapsed.values()) if all_pass else None,
+                "measurement_backend": MEASUREMENT_BACKEND,
+                "error": None,
+            }
+    finally:
+        # Explicit tmpdir cleanup (mkdtemp doesn't auto-clean).
+        for _exe, td, _err in compiled.values():
+            if td and os.path.isdir(td):
+                shutil.rmtree(td, ignore_errors=True)
 
     # ---- Phase 3: scatter, compute score from instr_count ----
     out: list[dict] = []
