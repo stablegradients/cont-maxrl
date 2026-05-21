@@ -103,7 +103,7 @@ def setup_pch(scratch_dir: str | None = None,
         f.write(header_text)
     proc = subprocess.run(
         [GPP_PATH, *COMPILE_FLAGS, "-x", "c++-header", hpp_path, "-o", hpp_path + ".gch"],
-        capture_output=True, text=True, timeout=60.0,
+        capture_output=True, text=True, errors="replace", timeout=60.0,
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -127,6 +127,10 @@ def _compile(code_str: str, tmpdir: str, pch_include_path: str | None = None
         args,
         capture_output=True,
         text=True,
+        errors="replace",  # g++ echoes user-source bytes back in error messages
+        # (e.g. "stray '\xXX' in program"); without errors='replace' a
+        # non-UTF-8 byte in a model-generated C++ string literal would
+        # crash the entire reward step with UnicodeDecodeError.
         timeout=30.0,
     )
     if proc.returncode != 0:
@@ -185,6 +189,7 @@ def _perf_count_instructions(exe_path: str, input_str: str) -> int | None:
         input=input_str,
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=10.0,
     )
     if proc.returncode != 0:

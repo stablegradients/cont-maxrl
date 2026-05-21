@@ -95,6 +95,44 @@ def test_compile_failure_reports_clearly():
     assert result["error"] is not None and len(result["error"]) > 0
 
 
+def test_compile_with_non_utf8_bytes_does_not_crash():
+    """REGRESSION (RL crash 2026-05-20 across maxrl/grpo/rloo jobs
+    2307581/2/3): the model can generate C++ source containing
+    non-UTF-8 byte sequences in string/char literals. g++ echoes those
+    bytes back in its stderr ("error: stray '\\xXX' in program ..."),
+    and subprocess.run(text=True) would crash with UnicodeDecodeError
+    if `errors='replace'` is missing — taking down the entire reward
+    step and the whole RL run.
+
+    Verify that compiling such a program returns the standard failure
+    dict (compiled=False, all_pass=False, non-None error) without
+    raising. The bytes embedded below include 0xE0 0x80 (an invalid
+    UTF-8 sequence — incomplete continuation) and 0xFF, both of which
+    appeared in the actual crashing rollouts.
+    """
+    from experiment11_code_optim.measurement.core import measure
+    src = (
+        "#include <iostream>\n"
+        "int main(){\n"
+        "    const char *s = \"" + "\\xe0\\x80" + "\\xff\";\n"  # bad UTF-8
+        "    std::cout << s << std::endl;\n"
+        "    return 0;\n"
+        "}\n"
+    )
+    # Wrap in a bytes->str round-trip to force a literal raw byte path.
+    src_bytes = src.encode("latin-1") + b"\xe0\x80\xff// trailing non-utf8\n"
+    src_with_bad = src_bytes.decode("latin-1")
+    result = measure(src_with_bad, [("", "anything\n")])
+    assert isinstance(result, dict)
+    # Either compiled successfully (and the gate fails on output mismatch)
+    # OR the compile errored — either way, the call must NOT raise and the
+    # result dict must be well-formed. The non-crashing property is what
+    # the regression is guarding against.
+    assert result["compiled"] in (True, False)
+    if not result["compiled"]:
+        assert result["error"] is not None and isinstance(result["error"], str)
+
+
 def test_wrong_output_fails_gate():
     """A compilable program that prints the wrong thing must fail the strict gate
     and not produce an elapsed_ns (spec §4.2: measure only if all_pass)."""
