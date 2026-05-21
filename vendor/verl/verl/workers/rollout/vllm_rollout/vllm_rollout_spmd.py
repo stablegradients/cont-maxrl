@@ -12,7 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-The vllm_rollout that can be applied in different backend
+The vllm_rollout that can be applied in different backend.
+
+PIE patch (2026-05-21): when PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1, capture
+log_probs at rollout time and populate `batch["old_log_probs"]` so the
+trainer can skip the ~3-min/step actor compute_log_prob recompute. Safe
+only under on-policy ppo_epochs=1.
+
+Note on `_PIE_SKIP_OLD`: this is read at MODULE LOAD time (not inside the
+class __init__) because there is a nested `import os` deep inside the
+megatron-only branch of vLLMRollout.__init__ — Python sees that as a
+function-local assignment of `os`, which makes every other reference to
+`os` in __init__ raise UnboundLocalError. Module-level read avoids the
+scoping trap entirely.
+"""
 When working with FSDP:
 - Use DTensor weight loader (recommended) or HF weight loader
 - Utilize state_dict from the FSDP to synchronize the weights among tp ranks in vLLM
@@ -28,6 +41,10 @@ When working with Megatron:
 
 import logging
 import os
+
+# PIE patch: read env at module load — see header comment about the os-scoping
+# trap caused by the megatron-only nested `import os` inside __init__.
+_PIE_SKIP_OLD = os.environ.get("PIE_SKIP_OLD_LOG_PROB_RECOMPUTE", "0") == "1"
 from contextlib import contextmanager
 from typing import Any, Dict, List, Union
 
@@ -150,11 +167,9 @@ class vLLMRollout(BaseRollout):
         self.inference_engine.sleep(level=1)
 
         # PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1: capture log_probs at rollout time and
-        # skip the ~3-min/step actor recompute. Safe only under on-policy training
-        # (ppo_epochs=1 and same weights between rollout and update — both true
-        # for the PIE setup). logprobs=1 returns just the sampled token's log_prob
-        # (no top-k), enough for the PPO ratio.
-        _PIE_SKIP_OLD = os.environ.get("PIE_SKIP_OLD_LOG_PROB_RECOMPUTE", "0") == "1"
+        # skip the ~3-min/step actor recompute. _PIE_SKIP_OLD is read at module
+        # load (see header) to avoid the nested-import os-scoping trap that
+        # would otherwise raise UnboundLocalError here.
         kwargs = dict(
             n=1,
             logprobs=1 if _PIE_SKIP_OLD else 0,

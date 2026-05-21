@@ -115,6 +115,46 @@ def test_skip_old_log_prob_patch_in_vllm_rollout_spmd():
     )
 
 
+def test_skip_old_log_prob_env_var_read_at_module_level_not_init():
+    """REGRESSION (dry-run crash 2026-05-21, job 2314300):
+    vLLMRollout.__init__ has a nested `import os` inside a megatron-only
+    branch (line 96), which makes Python treat `os` as a function-local
+    variable for the entire __init__ body. Reading
+    PIE_SKIP_OLD_LOG_PROB_RECOMPUTE inside __init__ via `os.environ.get(…)`
+    raised UnboundLocalError BEFORE that nested import executes.
+
+    Fix: read the env var at MODULE LOAD time, store as `_PIE_SKIP_OLD`,
+    reference the module-level binding from __init__.
+
+    Guard: source-level check that the env-var read is at module level."""
+    body = (VENDOR_VERL / "verl" / "workers" / "rollout" / "vllm_rollout" /
+            "vllm_rollout_spmd.py").read_text()
+    lines = body.splitlines()
+    init_start = next(i for i, l in enumerate(lines) if "def __init__" in l)
+    module_level_lines = lines[:init_start]
+    init_body_lines = lines[init_start:]
+    # The os.environ.get for PIE_SKIP_OLD_LOG_PROB_RECOMPUTE must appear
+    # at module level, NOT inside __init__.
+    module_has_read = any(
+        "PIE_SKIP_OLD_LOG_PROB_RECOMPUTE" in l and "os.environ" in l
+        for l in module_level_lines
+    )
+    init_has_read = any(
+        "PIE_SKIP_OLD_LOG_PROB_RECOMPUTE" in l and "os.environ" in l
+        for l in init_body_lines
+    )
+    assert module_has_read, (
+        "vllm_rollout_spmd.py must read PIE_SKIP_OLD_LOG_PROB_RECOMPUTE at "
+        "module level (NOT inside __init__) to avoid the os-scoping trap"
+    )
+    assert not init_has_read, (
+        "vllm_rollout_spmd.py: do NOT read PIE_SKIP_OLD_LOG_PROB_RECOMPUTE "
+        "inside __init__ — the nested megatron `import os` at line 96 makes "
+        "`os` function-local for the whole __init__ body, triggering "
+        "UnboundLocalError on the env-var read"
+    )
+
+
 def test_skip_old_log_prob_patch_in_ray_trainer():
     """The ray_trainer.py patch must skip compute_log_prob when env var is set."""
     body = (VENDOR_VERL / "verl" / "trainer" / "ppo" / "ray_trainer.py").read_text()
