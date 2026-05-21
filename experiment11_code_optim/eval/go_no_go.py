@@ -72,6 +72,17 @@ def main() -> int:
         args.end_idx = len(df)
     df = df.iloc[args.start_idx:args.end_idx].reset_index(drop=True)
     print(f"[go_no_go] shard rows [{args.start_idx}, {args.end_idx})")
+    # Apply the model's chat template so the rendered prompt matches what verl
+    # feeds at RL inference time (RLHFDataset always calls apply_chat_template).
+    # Without this, a chat-format SFT model gets out-of-distribution raw input
+    # and emits ~70-token confused outputs (cf. crash on 2026-05-20).
+    from transformers import AutoTokenizer
+    _tok = AutoTokenizer.from_pretrained(args.sft_ckpt, trust_remote_code=True)
+    def _render(user_content: str) -> str:
+        return _tok.apply_chat_template(
+            [{"role": "user", "content": user_content}],
+            tokenize=False, add_generation_prompt=True, enable_thinking=False,
+        )
     prompts: list[str] = []
     ground_truths: list[str] = []
     pids: list[str] = []
@@ -82,7 +93,7 @@ def main() -> int:
         )
         if prompt_text is None:
             continue
-        prompts.append(prompt_text)
+        prompts.append(_render(prompt_text))
         gt = row["reward_model"]["ground_truth"]
         ground_truths.append(gt)
         try:

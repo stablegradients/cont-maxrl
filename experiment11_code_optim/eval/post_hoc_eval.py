@@ -203,18 +203,24 @@ def evaluate_checkpoint(
         merge_fsdp_to_hf(actor_dir, hf_dir, base_model, merger_script)
 
     df = pd.read_parquet(val_parquet)
-    # The prompt column is list[dict]; concatenate user content as the prompt.
+    # Apply chat template so rendered prompts match what RL trained on.
+    from transformers import AutoTokenizer
+    _tok = AutoTokenizer.from_pretrained(str(hf_dir), trust_remote_code=True)
+    def _render(user_content: str) -> str:
+        return _tok.apply_chat_template(
+            [{"role": "user", "content": user_content}],
+            tokenize=False, add_generation_prompt=True, enable_thinking=False,
+        )
     prompts: list[str] = []
     ground_truths: list[str] = []
     for _, row in df.iterrows():
-        # Find the user message and use its content
         prompt_text = next(
             (m["content"] for m in row["prompt"] if m.get("role") == "user"),
             None,
         )
         if prompt_text is None:
             continue
-        prompts.append(prompt_text)
+        prompts.append(_render(prompt_text))
         ground_truths.append(row["reward_model"]["ground_truth"])
 
     print(f"[step {step}] generating {n_completions} x {len(prompts)} completions...")
