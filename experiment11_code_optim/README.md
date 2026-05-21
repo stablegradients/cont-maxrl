@@ -270,7 +270,7 @@ SLURM scripts default these but accept overrides:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PIE_SFT_CKPT` | `/work/nvme/.../qwen3_1.7b_pie_sft_1ep_fulltrain_s3/final` | actor model dir |
+| `PIE_SFT_CKPT` | `/work/nvme/.../qwen3_1.7b_pie_sft_1ep_fulltrain_chat_s0/final` | actor model dir |
 | `PIE_STEPS_PER_EPOCH` | `289` | `ceil(73,893 / 256)` |
 | `PIE_TOTAL_STEPS` | `867` | `3 × 289` |
 | `PIE_EVAL_STEPS` | `[289,578,867]` | in-situ eval at each epoch boundary |
