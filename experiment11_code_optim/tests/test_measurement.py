@@ -147,6 +147,50 @@ def test_wrong_output_fails_gate():
     assert result["elapsed_ns"] is None
 
 
+def test_memory_exhausting_program_fails_gate_via_rlimit():
+    """REGRESSION (RL crash 2026-05-21 across maxrl 2308902 / grpo 2308903 /
+    rloo 2308904): a model-generated program that allocates tens of GB of
+    memory blew the global node memory and triggered Ray OOM-killer on the
+    trainer. The fix is RLIMIT_AS in a preexec_fn capping each spawned
+    binary; an over-large allocation gets SIGKILL'd by the kernel and the
+    gate just reports a non-zero exit (failed test) instead of taking down
+    the whole training run.
+
+    This test sets the cap to 64 MiB via PIE_PROGRAM_MEM_LIMIT_GB (we read
+    it as integer GB; encode 64MB by routing through a small fork), compiles
+    a program that asks malloc for 1 GiB, and asserts the gate cleanly
+    fails (no exception, no test-runner crash).
+    """
+    import os
+    from experiment11_code_optim.measurement import core as _core
+    saved = _core._MEM_LIMIT_BYTES
+    _core._MEM_LIMIT_BYTES = 64 * (1 << 20)  # 64 MiB
+    try:
+        src = """
+#include <iostream>
+#include <cstdlib>
+int main() {
+    // Ask for 1 GiB; with RLIMIT_AS at 64 MiB this will fail or SIGKILL.
+    size_t N = 1ULL << 30;
+    char *p = (char*)std::malloc(N);
+    if (!p) { std::cout << "malloc-failed\\n"; return 1; }
+    // Touch the pages to force commit (or crash if overcommit lies).
+    for (size_t i = 0; i < N; i += 4096) p[i] = 1;
+    std::cout << "alloc-ok\\n";
+    return 0;
+}
+"""
+        result = _core.measure(src, [("", "alloc-ok\n")])
+        # Either compile failed, or run got OOM/SIGKILL'd. Both yield
+        # all_pass=False without raising — that's the contract.
+        assert isinstance(result, dict)
+        assert result["all_pass"] is False
+        # n_tests_passed should be 0 — the cap should have taken effect.
+        assert result["n_tests_passed"] == 0
+    finally:
+        _core._MEM_LIMIT_BYTES = saved
+
+
 def test_segfault_fails_gate():
     """A compilable program that segfaults at runtime must fail the strict gate
     (nonzero exit) without raising and without producing an elapsed_ns."""

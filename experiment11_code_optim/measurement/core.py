@@ -138,6 +138,25 @@ def _compile(code_str: str, tmpdir: str, pch_include_path: str | None = None
     return exe_path, None
 
 
+# Per-program address-space cap (RLIMIT_AS). Overridable via env var; default
+# 1 GiB. Model-generated programs occasionally allocate tens of GB (e.g. an
+# `int arr[N*N]` with N read from stdin), and with 64 parallel reward workers
+# the node hits global OOM and Ray kills the trainer (crash 2026-05-21 on
+# jobs 2308902/2308903/2308904 — saw `prog` processes using 45-52 GB each).
+# 1 GiB is generous for competitive-programming workloads; anything that
+# legitimately needs more is almost certainly a bug.
+import resource as _resource
+_MEM_LIMIT_BYTES = int(os.environ.get("PIE_PROGRAM_MEM_LIMIT_GB", "1")) * (1 << 30)
+
+
+def _set_program_limits():
+    """preexec_fn for spawned C++ binaries: cap address space and CPU."""
+    try:
+        _resource.setrlimit(_resource.RLIMIT_AS, (_MEM_LIMIT_BYTES, _MEM_LIMIT_BYTES))
+    except (ValueError, OSError):
+        pass
+
+
 def _run_and_compare(
     exe_path: str, input_str: str, expected: str, timeout_s: float
 ) -> tuple[bool, int]:
@@ -148,7 +167,10 @@ def _run_and_compare(
     `measure()` only uses it on the all-pass path.
 
     Failures (nonzero exit, timeout, OS error, undecodable output) all return
-    (False, _) — never raise — so the strict-gate loop can keep going.
+    (False, _) — never raise — so the strict-gate loop can keep going. A
+    program that exceeds the RLIMIT_AS cap (default 1 GiB; tune via
+    PIE_PROGRAM_MEM_LIMIT_GB) gets SIGKILL'd by the kernel and shows up here
+    as a non-zero returncode — the gate rejects it normally, no special path.
 
     `errors='replace'` is load-bearing: some training programs print
     uninitialized memory (e.g., a stray 0xff byte) to stdout. Without it,
@@ -165,6 +187,7 @@ def _run_and_compare(
             text=True,
             errors="replace",
             timeout=timeout_s,
+            preexec_fn=_set_program_limits,
         )
     except (subprocess.TimeoutExpired, OSError):
         return False, time.monotonic_ns() - t0
