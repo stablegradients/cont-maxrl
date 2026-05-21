@@ -79,19 +79,46 @@ def build_dataset(jsonl_path: str, tokenizer, max_length: int) -> Dataset:
             samples.append({"src_code": src, "tgt_code": tgt})
 
     def tokenize(ex):
-        prompt = PROMPT_TEMPLATE.format(src_code=ex["src_code"])
-        completion = COMPLETION_TEMPLATE.format(tgt_code=ex["tgt_code"]) + tokenizer.eos_token
-        prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-        completion_ids = tokenizer(completion, add_special_tokens=False)["input_ids"]
-        ids = prompt_ids + completion_ids
-        labels = [-100] * len(prompt_ids) + completion_ids
-        if len(ids) > max_length:
-            # Right-truncate; this drops the END of the completion, which is
-            # less harmful than dropping the prompt (the model still sees the
-            # task spec).
-            ids = ids[:max_length]
+        user_content = PROMPT_TEMPLATE.format(src_code=ex["src_code"])
+        assistant_content = COMPLETION_TEMPLATE.format(tgt_code=ex["tgt_code"])
+        messages_full = [
+            {"role": "user", "content": user_content},
+            {"role": "assistant", "content": assistant_content},
+        ]
+        messages_prompt = [{"role": "user", "content": user_content}]
+        # Render with Qwen3 chat template + enable_thinking=False (this MUST
+        # match what verl's RLHFDataset does at RL inference time — see
+        # data.enable_thinking=False in the RL SLURM scripts. The earlier
+        # SFT trained on raw strings and the model never learned the
+        # <|im_start|>user / <|im_end|> / <think>\n\n</think> wrappers,
+        # causing 99.9% fraction_zero at RL step 1.)
+        full_text = tokenizer.apply_chat_template(
+            messages_full, tokenize=False, add_generation_prompt=False,
+            enable_thinking=False,
+        )
+        prompt_text = tokenizer.apply_chat_template(
+            messages_prompt, tokenize=False, add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
+        full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
+        # The chat template MUST produce a render where the user-only-with-
+        # generation-prompt is a strict token-id prefix of the full user+
+        # assistant render. Without this invariant, the SFT loss mask would
+        # corrupt teacher-forcing.
+        assert full_ids[:len(prompt_ids)] == prompt_ids, (
+            "chat-template inconsistency: prompt render is not a prefix of "
+            "the full render — SFT loss mask would be misaligned"
+        )
+        labels = [-100] * len(prompt_ids) + full_ids[len(prompt_ids):]
+        if len(full_ids) > max_length:
+            full_ids = full_ids[:max_length]
             labels = labels[:max_length]
-        return {"input_ids": ids, "labels": labels, "attention_mask": [1] * len(ids)}
+        return {
+            "input_ids": full_ids,
+            "labels": labels,
+            "attention_mask": [1] * len(full_ids),
+        }
 
     ds = Dataset.from_list(samples)
     ds = ds.map(tokenize, remove_columns=["src_code", "tgt_code"], desc="tokenize")
