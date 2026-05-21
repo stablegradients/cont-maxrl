@@ -138,23 +138,28 @@ def _compile(code_str: str, tmpdir: str, pch_include_path: str | None = None
     return exe_path, None
 
 
-# Per-program address-space cap (RLIMIT_AS). Overridable via env var; default
-# 1 GiB. Model-generated programs occasionally allocate tens of GB (e.g. an
-# `int arr[N*N]` with N read from stdin), and with 64 parallel reward workers
-# the node hits global OOM and Ray kills the trainer (crash 2026-05-21 on
-# jobs 2308902/2308903/2308904 — saw `prog` processes using 45-52 GB each).
-# 1 GiB is generous for competitive-programming workloads; anything that
-# legitimately needs more is almost certainly a bug.
-import resource as _resource
+# Per-program address-space cap. Default 1 GiB; override via PIE_PROGRAM_MEM_LIMIT_GB.
+# Model-generated programs occasionally allocate tens of GB and at 64-worker
+# concurrency that ran the node out of memory (Ray OOM crash, jobs 2308902/3/4
+# on 2026-05-21).
+#
+# Originally implemented via `preexec_fn=setrlimit` on subprocess.run, but
+# preexec_fn is documented UNSAFE with threads (it can deadlock between fork
+# and exec when the calling Python is multi-threaded — and our reward worker
+# is at 64 threads). In production this manifested as 100% gate failures
+# (jobs 2311188/89/90) because subprocess.run paths deadlocked silently.
+#
+# Use `prlimit -v <bytes> --` as an exec-side wrapper instead. prlimit is part
+# of util-linux (always available on Linux servers), sets the limit on the
+# spawned child only, and crucially does NOT require preexec_fn — so it's safe
+# with threading.
+_PRLIMIT_PATH = "/usr/bin/prlimit"
 _MEM_LIMIT_BYTES = int(os.environ.get("PIE_PROGRAM_MEM_LIMIT_GB", "1")) * (1 << 30)
 
 
-def _set_program_limits():
-    """preexec_fn for spawned C++ binaries: cap address space and CPU."""
-    try:
-        _resource.setrlimit(_resource.RLIMIT_AS, (_MEM_LIMIT_BYTES, _MEM_LIMIT_BYTES))
-    except (ValueError, OSError):
-        pass
+def _limited_argv(argv: list[str]) -> list[str]:
+    """Prepend prlimit to argv so the spawned child has RLIMIT_AS = _MEM_LIMIT_BYTES."""
+    return [_PRLIMIT_PATH, f"--as={_MEM_LIMIT_BYTES}", "--"] + argv
 
 
 def _run_and_compare(
@@ -181,13 +186,12 @@ def _run_and_compare(
     t0 = time.monotonic_ns()
     try:
         proc = subprocess.run(
-            [exe_path],
+            _limited_argv([exe_path]),
             input=input_str,
             capture_output=True,
             text=True,
             errors="replace",
             timeout=timeout_s,
-            preexec_fn=_set_program_limits,
         )
     except (subprocess.TimeoutExpired, OSError):
         return False, time.monotonic_ns() - t0
