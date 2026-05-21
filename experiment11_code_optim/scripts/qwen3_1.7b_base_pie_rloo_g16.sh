@@ -94,6 +94,11 @@ export VERL_REWARD_WORKERS=64
 # every rollout as 0 (spec §8 silent-failure trap; DEFERRED_FIXES.md "F6").
 export PIE_MODE=1
 
+# Skip the ~3-min/step actor old_log_prob recompute by using vLLM rollout
+# log_probs directly. Safe under on-policy ppo_epochs=1 (our setup).
+# Requires vendored verl patches in vllm_rollout_spmd.py + ray_trainer.py.
+export PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1
+
 # Insitu eval metrics: report pass@k AND best@k at K∈{1,4,16,64,256}.
 export INSITU_EVAL_K_VALUES='[1,4,16,64,256]'
 export INSITU_EVAL_BEST_AT_K=1
@@ -155,7 +160,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   data.val_files="${PIE_TRAIN_PARQUET}" \
   data.train_batch_size=256 \
   data.max_prompt_length=2560 \
-  data.max_response_length=8192 \
+  data.max_response_length=4096 \
   data.shuffle=True \
   data.filter_overlong_prompts=True \
   data.enable_thinking=False \

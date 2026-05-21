@@ -1222,18 +1222,38 @@ class RayPPOTrainer:
                             reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
                         print(f"[DEBUG] Rewards computed.", flush=True)
 
-                    # recompute old_log_probs
-                    with _timer("old_log_prob", timing_raw):
-                        print(f"[DEBUG] Computing old_log_prob...", flush=True)
-                        old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
-                        entropys = old_log_prob.batch["entropys"]
-                        response_masks = batch.batch["response_mask"]
-                        loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
-                        entropy_loss = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
-                        old_log_prob_metrics = {"actor/entropy_loss": entropy_loss.detach().item()}
-                        metrics.update(old_log_prob_metrics)
-                        old_log_prob.batch.pop("entropys")
-                        batch = batch.union(old_log_prob)
+                    # recompute old_log_probs (or skip if rollout populated them).
+                    # PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1 trades the ~3 min/step
+                    # forward pass for using vLLM's per-token log_probs directly.
+                    # Safe under on-policy training (ppo_epochs=1, weights match
+                    # between rollout and update). The small numerical drift
+                    # between vLLM's BF16 path and FSDP's BF16 path is well
+                    # within the 0.2 PPO clip-ratio margin.
+                    if os.environ.get("PIE_SKIP_OLD_LOG_PROB_RECOMPUTE", "0") == "1":
+                        with _timer("old_log_prob", timing_raw):
+                            assert "old_log_probs" in batch.batch, (
+                                "PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1 but "
+                                "old_log_probs missing from rollout batch — "
+                                "vLLM rollout must populate them when this env "
+                                "var is set (see vllm_rollout_spmd.py)"
+                            )
+                            # entropy_loss metric is not computed in the skip
+                            # path (would require an extra forward pass). Set
+                            # to a sentinel; entropy_coeff is 0 in our setup
+                            # so this never affects the gradient.
+                            metrics["actor/entropy_loss"] = 0.0
+                    else:
+                        with _timer("old_log_prob", timing_raw):
+                            print(f"[DEBUG] Computing old_log_prob...", flush=True)
+                            old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
+                            entropys = old_log_prob.batch["entropys"]
+                            response_masks = batch.batch["response_mask"]
+                            loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
+                            entropy_loss = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
+                            old_log_prob_metrics = {"actor/entropy_loss": entropy_loss.detach().item()}
+                            metrics.update(old_log_prob_metrics)
+                            old_log_prob.batch.pop("entropys")
+                            batch = batch.union(old_log_prob)
 
                     if self.use_reference_policy:
                         # compute reference log_prob

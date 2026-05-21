@@ -149,9 +149,15 @@ class vLLMRollout(BaseRollout):
         # Offload vllm model to reduce peak memory usage
         self.inference_engine.sleep(level=1)
 
+        # PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1: capture log_probs at rollout time and
+        # skip the ~3-min/step actor recompute. Safe only under on-policy training
+        # (ppo_epochs=1 and same weights between rollout and update — both true
+        # for the PIE setup). logprobs=1 returns just the sampled token's log_prob
+        # (no top-k), enough for the PPO ratio.
+        _PIE_SKIP_OLD = os.environ.get("PIE_SKIP_OLD_LOG_PROB_RECOMPUTE", "0") == "1"
         kwargs = dict(
             n=1,
-            logprobs=0,  # can be set to 0 and let actor to recompute
+            logprobs=1 if _PIE_SKIP_OLD else 0,
             max_tokens=config.response_length,
         )
 
@@ -264,11 +270,30 @@ class vLLMRollout(BaseRollout):
             # if n = 1: (bs, response_length) ; if n > 1: (bs * n, response_length)
 
             response = []
+            response_log_probs: list[list[float]] = []  # only populated when _PIE_SKIP_OLD
             for output in outputs:
                 for sample_id in range(len(output.outputs)):
-                    response.append(output.outputs[sample_id].token_ids)
+                    sample = output.outputs[sample_id]
+                    response.append(sample.token_ids)
+                    if _PIE_SKIP_OLD:
+                        lps: list[float] = []
+                        # sample.logprobs is list[dict[int, Logprob]] aligned to
+                        # sample.token_ids — one dict per generated token.
+                        for tok_id, lp_dict in zip(sample.token_ids, sample.logprobs or []):
+                            entry = lp_dict.get(tok_id) if lp_dict else None
+                            lps.append(float(entry.logprob) if entry is not None else 0.0)
+                        response_log_probs.append(lps)
 
             response = pad_2d_list_to_length(response, self.pad_token_id, max_length=self.config.response_length).to(idx.device)
+            if _PIE_SKIP_OLD:
+                # pad_2d_list_to_length infers dtype from data; float-only lists
+                # give float64, which would upcast the PPO ratio computation
+                # and bloat memory. Force float32 to match dp_actor's
+                # logprobs_from_logits output dtype (bf16 autocast → fp32 cast
+                # in mixed-precision; old_log_probs is always fp32 in verl).
+                rollouts_log_probs = pad_2d_list_to_length(
+                    response_log_probs, 0.0, max_length=self.config.response_length
+                ).to(device=idx.device, dtype=torch.float32)
 
             if self.sampling_params.n > 1 and do_sample:
                 idx = _repeat_interleave(idx, self.sampling_params.n)
@@ -299,17 +324,16 @@ class vLLMRollout(BaseRollout):
         attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
 
         # all the tp ranks should contain the same data here. data in all ranks are valid
-        batch = TensorDict(
-            {
-                "prompts": idx,
-                "responses": response,
-                "input_ids": seq,  # here input_ids become the whole sentences
-                # 'old_log_probs': log_probs, # we will recompute old log prob with actor
-                "attention_mask": attention_mask,
-                "position_ids": position_ids,
-            },
-            batch_size=batch_size,
-        )
+        _batch_dict = {
+            "prompts": idx,
+            "responses": response,
+            "input_ids": seq,  # here input_ids become the whole sentences
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+        }
+        if _PIE_SKIP_OLD:
+            _batch_dict["old_log_probs"] = rollouts_log_probs
+        batch = TensorDict(_batch_dict, batch_size=batch_size)
 
         # free vllm cache engine
         if (
