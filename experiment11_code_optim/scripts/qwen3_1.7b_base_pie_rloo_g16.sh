@@ -155,7 +155,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   data.val_files="${PIE_TRAIN_PARQUET}" \
   data.train_batch_size=256 \
   data.max_prompt_length=2560 \
-  data.max_response_length=4096 \
+  data.max_response_length=8192 \
   data.shuffle=True \
   data.filter_overlong_prompts=True \
   data.enable_thinking=False \
