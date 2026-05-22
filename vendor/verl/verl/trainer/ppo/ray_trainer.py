@@ -1231,7 +1231,8 @@ class RayPPOTrainer:
                     # within the 0.2 PPO clip-ratio margin.
                     if os.environ.get("PIE_SKIP_OLD_LOG_PROB_RECOMPUTE", "0") == "1":
                         with _timer("old_log_prob", timing_raw):
-                            assert "old_log_probs" in batch.batch, (
+                            # TensorDict doesn't support `in` directly; use .keys()
+                            assert "old_log_probs" in batch.batch.keys(), (
                                 "PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1 but "
                                 "old_log_probs missing from rollout batch — "
                                 "vLLM rollout must populate them when this env "

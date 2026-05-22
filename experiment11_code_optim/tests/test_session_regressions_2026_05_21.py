@@ -190,9 +190,11 @@ def test_skip_old_log_prob_patch_in_ray_trainer():
     assert 'PIE_SKIP_OLD_LOG_PROB_RECOMPUTE' in body, (
         "ray_trainer.py missing the PIE_SKIP_OLD_LOG_PROB_RECOMPUTE branch"
     )
-    assert 'assert "old_log_probs" in batch.batch' in body, (
+    assert 'assert "old_log_probs" in batch.batch.keys()' in body, (
         "ray_trainer.py: missing safety assertion that rollout populated "
-        "old_log_probs when skip path is taken"
+        "old_log_probs when skip path is taken. NOTE: must use "
+        "batch.batch.keys() because TensorDict raises NotImplementedError "
+        "on bare `in`."
     )
 
 
