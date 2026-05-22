@@ -196,6 +196,15 @@ def test_skip_old_log_prob_patch_in_ray_trainer():
         "batch.batch.keys() because TensorDict raises NotImplementedError "
         "on bare `in`."
     )
+    # REGRESSION (dry-run crash 2318910): the skip path must also propagate
+    # meta_info["temperature"] because dp_actor.update_policy reads it
+    # (would otherwise KeyError). The normal compute_log_prob path sets
+    # this via fsdp_workers.py; bypassing that requires explicit assignment.
+    assert 'batch.meta_info["temperature"]' in body, (
+        "ray_trainer.py: skip path must set batch.meta_info['temperature'] "
+        "before update_policy (otherwise dp_actor.update_policy raises "
+        "KeyError: 'temperature')"
+    )
 
 
 # ===========================================================================

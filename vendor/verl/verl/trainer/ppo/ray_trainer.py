@@ -1238,6 +1238,13 @@ class RayPPOTrainer:
                                 "vLLM rollout must populate them when this env "
                                 "var is set (see vllm_rollout_spmd.py)"
                             )
+                            # The normal compute_log_prob path sets
+                            # meta_info["temperature"] (fsdp_workers.py:638)
+                            # which dp_actor.update_policy then reads. We
+                            # bypass that, so set it explicitly here.
+                            batch.meta_info["temperature"] = (
+                                self.config.actor_rollout_ref.rollout.temperature
+                            )
                             # entropy_loss metric is not computed in the skip
                             # path (would require an extra forward pass). Set
                             # to a sentinel; entropy_coeff is 0 in our setup
