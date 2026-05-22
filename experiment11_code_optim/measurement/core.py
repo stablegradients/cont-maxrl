@@ -114,7 +114,18 @@ def setup_pch(scratch_dir: str | None = None,
 
 def _compile(code_str: str, tmpdir: str, pch_include_path: str | None = None
              ) -> tuple[str | None, str | None]:
-    """Compile C++ source. Returns (executable_path, error_str). On failure exe is None."""
+    """Compile C++ source. Returns (executable_path, error_str). On failure exe is None.
+
+    Failure modes — all return (None, error_str) instead of raising, so the
+    caller (grade_dedup_batch.pool.map) doesn't surface an exception that
+    would tear down the entire reward step:
+      - rc != 0          → syntax/link error from g++
+      - TimeoutExpired   → g++ hung past 30 s (some model-generated code with
+                           huge template instantiations or pathological
+                           constexpr can do this; crash 2323298 on 2026-05-21
+                           was a 30s g++ timeout uncaught)
+      - OSError          → /tmp full, exe_path missing, etc.
+    """
     src_path = os.path.join(tmpdir, "prog.cpp")
     exe_path = os.path.join(tmpdir, "prog")
     with open(src_path, "w") as f:
@@ -123,16 +134,21 @@ def _compile(code_str: str, tmpdir: str, pch_include_path: str | None = None
     if pch_include_path:
         args += ["-include", pch_include_path]
     args += ["-o", exe_path, src_path]
-    proc = subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        errors="replace",  # g++ echoes user-source bytes back in error messages
-        # (e.g. "stray '\xXX' in program"); without errors='replace' a
-        # non-UTF-8 byte in a model-generated C++ string literal would
-        # crash the entire reward step with UnicodeDecodeError.
-        timeout=30.0,
-    )
+    try:
+        proc = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            errors="replace",  # g++ echoes user-source bytes back in error messages
+            # (e.g. "stray '\xXX' in program"); without errors='replace' a
+            # non-UTF-8 byte in a model-generated C++ string literal would
+            # crash the entire reward step with UnicodeDecodeError.
+            timeout=30.0,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "compile timed out (30s)"
+    except OSError as e:
+        return None, f"compile OS error: {e}"
     if proc.returncode != 0:
         return None, f"compile failed (rc={proc.returncode}): {proc.stderr.strip()}"
     return exe_path, None

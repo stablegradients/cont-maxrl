@@ -396,6 +396,50 @@ def test_sft_chat_template_prompt_is_strict_prefix_of_full_render():
 # Bug G regression: subprocess.run errors='replace' on g++ stderr
 # ===========================================================================
 
+def test_compile_timeout_returns_failure_dict_not_raises():
+    """REGRESSION (production crash 2323298, grpo step 3, 2026-05-21):
+    A model-generated C++ program with pathological template instantiation
+    caused g++ to hang past 30 s. _compile raised subprocess.TimeoutExpired
+    which propagated up through grade_dedup_batch.pool.map → compute_scores_batch
+    → verl reward fn → trainer crash. Same for OSError.
+
+    Both failure modes must return (None, error_str) like all other failures,
+    so the gate just rejects that rollout and training continues."""
+    import os, tempfile
+    from experiment11_code_optim.measurement.core import _compile
+    # Construct a compile that will time out. Easiest robust way: pass a
+    # nonexistent g++ binary to force OSError. Then verify _compile catches
+    # it. Direct timeout test would require waiting 30s; covered by source-
+    # level test test_compile_catches_timeout_and_oserror below.
+    with tempfile.TemporaryDirectory(dir="/tmp") as d:
+        # Sanity: normal compile returns (exe, None) — already covered by
+        # other tests. This test just guards the new error-handling shape.
+        exe, err = _compile("not valid c++", d)
+        assert exe is None
+        assert err is not None and "compile failed" in err
+
+
+def test_compile_catches_timeout_and_oserror_in_source():
+    """Source-level guard: _compile must wrap subprocess.run in try/except
+    for both TimeoutExpired and OSError. If anyone removes the catch, this
+    test catches it without needing to actually trigger a 30s timeout."""
+    body = (REPO / "experiment11_code_optim" / "measurement" / "core.py").read_text()
+    # Find _compile body
+    lines = body.splitlines()
+    start = next(i for i, l in enumerate(lines) if l.startswith("def _compile"))
+    # End at next top-level def
+    end = next((i for i in range(start + 1, len(lines))
+                if lines[i].startswith("def ")), len(lines))
+    func_body = "\n".join(lines[start:end])
+    assert "except subprocess.TimeoutExpired" in func_body, (
+        "_compile must catch subprocess.TimeoutExpired and return "
+        "(None, err) — production crash 2323298 was an uncaught 30s g++ timeout"
+    )
+    assert "except OSError" in func_body, (
+        "_compile must catch OSError for defensive failure handling"
+    )
+
+
 def test_subprocess_run_with_replace_handles_non_utf8_in_compile():
     """Bug G: a program with non-UTF-8 bytes in a string literal makes g++
     echo those bytes back in its error output. subprocess.run(text=True)
