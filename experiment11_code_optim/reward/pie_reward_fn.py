@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import bisect
 import hashlib
+import itertools
 import json
 import os
 import pickle
@@ -36,8 +37,82 @@ import random
 import re
 import shutil
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor, wait as cf_wait
 from typing import Any
+
+
+# ---------------------------------------------------------------------------
+# Stage 1 noise mitigation: per-thread CPU affinity pinning.
+#
+# When PIE_REWARD_CPUSET is set (e.g. "24-71,96-143,168-215,240-287" — the
+# trailing 48 cores of each Grace socket, kept away from the first 24 cores
+# where Ray/vLLM workers tend to land), the FIRST grading call from each
+# ThreadPoolExecutor worker thread pins that thread (and its forked
+# subprocesses) to a single dedicated core. Subprocesses inherit the
+# parent thread's affinity at fork time, so the spawned C++ binary runs
+# pinned to the same core too.
+#
+# Why pin to a SINGLE core (not a NUMA node):
+#   - numactl --cpunodebind keeps the program on one socket but lets the
+#     OS scheduler bounce it across 72 cores of that socket, destroying
+#     L1/L2 cache locality on every reschedule
+#   - One-core pinning eliminates the bouncing → consistent L1 hit-rate
+#     once warm
+#   - Cost: a small constant warm-up per program (cold L1 on first run)
+#
+# Why a Python-side set instead of `taskset` wrapper:
+#   - `taskset` adds fork+exec overhead per subprocess.run — exactly the
+#     thing we don't want for short programs
+#   - sched_setaffinity inside the reward thread costs ~1 µs and only
+#     happens once per thread lifetime
+#
+# The first-touch assignment is lock-protected to avoid two threads
+# racing for the same core on initialization.
+# ---------------------------------------------------------------------------
+
+def _expand_cpuset(spec: str) -> list[int]:
+    """Parse 'a-b,c,d-e' style cpuset specs into a sorted list of ints."""
+    out: list[int] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            out.extend(range(int(lo), int(hi) + 1))
+        else:
+            out.append(int(part))
+    return sorted(set(out))
+
+
+_REWARD_CORES: list[int] = _expand_cpuset(os.environ.get("PIE_REWARD_CPUSET", ""))
+_CORE_ASSIGN_LOCK = threading.Lock()
+_CORE_ITER = itertools.cycle(_REWARD_CORES) if _REWARD_CORES else None
+_THREAD_PINNED: set[int] = set()
+
+
+def _ensure_thread_pinned() -> None:
+    """Pin the calling thread (and any subprocess it later forks) to one
+    dedicated core from PIE_REWARD_CPUSET. No-op if the env var is unset
+    or if this thread has already been pinned."""
+    if _CORE_ITER is None:
+        return
+    tid = threading.get_ident()
+    if tid in _THREAD_PINNED:
+        return
+    with _CORE_ASSIGN_LOCK:
+        if tid in _THREAD_PINNED:
+            return
+        core = next(_CORE_ITER)
+        try:
+            os.sched_setaffinity(0, {core})
+        except OSError:
+            # If the core isn't in our cgroup's allowed set, give up
+            # silently. Worst case: this thread runs unpinned, which is
+            # the same as the no-PIE_REWARD_CPUSET baseline.
+            pass
+        _THREAD_PINNED.add(tid)
 
 from experiment11_code_optim.measurement.core import (
     measure, measure_from_disk,  # kept for re-export compatibility
@@ -380,12 +455,14 @@ def grade_dedup_batch(
     compile_dir = _scratch_dir() or tempfile.gettempdir()
 
     def _compile_one(item: tuple[str, dict]) -> tuple[str, str | None, str, str | None]:
+        _ensure_thread_pinned()  # Stage 1 noise mitigation; no-op if PIE_REWARD_CPUSET unset
         key, task = item
         td = tempfile.mkdtemp(dir=compile_dir, prefix="pie_meas_")
         exe, err = _compile(task["code"], td, pch_include_path=pch_include_path)
         return key, exe, td, err
 
     def _run_one(job: tuple[str, int, str, str, str]) -> tuple[str, int, bool, int]:
+        _ensure_thread_pinned()  # Stage 1 noise mitigation
         key, idx, exe_path, inp, exp = job
         passed, elapsed_ns = _run_and_compare(
             exe_path, inp, exp, float(timeout_per_test)
