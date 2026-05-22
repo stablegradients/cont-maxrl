@@ -198,6 +198,16 @@ def _run_and_compare(
     subprocess.run's text decoder raises UnicodeDecodeError and aborts the
     whole batch. With `replace`, the bad bytes become U+FFFD and the gate
     rejects the program for output mismatch — the correct outcome.
+
+    `cwd=os.path.dirname(exe_path)` is load-bearing: model-generated C++
+    sometimes uses competitive-programming file I/O patterns
+    (`freopen("foo.out", "w", stdout)`, hardcoded `ofstream("bar.txt")`).
+    Without an explicit cwd, the binary inherits the parent's cwd (the
+    SLURM script's REPO_ROOT) and litters the repo with files like
+    `Beacon.out`, `connect.out`. Worse, two parallel rollouts can race
+    on the same filename and corrupt each other's output. Pinning cwd
+    to the binary's own tmpdir (which `measure()` cleans up after) keeps
+    those side-effects sandboxed.
     """
     t0 = time.monotonic_ns()
     try:
@@ -208,6 +218,7 @@ def _run_and_compare(
             text=True,
             errors="replace",
             timeout=timeout_s,
+            cwd=os.path.dirname(exe_path),
         )
     except (subprocess.TimeoutExpired, OSError):
         return False, time.monotonic_ns() - t0

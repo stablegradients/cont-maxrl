@@ -396,6 +396,51 @@ def test_sft_chat_template_prompt_is_strict_prefix_of_full_render():
 # Bug G regression: subprocess.run errors='replace' on g++ stderr
 # ===========================================================================
 
+def test_run_and_compare_sandboxes_cwd_to_exe_dir():
+    """REGRESSION (repo pollution 2026-05-22): model-generated C++ that uses
+    file-I/O patterns like freopen("foo.out", "w", stdout) was writing into
+    the SLURM script's REPO_ROOT cwd, littering the repo with files
+    (Beacon.out, connect.out, etc.) and creating race conditions between
+    parallel rollouts. Fix: set cwd=os.path.dirname(exe_path) on the
+    subprocess.run call so the binary runs in its sandboxed tmpdir.
+
+    This test compiles a program that writes to "leaked.out" via freopen
+    and verifies the file lands in the binary's tmpdir, NOT in the caller's
+    cwd.
+    """
+    import os, tempfile
+    from experiment11_code_optim.measurement.core import _compile, _run_and_compare
+
+    SRC = """
+#include <cstdio>
+int main() {
+    std::freopen("leaked.out", "w", stdout);
+    std::printf("polluting cwd\\n");
+    std::printf("expected\\n");
+    return 0;
+}
+"""
+    with tempfile.TemporaryDirectory(dir="/tmp") as d:
+        exe, err = _compile(SRC, d)
+        assert exe is not None, err
+        # The program prints "polluting cwd\nexpected\n" via freopen-stdout,
+        # then ALSO prints to stdout (which is now the file). So
+        # subprocess captures nothing; the file gets the content.
+        _passed, _cpu = _run_and_compare(exe, "", "", 5.0)
+        # File MUST have been written in exe's dir, NOT in the test
+        # process's cwd (which is REPO_ROOT under pytest).
+        exe_dir = os.path.dirname(exe)
+        assert os.path.exists(os.path.join(exe_dir, "leaked.out")), (
+            f"leaked.out not found in exe dir {exe_dir!r}; subprocess.run "
+            f"may be missing the cwd= argument"
+        )
+        # And the file MUST NOT exist in REPO_ROOT (where pytest is run).
+        repo_root = "/projects/bgmo/sramasubramanian/cont-maxrl"
+        assert not os.path.exists(os.path.join(repo_root, "leaked.out")), (
+            "leaked.out polluted the repo root — sandbox is broken"
+        )
+
+
 def test_compile_timeout_returns_failure_dict_not_raises():
     """REGRESSION (production crash 2323298, grpo step 3, 2026-05-21):
     A model-generated C++ program with pathological template instantiation
