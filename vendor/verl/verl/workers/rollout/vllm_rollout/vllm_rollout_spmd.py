@@ -15,17 +15,17 @@
 The vllm_rollout that can be applied in different backend.
 
 PIE patch (2026-05-21): when PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1, capture
-log_probs at rollout time and populate `batch["old_log_probs"]` so the
+log_probs at rollout time and populate ``batch["old_log_probs"]`` so the
 trainer can skip the ~3-min/step actor compute_log_prob recompute. Safe
 only under on-policy ppo_epochs=1.
 
-Note on `_PIE_SKIP_OLD`: this is read at MODULE LOAD time (not inside the
-class __init__) because there is a nested `import os` deep inside the
-megatron-only branch of vLLMRollout.__init__ — Python sees that as a
-function-local assignment of `os`, which makes every other reference to
-`os` in __init__ raise UnboundLocalError. Module-level read avoids the
-scoping trap entirely.
-"""
+Note on ``_PIE_SKIP_OLD``: this is read at MODULE LOAD time (not inside
+the class __init__) because there is a nested ``import os`` deep inside
+the megatron-only branch of vLLMRollout.__init__ — Python sees that as a
+function-local assignment of ``os``, which makes every other reference
+to ``os`` in __init__ raise UnboundLocalError. Module-level read avoids
+the scoping trap entirely.
+
 When working with FSDP:
 - Use DTensor weight loader (recommended) or HF weight loader
 - Utilize state_dict from the FSDP to synchronize the weights among tp ranks in vLLM
@@ -36,7 +36,7 @@ When working with Megatron:
   to all other pp ranks (all pp ranks holds all the parameters)
 - Bind the parameters to the inference engine
 - Do inference in tp. pp is treated as additional dp
-- After inference, all the parameters that doesn't belong to this pp rank is freed.
+- After inference, all the parameters that does not belong to this pp rank are freed.
 """
 
 import logging

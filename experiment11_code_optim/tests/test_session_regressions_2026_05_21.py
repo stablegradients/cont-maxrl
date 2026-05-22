@@ -115,6 +115,35 @@ def test_skip_old_log_prob_patch_in_vllm_rollout_spmd():
     )
 
 
+def test_patched_vllm_rollout_module_parses_and_imports():
+    """REGRESSION (dry-run crash 2026-05-21, job 2314382):
+    My PIE patch's module-level docstring edit truncated the ORIGINAL
+    docstring; the rest of the original docstring's content fell outside
+    the closing `\"\"\"` and Python tried to parse it as code. The line
+    containing `doesn't` (an apostrophe) raised SyntaxError: unterminated
+    string literal.
+
+    This test imports the patched module to catch any future docstring or
+    syntax breakage in the verl vendor patches. A fresh Python import does
+    full parse + module-init.
+    """
+    import importlib, sys
+    # vendor verl on path
+    vendor = str(VENDOR_VERL)
+    if vendor not in sys.path:
+        sys.path.insert(0, vendor)
+    # Force a fresh import to catch any breakage
+    mod_name = "verl.workers.rollout.vllm_rollout.vllm_rollout_spmd"
+    if mod_name in sys.modules:
+        importlib.reload(sys.modules[mod_name])
+    else:
+        importlib.import_module(mod_name)
+    m = sys.modules[mod_name]
+    # Patch sanity: module-level constant and class are present
+    assert hasattr(m, "_PIE_SKIP_OLD")
+    assert hasattr(m, "vLLMRollout")
+
+
 def test_skip_old_log_prob_env_var_read_at_module_level_not_init():
     """REGRESSION (dry-run crash 2026-05-21, job 2314300):
     vLLMRollout.__init__ has a nested `import os` inside a megatron-only
