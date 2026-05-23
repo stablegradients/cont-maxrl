@@ -310,56 +310,6 @@ def _build_perf_attr_instructions() -> bytes:
 _PERF_ATTR_BLOB = _build_perf_attr_instructions()
 
 
-def _perf_warm_up_syscall() -> None:
-    """Drive the parent process to perf-grading steady-state at module load.
-
-    Empirically (smoke-test 2026-05-22), the first ~13 grades from a fresh
-    Python process exhibit a warm-up curve: call 1 misses ~58% of
-    instructions, calls 2..13 drift up gradually, calls 14+ are
-    bit-identical within ±8 instructions (rel_spread ~ 2e-6). The cold
-    paths being primed are:
-      - Python's subprocess module (_posixsubprocess, fd-pool internals)
-      - glibc malloc thread-local cache in the parent
-      - Linux page cache for /usr/bin/prlimit + the child's ld.so chain
-      - Branch-predictor state in the parent's subprocess-launch path
-      - ctypes lazy-bind of libc.syscall and argument marshalling
-
-    Compiling a tiny C++ binary once and exercising the full perf flow
-    15 times burns the warm-up curve at import time so the first
-    production grade per worker process is already in steady-state.
-    ProcessPoolExecutor (and ThreadPoolExecutor, since this lives at
-    module-init time) thus each pay this ~150ms cost once per worker.
-
-    No-op if PIE_BACKEND != "perf".
-    """
-    if MEASUREMENT_BACKEND != "perf":
-        return
-    import shutil
-    code = (
-        "#include <iostream>\n"
-        "int main(){int n;std::cin>>n;"
-        "long s=0;for(int i=0;i<n;++i)s+=i;"
-        "std::cout<<s<<\"\\n\";return 0;}\n"
-    )
-    td = tempfile.mkdtemp(
-        dir=os.environ.get("PIE_COMPILE_SCRATCH") or None,
-        prefix="pie_perf_warmup_",
-    )
-    try:
-        exe, _err = _compile(code, td)
-        if exe is None:
-            return
-        # 15 iterations matches the empirical warm-up tail length.
-        # Use a tiny n=1000 (~5K instructions) so total warm-up wall is small.
-        for _ in range(15):
-            try:
-                _run_and_compare_perf(exe, "1000\n", "499500\n", 5.0)
-            except Exception:
-                break
-    finally:
-        shutil.rmtree(td, ignore_errors=True)
-
-
 def _perf_event_open_pid(pid: int) -> int:
     """Open a perf event fd that counts retired user-space instructions on
     the given PID across all CPUs. Returns the fd; caller must os.close()."""
@@ -397,9 +347,6 @@ def _perf_read_count(fd: int) -> int:
         return raw_count
     # Multiplexed — apply the standard kernel-side rescaling factor.
     return int(raw_count * time_enabled / time_running)
-
-
-_perf_warm_up_syscall()
 
 
 def _run_and_compare_perf(
