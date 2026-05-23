@@ -69,8 +69,25 @@ def generate_completions(
     gpu_memory_utilization: float = 0.90,
     tensor_parallel_size: int = 4,
     max_num_seqs: int = 256,
+    template_mode: str = "chat",
+    oneshot_preamble: str | None = None,
+    stop_token_ids: list[int] | None = None,
 ) -> list[list[str]]:
-    """Generate completions using vLLM with chat template."""
+    """Generate completions using vLLM.
+
+    Args:
+        template_mode: "chat" applies the model's chat template (with
+            enable_thinking=False). "raw" feeds the prompt's user-content
+            directly with no chat wrapping — for base models without chat
+            tuning. "raw_oneshot" prepends `oneshot_preamble` before each
+            raw user-content (1-shot format anchor).
+        oneshot_preamble: only used when template_mode="raw_oneshot". Must
+            end with the trailing fragment that primes the model to emit
+            the next answer (typically "### Optimized Version:\n```cpp\n").
+        stop_token_ids: per-variant EOS list. Pass [151643] for Qwen3-Base,
+            [151645, 151643] for Qwen3-Instruct. If None, vLLM uses the
+            model's generation_config defaults.
+    """
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
 
@@ -87,22 +104,38 @@ def generate_completions(
         enable_chunked_prefill=True,
         max_num_batched_tokens=32768,
     )
-    sampling_params = SamplingParams(
+    sp_kwargs = dict(
         n=n_completions,
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
         max_tokens=max_tokens,
     )
+    if stop_token_ids:
+        sp_kwargs["stop_token_ids"] = list(stop_token_ids)
+    sampling_params = SamplingParams(**sp_kwargs)
 
-    # Format prompts via chat template (matches training rollout)
+    # Format prompts according to template_mode
     formatted_prompts = []
     for problem in problems:
         messages = list(problem["prompt"])
-        text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True,
-            enable_thinking=False,
-        )
+        if template_mode == "chat":
+            text = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True,
+                enable_thinking=False,
+            )
+        elif template_mode == "raw":
+            # Concat all user-content fields; assume single-turn for our use.
+            text = "".join(m.get("content", "") for m in messages
+                            if m.get("role") == "user")
+        elif template_mode == "raw_oneshot":
+            user_content = "".join(m.get("content", "") for m in messages
+                                    if m.get("role") == "user")
+            if not oneshot_preamble:
+                raise ValueError("raw_oneshot requires oneshot_preamble")
+            text = oneshot_preamble + user_content
+        else:
+            raise ValueError(f"unknown template_mode={template_mode!r}")
         formatted_prompts.append(text)
 
     print(f"    Generating {n_completions} completions for {len(formatted_prompts)} problems...")

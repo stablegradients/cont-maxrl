@@ -1,0 +1,42 @@
+You are a C++ optimization expert. Below is a working C++ program. Rewrite it to run faster while producing identical output for all valid inputs. Keep the same input/output format and only change the algorithm/implementation.
+
+### Slow Version:
+```cpp
+#include <iostream>
+#include <cstdio>
+using namespace std;
+long long n, s, a[100005];
+int main() {
+	int i, t;;
+	scanf("%d", &n);
+	for(i=1; i<=n; i++) {
+		scanf("%d", &a[i]);
+		t = min(a[i], a[i-1]);
+		s += t;
+		a[i] -= t;
+		s += a[i]/2;
+		a[i] %= 2;
+	}
+	printf("%lld", s);
+	return 0;
+}
+```
+
+### Optimized Version:
+```cpp
+#include <cstdio>
+long long n, s, a, b;
+int main() {
+	scanf("%d", &n);
+	while(n--) {
+		scanf("%lld", &a);
+		if(!a) b=0;
+		b += a;
+		s += b/2;
+		b %= 2;
+	}
+	printf("%lld", s);
+	return 0;
+}
+```
+

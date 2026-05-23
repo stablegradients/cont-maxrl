@@ -25,9 +25,28 @@ def pass_at_k(n, c, k):
 def run_shard(gpu_id, hf_dir, problems_file, metrics_file, completions_file, args):
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    if args.pie_mode:
+        env["PIE_MODE"] = "1"
+
+    # Optional 1-shot preamble for raw_oneshot template (Base eval B2).
+    # Stored as a literal string we inject into the heredoc.
+    preamble_literal = repr(args.oneshot_preamble) if args.oneshot_preamble else "None"
+    stop_ids_literal = repr(list(args.stop_token_ids)) if args.stop_token_ids else "None"
+
+    # Build the PIE_MODE shim that MUST run before any experiment4_llm import.
+    # Without it the worker imports DeepCoder's reward function, which scores
+    # every C++ program at 0 (silently). See F6 in DEFERRED_FIXES.md.
+    shim = (
+        "import os, sys\n"
+        "if os.environ.get('PIE_MODE') == '1':\n"
+        f"    sys.path.insert(0, {args.repo_root!r})\n"
+        "    from experiment11_code_optim.reward import pie_reward_fn\n"
+        "    sys.modules['experiment4_llm.src.reward_function'] = pie_reward_fn\n"
+    ) if args.pie_mode else ""
 
     cmd = [
         sys.executable, "-c", f"""
+{shim}
 import json, sys, math
 sys.path.insert(0, "{args.repo_root}")
 import pandas as pd
@@ -53,6 +72,9 @@ completions = generate_completions(
     gpu_memory_utilization={args.gpu_memory_utilization},
     tensor_parallel_size=1,
     max_num_seqs=256,
+    template_mode={args.template_mode!r},
+    oneshot_preamble={preamble_literal},
+    stop_token_ids={stop_ids_literal},
 )
 
 metrics = score_completions(
@@ -151,7 +173,26 @@ def main():
     parser.add_argument("--timeout_per_test", type=int, default=6)
     parser.add_argument("--n_workers", type=int, default=64)
     parser.add_argument("--k_values", type=int, nargs="+", default=[1, 4, 16, 64, 256])
+    # PIE baseline-eval additions:
+    parser.add_argument("--pie_mode", action="store_true",
+                        help="Install sys.modules shim so experiment4_llm.src.reward_function "
+                             "→ pie_reward_fn (C++ compile+gate scoring instead of DeepCoder).")
+    parser.add_argument("--template_mode", choices=["chat", "raw", "raw_oneshot"],
+                        default="chat",
+                        help="chat: apply_chat_template with enable_thinking=False (default). "
+                             "raw: use prompt user-content as-is (Base, no anchor). "
+                             "raw_oneshot: prepend --oneshot_preamble (Base + 1-shot anchor).")
+    parser.add_argument("--oneshot_preamble", type=str, default=None,
+                        help="Required when --template_mode=raw_oneshot. Path to a text file "
+                             "whose contents are prepended to each user-content prompt.")
+    parser.add_argument("--stop_token_ids", type=int, nargs="*", default=None,
+                        help="EOS list to pass to vLLM SamplingParams.stop_token_ids. "
+                             "Base: 151643. Instruct: 151645 151643.")
     args = parser.parse_args()
+    # Resolve oneshot file → literal string before passing to subprocess
+    if args.oneshot_preamble:
+        with open(args.oneshot_preamble) as f:
+            args.oneshot_preamble = f.read()
     args.repo_root = str(Path(__file__).resolve().parent.parent.parent.parent)
 
     output_dir = args.output_dir
