@@ -208,8 +208,12 @@ def main() -> int:
         else:
             excluded.append(f"{split}/{pid}")
 
+    from experiment11_code_optim.measurement.core import MEASUREMENT_BACKEND
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,  # bumped: added `backend` field
+        "backend": MEASUREMENT_BACKEND,  # "walltime" | "perf"; consumer must
+        # assert this matches its own MEASUREMENT_BACKEND or the units of
+        # elapsed_ns_values won't line up (ns vs instructions).
         "splits": splits,
         "K_cap": K_cap,
         "n_total_problems": len(per_problem),

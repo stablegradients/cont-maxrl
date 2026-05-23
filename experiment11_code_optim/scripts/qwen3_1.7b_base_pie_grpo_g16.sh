@@ -117,9 +117,16 @@ export PIE_INIT_CKPT="${PIE_SFT_CKPT}"
 export PIE_MEASUREMENT_MAX_TESTS=5
 export PIE_COMPILE_SCRATCH="${TMPDIR}"
 mkdir -p "${PIE_COMPILE_SCRATCH}"
+# §perf-backend: switch reward measurement to HW retired-instructions.
+# Reference table built under same backend; MANIFEST.json check at preload
+# will refuse a units-mismatched table.
+export PIE_BACKEND=perf
+export PIE_REFERENCE_TABLE_DIR="${PIE_DATA_ROOT}/reference_table_perf"
+export PIE_REFERENCE_TABLE_PICKLE="${PIE_DATA_ROOT}/reference_table_perf.pkl"
 PIE_PCH_INCLUDE_PATH=$(${PYTHON} -c "import sys; sys.path.insert(0, '${REPO_ROOT}'); from experiment11_code_optim.measurement.core import setup_pch; print(setup_pch())")
 export PIE_PCH_INCLUDE_PATH
-echo "PIE reward config: MAX_TESTS=${PIE_MEASUREMENT_MAX_TESTS} PCH=${PIE_PCH_INCLUDE_PATH} SCRATCH=${PIE_COMPILE_SCRATCH}"
+echo "PIE reward config: BACKEND=${PIE_BACKEND} MAX_TESTS=${PIE_MEASUREMENT_MAX_TESTS} PCH=${PIE_PCH_INCLUDE_PATH} SCRATCH=${PIE_COMPILE_SCRATCH}"
+echo "PIE reference table: ${PIE_REFERENCE_TABLE_DIR}"
 export VLLM_USE_V1=0
 export RAY_OBJECT_STORE_MEMORY=32000000000
 export RAY_TMPDIR="/tmp/ray_${USER}"

@@ -28,9 +28,13 @@ when a new failing test demands them.
 """
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
 import os
 import re
+import struct
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -60,16 +64,24 @@ def _scratch_dir() -> str | None:
 # (perf_event_paranoid=2 permits user-process hardware counters). PAPI 7.2.0.2
 # fallback is documented; we add the runtime check below only when perf fails
 # at first use; the failing case becomes its own test before refactoring.
-MEASUREMENT_BACKEND = "walltime"  # was "perf"; switched because `perf stat` HW
-# counters serialise at the kernel level under concurrency, capping reward
-# throughput at ~3x regardless of worker count. Wall-clock timing piggybacks
-# on the gate-phase subprocess.run we're already paying for — zero extra cost
-# per measurement, unlocks gate-phase parallelism (~15x with PCH per the
-# microbench). Percentile-rank reward is robust to wall-clock noise; the
-# scientific comparison (GOS vs GRPO) is unaffected because both arms see
-# the same noise. The legacy "perf" backend can still be selected via
-# `use_perf=True` on measure() for the precompute job where latency is not
-# critical and HW-counter precision is preferred.
+# Backend selection. Reads `PIE_BACKEND` at module load: "walltime" (default,
+# legacy) or "perf" (HW retired-instruction counter via perf_event_open).
+#
+# History: spec §1 mandated `perf` originally; the v1 implementation went
+# through `perf stat` (subprocess wrapper), which capped reward throughput at
+# ~3x under concurrency due to kernel-level event-fd serialisation. v2
+# switched to wall-clock as a workaround. The 2026-05-22 Variant E + worker
+# sweep then established wall-clock noise as irreducible under concurrency
+# on Grace ARM. v3 returns to retired instructions but talks to
+# `perf_event_open` *directly* (raw ctypes syscall), bypassing the perf-stat
+# wrapper that hit the 3x cap — direct per-PID HW counters do not share that
+# kernel path.
+#
+# The dict field `elapsed_ns` retains its name across backends (avoids a
+# repo-wide rename); under "perf" it carries instruction counts in the same
+# slot. Reference-table units must match — see MANIFEST.json check at
+# preload time.
+MEASUREMENT_BACKEND = os.environ.get("PIE_BACKEND", "walltime")
 
 # perf stat writes to stderr; the instruction-count line looks like
 #     "     281,447      instructions:u  ..."
@@ -178,10 +190,341 @@ def _limited_argv(argv: list[str]) -> list[str]:
     return [_PRLIMIT_PATH, f"--as={_MEM_LIMIT_BYTES}", "--"] + argv
 
 
+# ---------------------------------------------------------------------------
+# perf_event_open backend (raw ctypes, no Cirron dependency).
+#
+# Why raw ctypes and not Cirron / py-spy / pyperf: we want zero new
+# dependencies and zero process spawns beyond the candidate itself. The
+# `perf stat` subprocess wrapper that the v1 backend used hit a 3x throughput
+# cap under concurrency (kernel-level event-fd serialisation; see
+# PROBE_REPORT.md). perf_event_open invoked per-grade directly avoids that
+# path entirely because each fd is independent and per-PID.
+#
+# Race window: between Popen returning (child PID exists, kernel has started
+# the child) and the parent calling perf_event_open(pid=child_pid), the
+# child may execute ld.so resolution + initial libc setup. Those instructions
+# are NOT counted. We accept this as a small constant offset; the
+# determinism gate (Gate 1, target rel_spread <= 1e-4) is the criterion
+# the spec uses to confirm the offset is small enough to be ignored. The
+# common-case PIE program also blocks on stdin within the first few hundred
+# instructions (e.g. `cin >> n;`), so the unmissed-work window is small.
+#
+# Spec §1 fields:
+#   type   = PERF_TYPE_HARDWARE
+#   config = PERF_COUNT_HW_INSTRUCTIONS
+#   exclude_kernel = 1   (only user-space instructions)
+#   inherit        = 0   (do NOT propagate to fork()'d children; matches
+#                          EvalPerf convention. PIE candidates don't fork.)
+#   disabled       = 0   (start counting as soon as fd opens)
+# ---------------------------------------------------------------------------
+
+_libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
+
+# aarch64 syscall numbers (arch/arm64/include/asm/unistd.h: 241).
+# x86_64 uses 298. We're aarch64-only on Delta AI Grace nodes.
+_SYS_perf_event_open = 241 if (os.uname().machine == "aarch64") else 298
+
+# SIGSTOP-then-exec wrapper. Eliminates the perf-attach race window:
+# the wrapper raises SIGSTOP before exec'ing the candidate program, so
+# the parent has time to call perf_event_open on a known-stopped child
+# before any candidate-program instructions run. After parent SIGCONTs,
+# the wrapper execvp's the real binary; perf survives execve and counts
+# from instruction 0.
+_PERF_WRAPPER_PATH: str | None = None  # set lazily by _ensure_perf_wrapper()
+
+
+def _ensure_perf_wrapper() -> str | None:
+    """Compile the SIGSTOP wrapper once and return the path. None on failure
+    (caller should fall back to walltime)."""
+    global _PERF_WRAPPER_PATH
+    if _PERF_WRAPPER_PATH is not None and os.path.isfile(_PERF_WRAPPER_PATH):
+        return _PERF_WRAPPER_PATH
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "pie_perf_wrapper.c")
+    if not os.path.isfile(src):
+        return None
+    # Cache the wrapper next to the scratch dir so it survives across worker
+    # processes on the same node and across job restarts.
+    scratch = _scratch_dir() or tempfile.gettempdir()
+    out_dir = os.path.join(scratch, "pie_perf_wrapper")
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, "pie_perf_wrapper")
+    try:
+        proc = subprocess.run(
+            ["/opt/cray/pe/gcc-native/14/bin/gcc", "-O2", "-o", out, src],
+            capture_output=True, text=True, timeout=30.0,
+        )
+        if proc.returncode != 0:
+            return None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    _PERF_WRAPPER_PATH = out
+    return out
+
+_PERF_TYPE_HARDWARE = 0
+_PERF_COUNT_HW_INSTRUCTIONS = 1
+_PERF_ATTR_SIZE_VER0 = 64  # baseline ABI — sufficient for type/config/flags
+
+# read_format bits: ask the kernel to include enabled/running times in the
+# read() output. Under heavy concurrency the kernel multiplexes events
+# across CPUs and only counts during `running` ticks within a longer
+# `enabled` window; without scaling we'd see artificially small counts
+# (e.g., Gate 2 first-attempt showed stuck-at-90686 across most workers —
+# the unscaled count). Scaled count = raw * enabled / running.
+_PERF_FORMAT_TOTAL_TIME_ENABLED = 1
+_PERF_FORMAT_TOTAL_TIME_RUNNING = 2
+_PERF_READ_FORMAT_BITS = (
+    _PERF_FORMAT_TOTAL_TIME_ENABLED | _PERF_FORMAT_TOTAL_TIME_RUNNING
+)
+_PERF_READ_BYTES = 3 * 8  # count, time_enabled, time_running
+
+# Bit positions in the flags u64 at offset 40 of perf_event_attr.
+_FLAG_BIT_DISABLED = 0
+_FLAG_BIT_INHERIT = 1
+_FLAG_BIT_EXCLUDE_KERNEL = 5
+
+# perf_event_open(2) on aarch64 takes args as long, but `syscall()` is
+# variadic; we pass via c_long.
+_syscall = _libc.syscall
+_syscall.restype = ctypes.c_int
+
+
+def _build_perf_attr_instructions() -> bytes:
+    """Pack a minimal perf_event_attr for retired user-instructions counting."""
+    attr = bytearray(_PERF_ATTR_SIZE_VER0)
+    struct.pack_into("<I", attr, 0, _PERF_TYPE_HARDWARE)             # type
+    struct.pack_into("<I", attr, 4, _PERF_ATTR_SIZE_VER0)            # size
+    struct.pack_into("<Q", attr, 8, _PERF_COUNT_HW_INSTRUCTIONS)     # config
+    # offset 16 (sample_period) stays 0
+    # offset 24 (sample_type) stays 0
+    struct.pack_into("<Q", attr, 32, _PERF_READ_FORMAT_BITS)         # read_format
+    flags = (
+        (0 << _FLAG_BIT_DISABLED)
+        | (0 << _FLAG_BIT_INHERIT)
+        | (1 << _FLAG_BIT_EXCLUDE_KERNEL)
+    )
+    struct.pack_into("<Q", attr, 40, flags)
+    return bytes(attr)
+
+
+_PERF_ATTR_BLOB = _build_perf_attr_instructions()
+
+
+def _perf_warm_up_syscall() -> None:
+    """Drive the parent process to perf-grading steady-state at module load.
+
+    Empirically (smoke-test 2026-05-22), the first ~13 grades from a fresh
+    Python process exhibit a warm-up curve: call 1 misses ~58% of
+    instructions, calls 2..13 drift up gradually, calls 14+ are
+    bit-identical within ±8 instructions (rel_spread ~ 2e-6). The cold
+    paths being primed are:
+      - Python's subprocess module (_posixsubprocess, fd-pool internals)
+      - glibc malloc thread-local cache in the parent
+      - Linux page cache for /usr/bin/prlimit + the child's ld.so chain
+      - Branch-predictor state in the parent's subprocess-launch path
+      - ctypes lazy-bind of libc.syscall and argument marshalling
+
+    Compiling a tiny C++ binary once and exercising the full perf flow
+    15 times burns the warm-up curve at import time so the first
+    production grade per worker process is already in steady-state.
+    ProcessPoolExecutor (and ThreadPoolExecutor, since this lives at
+    module-init time) thus each pay this ~150ms cost once per worker.
+
+    No-op if PIE_BACKEND != "perf".
+    """
+    if MEASUREMENT_BACKEND != "perf":
+        return
+    import shutil
+    code = (
+        "#include <iostream>\n"
+        "int main(){int n;std::cin>>n;"
+        "long s=0;for(int i=0;i<n;++i)s+=i;"
+        "std::cout<<s<<\"\\n\";return 0;}\n"
+    )
+    td = tempfile.mkdtemp(
+        dir=os.environ.get("PIE_COMPILE_SCRATCH") or None,
+        prefix="pie_perf_warmup_",
+    )
+    try:
+        exe, _err = _compile(code, td)
+        if exe is None:
+            return
+        # 15 iterations matches the empirical warm-up tail length.
+        # Use a tiny n=1000 (~5K instructions) so total warm-up wall is small.
+        for _ in range(15):
+            try:
+                _run_and_compare_perf(exe, "1000\n", "499500\n", 5.0)
+            except Exception:
+                break
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def _perf_event_open_pid(pid: int) -> int:
+    """Open a perf event fd that counts retired user-space instructions on
+    the given PID across all CPUs. Returns the fd; caller must os.close()."""
+    attr_buf = ctypes.create_string_buffer(_PERF_ATTR_BLOB, len(_PERF_ATTR_BLOB))
+    fd = _syscall(
+        ctypes.c_long(_SYS_perf_event_open),
+        ctypes.cast(attr_buf, ctypes.c_void_p),
+        ctypes.c_long(pid),
+        ctypes.c_long(-1),     # cpu = -1 (any)
+        ctypes.c_long(-1),     # group_fd = -1
+        ctypes.c_ulong(0),     # flags
+    )
+    if fd < 0:
+        err = ctypes.get_errno()
+        raise OSError(err, f"perf_event_open(pid={pid}): {os.strerror(err)}")
+    return fd
+
+
+def _perf_read_count(fd: int) -> int:
+    """Read the multiplex-scaled instruction count from a perf event fd.
+
+    With read_format = TOTAL_TIME_ENABLED | TOTAL_TIME_RUNNING the kernel
+    returns 3 little-endian u64s: (raw_count, time_enabled, time_running).
+    Scale: count = raw_count * (time_enabled / time_running). If running == 0
+    the event never ran (likely failed silently); return 0.
+    """
+    buf = os.read(fd, _PERF_READ_BYTES)
+    if len(buf) != _PERF_READ_BYTES:
+        raise OSError(f"perf read returned {len(buf)} bytes "
+                      f"(expected {_PERF_READ_BYTES})")
+    raw_count, time_enabled, time_running = struct.unpack("<QQQ", buf)
+    if time_running == 0:
+        return 0
+    if time_enabled == time_running:
+        return raw_count
+    # Multiplexed — apply the standard kernel-side rescaling factor.
+    return int(raw_count * time_enabled / time_running)
+
+
+_perf_warm_up_syscall()
+
+
+def _run_and_compare_perf(
+    exe_path: str, input_str: str, expected: str, timeout_s: float
+) -> tuple[bool, int]:
+    """Run program with stdin=input_str, return (passed, instruction_count).
+
+    Same failure semantics as the walltime path: any error → (False, 0)
+    so the gate loop can keep going.
+
+    Uses the SIGSTOP wrapper to eliminate the perf-attach race window —
+    the wrapper raises SIGSTOP before exec'ing the target, parent waits
+    for the stop via waitpid(WUNTRACED), opens perf, then SIGCONTs. After
+    SIGCONT the wrapper execvp's the real binary; perf survives execve
+    and counts every instruction from main() onward.
+    """
+    import signal
+
+    wrapper = _ensure_perf_wrapper()
+    if wrapper is None:
+        raise RuntimeError("perf wrapper not built; falling back to walltime")
+
+    proc = subprocess.Popen(
+        _limited_argv([wrapper, exe_path]),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=os.path.dirname(exe_path),
+    )
+    fd = -1
+    instr_count = 0
+    try:
+        # Wait for the wrapper to reach raise(SIGSTOP). Use os.waitpid with
+        # WUNTRACED so we return when the child is stopped (not exited).
+        try:
+            wpid, status = os.waitpid(proc.pid, os.WUNTRACED)
+        except OSError as e:
+            return False, 0
+        if not os.WIFSTOPPED(status):
+            # Wrapper exited before stopping (probably argv error / exec
+            # failed before raise()). Treat as gate fail.
+            proc.returncode = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1
+            return False, 0
+
+        try:
+            fd = _perf_event_open_pid(proc.pid)
+        except OSError as e:
+            # Resume the child so it can exit, then return failure.
+            try:
+                os.kill(proc.pid, signal.SIGCONT)
+            except OSError:
+                pass
+            try:
+                proc.communicate(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.communicate(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    pass
+            raise RuntimeError(f"perf_event_open failed: {e}") from e
+
+        # Release the child to run the candidate program.
+        try:
+            os.kill(proc.pid, signal.SIGCONT)
+        except OSError:
+            return False, 0
+
+        try:
+            stdout_bytes, _stderr = proc.communicate(
+                input=input_str.encode(errors="replace"),
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.communicate(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                pass
+            return False, 0
+        except OSError:
+            return False, 0
+
+        try:
+            instr_count = _perf_read_count(fd)
+        except OSError:
+            instr_count = 0
+
+        if proc.returncode != 0:
+            return False, instr_count
+
+        actual = stdout_bytes.decode(errors="replace")
+        return _normalize(actual) == _normalize(expected), instr_count
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if proc.poll() is None:
+            try:
+                # Make sure the child isn't still stopped (would leak).
+                os.kill(proc.pid, signal.SIGCONT)
+            except OSError:
+                pass
+            try:
+                proc.kill()
+                proc.wait(timeout=1.0)
+            except Exception:
+                pass
+
+
+_PERF_FALLBACK_WARNED = False  # rate-limit fallback noise to once per process
+
+
 def _run_and_compare(
     exe_path: str, input_str: str, expected: str, timeout_s: float
 ) -> tuple[bool, int]:
-    """Run program with stdin=input_str, return (passed, elapsed_ns).
+    """Run program with stdin=input_str, return (passed, cost).
+
+    The `cost` slot carries either wall-clock nanoseconds (default backend)
+    or retired user-space instructions (PIE_BACKEND=perf). Field name
+    `elapsed_ns` is retained at the dict level for backward compatibility;
+    consumers MUST consult `measurement_backend` (or the reference-table
+    MANIFEST) to interpret the unit.
 
     elapsed_ns is the wall-clock time spent in `subprocess.run`. It is returned
     even when `passed` is False so callers can compute a fail-safe metric;
@@ -209,6 +552,16 @@ def _run_and_compare(
     to the binary's own tmpdir (which `measure()` cleans up after) keeps
     those side-effects sandboxed.
     """
+    if MEASUREMENT_BACKEND == "perf":
+        try:
+            return _run_and_compare_perf(exe_path, input_str, expected, timeout_s)
+        except (OSError, RuntimeError) as e:
+            global _PERF_FALLBACK_WARNED
+            if not _PERF_FALLBACK_WARNED:
+                print(f"[perf-fallback] {e}; reverting to walltime",
+                      file=sys.stderr, flush=True)
+                _PERF_FALLBACK_WARNED = True
+            # fall through to walltime
     t0 = time.monotonic_ns()
     try:
         proc = subprocess.run(

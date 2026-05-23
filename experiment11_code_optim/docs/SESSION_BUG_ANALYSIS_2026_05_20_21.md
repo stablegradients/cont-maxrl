@@ -270,6 +270,46 @@ distribution.
 - `test_repeated_measurement_jitter_bounded` (existing; loosened to <30 %
   rel_diff) — would catch a complete measurement-system regression
 
+### Closeout 2026-05-22 — switched to perf retired-instruction backend
+
+Variant E + worker-sweep probes (jobs 2327499–2327668) confirmed wall-clock
+noise on Grace ARM is irreducible under any feasible concurrency mitigation:
+
+- Stage 1 (CPU affinity pinning): no effect on tail spread.
+- Stage 2 (median-of-K per-test): warmup_factor < 1 under contention means
+  K-fold median can't discard a slow first sample.
+- Worker reduction: N=8 (3× headroom) only buys ~3× spread reduction —
+  blows the 60s `global_timeout` budget without reaching the 10% target.
+
+Switched to `perf_event_open(PERF_COUNT_HW_INSTRUCTIONS)` via raw ctypes
+syscall (no Cirron / no `perf stat` subprocess wrapper — the latter is what
+hit the original 3× concurrency cap in `tools/perf` event-fd serialisation).
+
+Key implementation detail: a tiny C SIGSTOP wrapper
+(`experiment11_code_optim/measurement/pie_perf_wrapper.c`) eliminates the
+perf-attach race window. Without it, gate-2 saw rel_spread ~ 28× because
+the per-task PMU timer only ticked from `perf_event_open` time onward,
+missing the early ld.so / libc startup of the candidate. The wrapper does
+`raise(SIGSTOP)` before `execvp`, so the parent attaches perf to a
+known-stopped child, then SIGCONTs — perf survives `execve` and counts
+from instruction 0 of the real binary.
+
+Verified on ghx4 whole-node allocations (commit pending, 2026-05-22):
+
+| gate | metric | target | observed |
+|---|---|---|---|
+| 1 (single-thread)   | rel_spread (steady) | ≤ 1e-4 | **2e-6** |
+| 2 (64-thread)       | rel_spread (steady) | ≤ 1e-3 | **2–5e-6** |
+| 3 (cross-program)   | max/min ratio       | ≥ 5×   | **49.9×** |
+
+Reward path env: `PIE_BACKEND=perf` selects the new measurement; reference
+table at `/work/nvme/.../reference_table_perf` (rebuilt under the same
+backend). `preload_reference_table` enforces a MANIFEST-`backend` match
+to prevent units mixing (ns vs instructions). Field name `elapsed_ns`
+retained to avoid a repo-wide rename; consumers read units from
+`MEASUREMENT_BACKEND`. Gate 4 + production validation are the final
+gates before Bug D is fully resolved.
+
 ---
 
 ## Bug E — Reference table built before walltime backend was production-aligned

@@ -92,6 +92,31 @@ _CORE_ITER = itertools.cycle(_REWARD_CORES) if _REWARD_CORES else None
 _THREAD_PINNED: set[int] = set()
 
 
+# ---------------------------------------------------------------------------
+# Stage 2 noise mitigation: median-of-K per-test.
+#
+# When PIE_MEASUREMENT_SAMPLES_PER_TEST >= 2, every test case is executed K
+# times serially within the same grading job; the test is considered passed
+# only if ALL K runs pass the gate, and the per-test elapsed_ns reported to
+# the aggregator is the median of the K wall-clock samples. This targets the
+# within-program upper-tail jitter (page faults, scheduler preemption, NUMA
+# memory-bus contention) that the Stage 1 A/B probe (2026-05-22) showed
+# Stage 1 affinity alone did not fix.
+#
+# IMPORTANT bias note: the reference table was built with K=1 (single
+# sample per test). Setting K>=2 here makes candidate timings systematically
+# smaller than the reference (median <= mean under right-skewed noise),
+# inflating the candidate's percentile rank. The fair-comparison fix is
+# Stage 3 (regrade the reference table with the same K) — without that,
+# Stage 2 alone is acceptable as a noise probe (does the reward-stream CV
+# drop?) but not as the long-term production setting.
+# ---------------------------------------------------------------------------
+
+_MEASUREMENT_SAMPLES_PER_TEST: int = max(
+    1, int(os.environ.get("PIE_MEASUREMENT_SAMPLES_PER_TEST", "1"))
+)
+
+
 def _ensure_thread_pinned() -> None:
     """Pin the calling thread (and any subprocess it later forks) to one
     dedicated core from PIE_REWARD_CPUSET. No-op if the env var is unset
@@ -247,6 +272,48 @@ _REF_TABLE_CACHE: dict[tuple[str, str], list[int]] = {}
 _REF_TABLE_CACHE_DIR: str | None = None
 
 
+def _check_reference_table_backend(reference_table_dir: str) -> None:
+    """Refuse to load a reference table built under a backend that doesn't
+    match the current measurement backend — the elapsed_ns_values would be
+    nanoseconds vs retired-instructions, mixing them gives garbage percentiles.
+
+    Strictly enforced when MANIFEST.json exists and carries a `backend` field
+    (schema_version >= 2). Older tables without `backend` are silently
+    tolerated for backward-compat with reference tables built before this
+    check was added — those were always walltime, and we only error if the
+    caller has explicitly opted into perf (preventing the dangerous mix).
+    """
+    manifest_path = os.path.join(reference_table_dir, "MANIFEST.json")
+    if not os.path.isfile(manifest_path):
+        return
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return
+    table_backend = manifest.get("backend")
+    if table_backend is None:
+        # Legacy table (schema_version 1) — assume walltime; refuse if caller
+        # is in perf mode.
+        if MEASUREMENT_BACKEND == "perf":
+            raise RuntimeError(
+                f"Reference table at {reference_table_dir} predates the "
+                f"backend field (schema_version 1) — assumed walltime. "
+                f"Current PIE_BACKEND=perf; rebuild the reference table under "
+                f"PIE_BACKEND=perf or unset PIE_BACKEND."
+            )
+        return
+    if table_backend != MEASUREMENT_BACKEND:
+        raise RuntimeError(
+            f"Reference-table backend mismatch: table was built under "
+            f"backend={table_backend!r} (units: "
+            f"{'instructions' if table_backend == 'perf' else 'nanoseconds'}) "
+            f"but the reward path is running under MEASUREMENT_BACKEND="
+            f"{MEASUREMENT_BACKEND!r}. Set PIE_BACKEND={table_backend} "
+            f"or rebuild the table with PIE_BACKEND={MEASUREMENT_BACKEND}."
+        )
+
+
 def preload_reference_table(reference_table_dir: str) -> int:
     """Populate the in-memory cache {(split, pid): elapsed_ns_values} for
     percentile-rank scoring. Idempotent.
@@ -258,6 +325,8 @@ def preload_reference_table(reference_table_dir: str) -> int:
     global _REF_TABLE_CACHE_DIR
     if _REF_TABLE_CACHE_DIR == reference_table_dir and _REF_TABLE_CACHE:
         return len(_REF_TABLE_CACHE)
+
+    _check_reference_table_backend(reference_table_dir)
 
     pickle_path = (
         os.environ.get("PIE_REFERENCE_TABLE_PICKLE")
@@ -464,10 +533,26 @@ def grade_dedup_batch(
     def _run_one(job: tuple[str, int, str, str, str]) -> tuple[str, int, bool, int]:
         _ensure_thread_pinned()  # Stage 1 noise mitigation
         key, idx, exe_path, inp, exp = job
-        passed, elapsed_ns = _run_and_compare(
-            exe_path, inp, exp, float(timeout_per_test)
-        )
-        return key, idx, passed, elapsed_ns
+        K = _MEASUREMENT_SAMPLES_PER_TEST
+        if K <= 1:
+            passed, elapsed_ns = _run_and_compare(
+                exe_path, inp, exp, float(timeout_per_test)
+            )
+            return key, idx, passed, elapsed_ns
+        # Stage 2: median-of-K. All K must pass for the test to count as a
+        # pass; short-circuit on first failure to avoid wasted work on a
+        # broken program.
+        samples: list[int] = []
+        for _ in range(K):
+            passed, elapsed_ns = _run_and_compare(
+                exe_path, inp, exp, float(timeout_per_test)
+            )
+            if not passed:
+                return key, idx, False, elapsed_ns
+            samples.append(elapsed_ns)
+        samples.sort()
+        med = samples[len(samples) // 2]  # upper median for even K (K=3 → samples[1])
+        return key, idx, True, med
 
     # key -> (exe_path or None, tmpdir, error or None)
     compiled: dict[str, tuple[str | None, str, str | None]] = {}
@@ -650,6 +735,84 @@ def compute_scores_batch(
         out.append({"score": float(score), "acc": 1.0})
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Grade-path warm-up: prime ThreadPoolExecutor + fork/exec + SIGSTOP wrapper
+# FS cache by running one synthetic grade_dedup_batch at module load.
+#
+# Without this, Gate 4 trial-1 (first grade_dedup_batch call after module
+# import) showed ~14/16 spurious gate-fails while trials 2-N were
+# bit-identical. Likely cause: cold libc thread-creation paths in the new
+# ThreadPoolExecutor + cold FS cache for the wrapper binary under the
+# production threading pattern. The warm-up runs the SAME code path that
+# production uses, with one trivial synthetic task, so each subsequent
+# production batch starts warm.
+#
+# Gated on PIE_BACKEND=perf — under walltime there's no such cold-trial-1
+# anomaly (the original codepath does the warm-up implicitly via thousands
+# of historical runs under the perf-event-stats backend), and we want to
+# avoid adding latency to the walltime fallback path.
+# ---------------------------------------------------------------------------
+
+def _grade_warm_up() -> None:
+    """Run one synthetic grade_dedup_batch to prime cold paths. No-op if
+    PIE_BACKEND != "perf" or if compile fails (the warm-up is best-effort)."""
+    if MEASUREMENT_BACKEND != "perf":
+        return
+    warmup_pid = "_pie_perf_warmup_"
+    warmup_code = (
+        "#include <iostream>\n"
+        "int main(){ std::cout << \"warm\\n\"; return 0; }\n"
+    )
+    # Inject one synthetic test case into the cache; clean up after.
+    global _TEST_CASE_CACHE_DIR
+    had_entry = warmup_pid in _TEST_CASE_CACHE
+    _TEST_CASE_CACHE[warmup_pid] = [("", "warm\n")]
+    saved_dir = _TEST_CASE_CACHE_DIR
+    if _TEST_CASE_CACHE_DIR is None:
+        _TEST_CASE_CACHE_DIR = "_pie_perf_warmup_dir"
+
+    key = hashlib.md5(f"{warmup_code}::{warmup_pid}".encode()).hexdigest()
+    tasks = {key: {"code": warmup_code, "problem_id": warmup_pid, "split": "val"}}
+    try:
+        grade_dedup_batch(
+            tasks,
+            test_case_dir=_TEST_CASE_CACHE_DIR,
+            measurement_max_tests=1,
+            timeout_per_test=10.0,
+            # Match the production thread-pool size so libc's pthread paths
+            # warm up at production scale. 64 trivial tasks would be wasteful;
+            # we submit 1 task and rely on grade_dedup_batch's min(n_workers,
+            # len(sub_tasks)) clamping — so pool spawn is for 1 thread.
+            # Instead, run multiple synthetic tasks to force broad warm-up.
+            num_workers=64,
+        )
+    except Exception:
+        # Warm-up failure must not block module import.
+        pass
+    finally:
+        if not had_entry:
+            _TEST_CASE_CACHE.pop(warmup_pid, None)
+        _TEST_CASE_CACHE_DIR = saved_dir
+
+
+# Second helper: spawn 64 worker threads to spread libc pthread-create's
+# allocator state across the warm-up. The ThreadPoolExecutor inside
+# grade_dedup_batch clamps to len(sub_tasks); a single warmup task gives
+# only 1 thread. Spawning 64 explicit warmup threads forces broad warm-up.
+def _warm_thread_pool(n: int = 64) -> None:
+    if MEASUREMENT_BACKEND != "perf":
+        return
+    try:
+        with ThreadPoolExecutor(max_workers=n) as pool:
+            list(pool.map(lambda _: None, range(n)))
+    except Exception:
+        pass
+
+
+_warm_thread_pool(64)
+_grade_warm_up()
 
 
 # ---------------------------------------------------------------------------

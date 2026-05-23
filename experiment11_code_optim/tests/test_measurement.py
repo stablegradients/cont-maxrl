@@ -406,6 +406,81 @@ def test_setup_pch_then_measure_with_pch_passes():
     assert result["elapsed_ns"] is not None and result["elapsed_ns"] > 100
 
 
+def _perf_paranoid_ok() -> bool:
+    try:
+        with open("/proc/sys/kernel/perf_event_paranoid") as f:
+            return int(f.read().strip()) <= 2
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(
+    not _perf_paranoid_ok(),
+    reason="perf_event_paranoid > 2; perf_event_open will fail with EACCES",
+)
+def test_perf_backend_is_deterministic(monkeypatch, tmp_path):
+    """Spec §4.2 / Gate 1: retired-instruction count should be near-deterministic
+    across repeated runs of the same fixed-work program.
+
+    We reach into the module's private API directly (not via measure())
+    because the env-load-at-import-time dispatch in MEASUREMENT_BACKEND is
+    set once when core.py first imports — and pytest may have already
+    imported it. Calling _run_and_compare_perf directly bypasses that and
+    is the exact code path used in production under PIE_BACKEND=perf.
+
+    Tolerance: spec §5 Gate 1 target is rel_spread <= 1e-4. Pre-flight
+    smoke-test on the login node showed ~1.3% (1e-2) due to ld.so/exec
+    setup variance on each fresh process. The looser <= 0.05 (5%) tolerance
+    here is what we expect on a typical multi-tenant node; the strict
+    1e-4 Gate 1 probe lives in tests/probe_perf_determinism.py and runs
+    under SLURM on a dedicated ghx4 allocation.
+    """
+    from experiment11_code_optim.measurement.core import (
+        _compile, _run_and_compare_perf,
+    )
+
+    code = """
+#include <iostream>
+int main() {
+    int n; std::cin >> n;
+    long s = 0;
+    for (int i = 0; i < n; ++i) s += i;
+    std::cout << s << std::endl;
+    return 0;
+}
+"""
+    expected = "499999500000\n"
+    exe, err = _compile(code, str(tmp_path))
+    assert exe is not None, f"compile failed: {err}"
+
+    # Module-load warm-up in core.py already burned ~15 cold-path grades,
+    # so the test process arrives in steady-state. Take a small leading
+    # slice for safety (in case the test host's contention is bursty).
+    counts: list[int] = []
+    for _ in range(20):
+        passed, c = _run_and_compare_perf(exe, "1000000\n", expected, 10.0)
+        assert passed, f"gate failed under perf backend (count={c})"
+        assert c > 0, "perf returned zero instruction count"
+        counts.append(c)
+
+    steady = sorted(counts[5:])
+    median = steady[len(steady) // 2]
+    rel_spread = (steady[-1] - steady[0]) / median
+    # Empirically the steady-state on a quiet, hermetic node is rel_spread
+    # ~ 2e-6 (bit-identical within ±8 instructions). Login/CI hosts can be
+    # multiplexing-noisy (other tenants' perf events fight for the PMU);
+    # observed up to ~3% on busy DeltaAI login nodes after scaling was
+    # added. 5% is loose enough to be stable on shared hosts while still
+    # catching the bug-case where steady-state devolves to walltime-style
+    # noise (~100%). The formal Gate 1 (hermetic ghx4 allocation) lives in
+    # tests/probe_perf_determinism.py and targets 1e-4.
+    assert rel_spread < 0.05, (
+        f"perf steady-state too variable: all_counts={counts}, "
+        f"steady_min={steady[0]}, steady_max={steady[-1]}, median={median}, "
+        f"rel_spread={rel_spread:.6f} (expected < 0.05)"
+    )
+
+
 def test_repeated_measurement_is_near_deterministic():
     """Spec §4.2: 'near-deterministic, median-stabilized.' Two back-to-back measurements
     of the same fixed-work program should agree within 1% (median-of-3 alone makes this

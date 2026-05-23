@@ -1,0 +1,91 @@
+{
+  "label": "gate3_perf_differentiation",
+  "backend": "perf",
+  "node": "gh005.hsn.cm.delta.internal.ncsa.edu",
+  "results": [
+    {
+      "name": "trivial_print",
+      "ok": true,
+      "counts": [
+        1663202,
+        1663206,
+        1663206
+      ],
+      "median": 1663206
+    },
+    {
+      "name": "loop_1k",
+      "ok": true,
+      "counts": [
+        1666867,
+        1666867,
+        1666871
+      ],
+      "median": 1666867
+    },
+    {
+      "name": "loop_100k",
+      "ok": true,
+      "counts": [
+        1666939,
+        1666939,
+        1666939
+      ],
+      "median": 1666939
+    },
+    {
+      "name": "loop_10m",
+      "ok": true,
+      "counts": [
+        1666916,
+        1666916,
+        1666916
+      ],
+      "median": 1666916
+    },
+    {
+      "name": "o_n_squared_5k",
+      "ok": true,
+      "counts": [
+        76684480,
+        76684480,
+        76684480
+      ],
+      "median": 76684480
+    },
+    {
+      "name": "o_n_cubed_300",
+      "ok": true,
+      "counts": [
+        83029625,
+        83029629,
+        83029625
+      ],
+      "median": 83029625
+    },
+    {
+      "name": "vector_push_1m",
+      "ok": true,
+      "counts": [
+        8921609,
+        8921609,
+        8921609
+      ],
+      "median": 8921609
+    },
+    {
+      "name": "string_concat_10k",
+      "ok": true,
+      "counts": [
+        2051734,
+        2051730,
+        2051730
+      ],
+      "median": 2051730
+    }
+  ],
+  "ratio": 49.92,
+  "min_median": 1663206,
+  "max_median": 83029625,
+  "verdict": "PASS"
+}
