@@ -60,7 +60,13 @@ def score_and_save(
     output_dir: str,
     n_target: int = 200,
     k_values: list[int] | None = None,
-    timeout_per_test: int = 6,
+    # Default 6s is the legacy DeepCoder value (Python programs run well
+    # under that). PIE at -O0 needs 30s — set via PIE_PER_TEST_TIMEOUT=30
+    # in the SLURM scripts so the env override propagates without changing
+    # the DeepCoder default. If we don't read this env var here, every
+    # insitu eval at -O0 systematically deflates pass@K relative to training
+    # (training-side timeout_per_test=30 vs eval-side=6).
+    timeout_per_test: int = int(os.environ.get("PIE_PER_TEST_TIMEOUT", "6")),
     n_workers: int = 128,
 ) -> dict:
     """Score completions, compute pass@k, and save metrics_epochN.json.

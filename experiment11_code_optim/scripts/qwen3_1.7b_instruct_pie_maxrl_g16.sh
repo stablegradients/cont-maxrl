@@ -119,6 +119,7 @@ export PIE_INIT_CKPT="${MODEL_PATH}"
 # the only backend stable enough under -O0 (walltime had 28× rel-spread).
 # ============================================================
 export PIE_MEASUREMENT_MAX_TESTS=5
+export PIE_PER_TEST_TIMEOUT=30
 export PIE_COMPILE_SCRATCH="${TMPDIR:-/tmp}/${USER}_pie_scratch"
 mkdir -p "${PIE_COMPILE_SCRATCH}"
 export PIE_BACKEND=perf

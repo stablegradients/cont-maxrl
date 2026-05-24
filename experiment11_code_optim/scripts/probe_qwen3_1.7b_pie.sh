@@ -39,6 +39,7 @@ export PIE_TEST_CASE_DIR="${PIE_DATA_ROOT}/tests"
 export PIE_TEST_CASE_PICKLE="${PIE_DATA_ROOT}/tests.pkl"
 export PIE_BACKEND=perf
 export PIE_MEASUREMENT_MAX_TESTS=5
+export PIE_PER_TEST_TIMEOUT=30
 export PIE_COMPILE_SCRATCH="${TMPDIR:-/tmp}/${USER}_pie_probe"
 mkdir -p "${PIE_COMPILE_SCRATCH}"
 export VLLM_USE_V1=0
