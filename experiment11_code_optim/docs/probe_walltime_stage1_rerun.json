@@ -1,0 +1,16 @@
+{
+  "label": "stage1_rerun",
+  "ok": true,
+  "n": 50,
+  "problem_id": "p02587",
+  "wall_seconds": 1.4,
+  "median_ms": 153.44,
+  "p10_ms": 68.83,
+  "p25_ms": 120.28,
+  "p75_ms": 192.88,
+  "p90_ms": 231.15,
+  "min_ms": 34.16,
+  "max_ms": 270.71,
+  "cv": 0.387,
+  "rel_spread": 1.542
+}

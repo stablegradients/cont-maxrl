@@ -46,6 +46,11 @@ export PIE_COMPILE_SCRATCH="${TMPDIR:-/tmp}/${USER}_pie_scratch"
 mkdir -p "${PIE_COMPILE_SCRATCH}"
 unset PIE_BACKEND  # walltime is fine for pass-rate
 
+# vLLM V0 — V1's torch.compile path hits a triton_key ImportError with the
+# triton version in our conda env (same workaround as post_eval_v2_job.sh
+# and the training scripts).
+export VLLM_USE_V1=0
+
 PYTHON=/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python
 
 EVAL_PARQUET="${EVAL_PARQUET:-/work/nvme/bgmo/sramasubramanian/pie_data/parquet/pie_val_200.parquet}"

@@ -1,0 +1,16 @@
+{
+  "label": "baseline",
+  "ok": true,
+  "n": 50,
+  "problem_id": "p02587",
+  "wall_seconds": 1.4,
+  "median_ms": 174.75,
+  "p10_ms": 83.74,
+  "p25_ms": 130.99,
+  "p75_ms": 211.94,
+  "p90_ms": 243.71,
+  "min_ms": 31.13,
+  "max_ms": 270.47,
+  "cv": 0.354,
+  "rel_spread": 1.37
+}

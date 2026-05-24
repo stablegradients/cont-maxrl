@@ -1,0 +1,2617 @@
+{
+  "pass_at_k": {
+    "1": 0.25,
+    "5": null,
+    "16": null
+  },
+  "per_problem": [
+    {
+      "problem_idx": 0,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16877.0
+    },
+    {
+      "problem_idx": 1,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 10375.0
+    },
+    {
+      "problem_idx": 2,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12277.0
+    },
+    {
+      "problem_idx": 3,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 10671.0
+    },
+    {
+      "problem_idx": 4,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12294.0
+    },
+    {
+      "problem_idx": 5,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12285.0
+    },
+    {
+      "problem_idx": 6,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12272.0
+    },
+    {
+      "problem_idx": 7,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16440.0
+    },
+    {
+      "problem_idx": 8,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2035.0
+    },
+    {
+      "problem_idx": 9,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 1082.0
+    },
+    {
+      "problem_idx": 10,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12296.0
+    },
+    {
+      "problem_idx": 11,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12661.0
+    },
+    {
+      "problem_idx": 12,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2383.0
+    },
+    {
+      "problem_idx": 13,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 17694.0
+    },
+    {
+      "problem_idx": 14,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16477.0
+    },
+    {
+      "problem_idx": 15,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 17694.0
+    },
+    {
+      "problem_idx": 16,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16166.0
+    },
+    {
+      "problem_idx": 17,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2505.0
+    },
+    {
+      "problem_idx": 18,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12668.0
+    },
+    {
+      "problem_idx": 19,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 17454.0
+    },
+    {
+      "problem_idx": 20,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3116.0
+    },
+    {
+      "problem_idx": 21,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16419.0
+    },
+    {
+      "problem_idx": 22,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2881.0
+    },
+    {
+      "problem_idx": 23,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13640.0
+    },
+    {
+      "problem_idx": 24,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12284.0
+    },
+    {
+      "problem_idx": 25,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12311.0
+    },
+    {
+      "problem_idx": 26,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13763.0
+    },
+    {
+      "problem_idx": 27,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3249.0
+    },
+    {
+      "problem_idx": 28,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12280.0
+    },
+    {
+      "problem_idx": 29,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3002.0
+    },
+    {
+      "problem_idx": 30,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12294.0
+    },
+    {
+      "problem_idx": 31,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 17780.0
+    },
+    {
+      "problem_idx": 32,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12267.0
+    },
+    {
+      "problem_idx": 33,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12294.0
+    },
+    {
+      "problem_idx": 34,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 17994.0
+    },
+    {
+      "problem_idx": 35,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12295.0
+    },
+    {
+      "problem_idx": 36,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 14025.0
+    },
+    {
+      "problem_idx": 37,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12355.0
+    },
+    {
+      "problem_idx": 38,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13621.0
+    },
+    {
+      "problem_idx": 39,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13763.0
+    },
+    {
+      "problem_idx": 40,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12236.0
+    },
+    {
+      "problem_idx": 41,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12280.0
+    },
+    {
+      "problem_idx": 42,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13499.0
+    },
+    {
+      "problem_idx": 43,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 14012.0
+    },
+    {
+      "problem_idx": 44,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 17780.0
+    },
+    {
+      "problem_idx": 45,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12292.0
+    },
+    {
+      "problem_idx": 46,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12294.0
+    },
+    {
+      "problem_idx": 47,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3126.0
+    },
+    {
+      "problem_idx": 48,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16440.0
+    },
+    {
+      "problem_idx": 49,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12283.0
+    },
+    {
+      "problem_idx": 50,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2317.0
+    },
+    {
+      "problem_idx": 51,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13982.0
+    },
+    {
+      "problem_idx": 52,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12306.0
+    },
+    {
+      "problem_idx": 53,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3126.0
+    },
+    {
+      "problem_idx": 54,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 14771.0
+    },
+    {
+      "problem_idx": 55,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12293.0
+    },
+    {
+      "problem_idx": 56,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12343.0
+    },
+    {
+      "problem_idx": 57,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 660.0
+    },
+    {
+      "problem_idx": 58,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12280.0
+    },
+    {
+      "problem_idx": 59,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12294.0
+    },
+    {
+      "problem_idx": 60,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12278.0
+    },
+    {
+      "problem_idx": 61,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12304.0
+    },
+    {
+      "problem_idx": 62,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 1715.0
+    },
+    {
+      "problem_idx": 63,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12286.0
+    },
+    {
+      "problem_idx": 64,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2650.0
+    },
+    {
+      "problem_idx": 65,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 18131.0
+    },
+    {
+      "problem_idx": 66,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 15315.0
+    },
+    {
+      "problem_idx": 67,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12278.0
+    },
+    {
+      "problem_idx": 68,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16440.0
+    },
+    {
+      "problem_idx": 69,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12293.0
+    },
+    {
+      "problem_idx": 70,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12278.0
+    },
+    {
+      "problem_idx": 71,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 17454.0
+    },
+    {
+      "problem_idx": 72,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 18559.0
+    },
+    {
+      "problem_idx": 73,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2593.0
+    },
+    {
+      "problem_idx": 74,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3977.0
+    },
+    {
+      "problem_idx": 75,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12270.0
+    },
+    {
+      "problem_idx": 76,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12289.0
+    },
+    {
+      "problem_idx": 77,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 9613.0
+    },
+    {
+      "problem_idx": 78,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12282.0
+    },
+    {
+      "problem_idx": 79,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12277.0
+    },
+    {
+      "problem_idx": 80,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12315.0
+    },
+    {
+      "problem_idx": 81,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3126.0
+    },
+    {
+      "problem_idx": 82,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2776.0
+    },
+    {
+      "problem_idx": 83,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 1971.0
+    },
+    {
+      "problem_idx": 84,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13182.0
+    },
+    {
+      "problem_idx": 85,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2247.0
+    },
+    {
+      "problem_idx": 86,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13545.0
+    },
+    {
+      "problem_idx": 87,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2816.0
+    },
+    {
+      "problem_idx": 88,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16477.0
+    },
+    {
+      "problem_idx": 89,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2035.0
+    },
+    {
+      "problem_idx": 90,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12272.0
+    },
+    {
+      "problem_idx": 91,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12289.0
+    },
+    {
+      "problem_idx": 92,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2132.0
+    },
+    {
+      "problem_idx": 93,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2468.0
+    },
+    {
+      "problem_idx": 94,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13780.0
+    },
+    {
+      "problem_idx": 95,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12276.0
+    },
+    {
+      "problem_idx": 96,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12668.0
+    },
+    {
+      "problem_idx": 97,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12278.0
+    },
+    {
+      "problem_idx": 98,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12668.0
+    },
+    {
+      "problem_idx": 99,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16477.0
+    },
+    {
+      "problem_idx": 100,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12668.0
+    },
+    {
+      "problem_idx": 101,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2439.0
+    },
+    {
+      "problem_idx": 102,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12276.0
+    },
+    {
+      "problem_idx": 103,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 10339.0
+    },
+    {
+      "problem_idx": 104,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 983.0
+    },
+    {
+      "problem_idx": 105,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12291.0
+    },
+    {
+      "problem_idx": 106,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 8279.0
+    },
+    {
+      "problem_idx": 107,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12270.0
+    },
+    {
+      "problem_idx": 108,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12310.0
+    },
+    {
+      "problem_idx": 109,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 1082.0
+    },
+    {
+      "problem_idx": 110,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12280.0
+    },
+    {
+      "problem_idx": 111,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12277.0
+    },
+    {
+      "problem_idx": 112,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 1753.0
+    },
+    {
+      "problem_idx": 113,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12304.0
+    },
+    {
+      "problem_idx": 114,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2593.0
+    },
+    {
+      "problem_idx": 115,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12277.0
+    },
+    {
+      "problem_idx": 116,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16786.0
+    },
+    {
+      "problem_idx": 117,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3126.0
+    },
+    {
+      "problem_idx": 118,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12265.0
+    },
+    {
+      "problem_idx": 119,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3048.0
+    },
+    {
+      "problem_idx": 120,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 11379.0
+    },
+    {
+      "problem_idx": 121,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12284.0
+    },
+    {
+      "problem_idx": 122,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12297.0
+    },
+    {
+      "problem_idx": 123,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 11897.0
+    },
+    {
+      "problem_idx": 124,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13803.0
+    },
+    {
+      "problem_idx": 125,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12284.0
+    },
+    {
+      "problem_idx": 126,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 11444.0
+    },
+    {
+      "problem_idx": 127,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12289.0
+    },
+    {
+      "problem_idx": 128,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13621.0
+    },
+    {
+      "problem_idx": 129,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12291.0
+    },
+    {
+      "problem_idx": 130,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16135.0
+    },
+    {
+      "problem_idx": 131,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2729.0
+    },
+    {
+      "problem_idx": 132,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12293.0
+    },
+    {
+      "problem_idx": 133,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12545.0
+    },
+    {
+      "problem_idx": 134,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 15315.0
+    },
+    {
+      "problem_idx": 135,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2247.0
+    },
+    {
+      "problem_idx": 136,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12629.0
+    },
+    {
+      "problem_idx": 137,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12277.0
+    },
+    {
+      "problem_idx": 138,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 10277.0
+    },
+    {
+      "problem_idx": 139,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12280.0
+    },
+    {
+      "problem_idx": 140,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12282.0
+    },
+    {
+      "problem_idx": 141,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 1753.0
+    },
+    {
+      "problem_idx": 142,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12281.0
+    },
+    {
+      "problem_idx": 143,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 17454.0
+    },
+    {
+      "problem_idx": 144,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12277.0
+    },
+    {
+      "problem_idx": 145,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 9149.0
+    },
+    {
+      "problem_idx": 146,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 19412.0
+    },
+    {
+      "problem_idx": 147,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 15315.0
+    },
+    {
+      "problem_idx": 148,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 17994.0
+    },
+    {
+      "problem_idx": 149,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12289.0
+    },
+    {
+      "problem_idx": 150,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16155.0
+    },
+    {
+      "problem_idx": 151,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12394.0
+    },
+    {
+      "problem_idx": 152,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12287.0
+    },
+    {
+      "problem_idx": 153,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13803.0
+    },
+    {
+      "problem_idx": 154,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 11289.0
+    },
+    {
+      "problem_idx": 155,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 10671.0
+    },
+    {
+      "problem_idx": 156,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12285.0
+    },
+    {
+      "problem_idx": 157,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12276.0
+    },
+    {
+      "problem_idx": 158,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12293.0
+    },
+    {
+      "problem_idx": 159,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12283.0
+    },
+    {
+      "problem_idx": 160,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16134.0
+    },
+    {
+      "problem_idx": 161,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12238.0
+    },
+    {
+      "problem_idx": 162,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 15464.0
+    },
+    {
+      "problem_idx": 163,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2383.0
+    },
+    {
+      "problem_idx": 164,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12280.0
+    },
+    {
+      "problem_idx": 165,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2094.0
+    },
+    {
+      "problem_idx": 166,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 3532.0
+    },
+    {
+      "problem_idx": 167,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 19429.0
+    },
+    {
+      "problem_idx": 168,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16856.0
+    },
+    {
+      "problem_idx": 169,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 711.0
+    },
+    {
+      "problem_idx": 170,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12311.0
+    },
+    {
+      "problem_idx": 171,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12277.0
+    },
+    {
+      "problem_idx": 172,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 11902.0
+    },
+    {
+      "problem_idx": 173,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12271.0
+    },
+    {
+      "problem_idx": 174,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12286.0
+    },
+    {
+      "problem_idx": 175,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2515.0
+    },
+    {
+      "problem_idx": 176,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2566.0
+    },
+    {
+      "problem_idx": 177,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12273.0
+    },
+    {
+      "problem_idx": 178,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 14025.0
+    },
+    {
+      "problem_idx": 179,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2430.0
+    },
+    {
+      "problem_idx": 180,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13674.0
+    },
+    {
+      "problem_idx": 181,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12295.0
+    },
+    {
+      "problem_idx": 182,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 11902.0
+    },
+    {
+      "problem_idx": 183,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12265.0
+    },
+    {
+      "problem_idx": 184,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13027.0
+    },
+    {
+      "problem_idx": 185,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12272.0
+    },
+    {
+      "problem_idx": 186,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13030.0
+    },
+    {
+      "problem_idx": 187,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12293.0
+    },
+    {
+      "problem_idx": 188,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12296.0
+    },
+    {
+      "problem_idx": 189,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 711.0
+    },
+    {
+      "problem_idx": 190,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12275.0
+    },
+    {
+      "problem_idx": 191,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 2746.0
+    },
+    {
+      "problem_idx": 192,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 1853.0
+    },
+    {
+      "problem_idx": 193,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12348.0
+    },
+    {
+      "problem_idx": 194,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 21494.0
+    },
+    {
+      "problem_idx": 195,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 13027.0
+    },
+    {
+      "problem_idx": 196,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12272.0
+    },
+    {
+      "problem_idx": 197,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16419.0
+    },
+    {
+      "problem_idx": 198,
+      "n": 1,
+      "c": 0,
+      "pass_at_k": {
+        "1": 0.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.0,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 12283.0
+    },
+    {
+      "problem_idx": 199,
+      "n": 1,
+      "c": 1,
+      "pass_at_k": {
+        "1": 1.0,
+        "5": null,
+        "16": null
+      },
+      "mean_score": 0.5,
+      "unique_solution_rate": 1.0,
+      "mean_output_length": 16477.0
+    }
+  ],
+  "mean_score": 0.125,
+  "mean_pass_rate": 0.25,
+  "mean_unique_solution_rate": 1.0,
+  "mean_output_length": 10953.865,
+  "n_problems_solved": 50,
+  "n_problems": 200,
+  "n_completions_per_problem": 1,
+  "global_step": 0
+}

@@ -1,0 +1,16 @@
+{
+  "label": "stage1",
+  "ok": true,
+  "n": 50,
+  "problem_id": "p02587",
+  "wall_seconds": 1.39,
+  "median_ms": 131.25,
+  "p10_ms": 54.42,
+  "p25_ms": 86.76,
+  "p75_ms": 153.7,
+  "p90_ms": 190.86,
+  "min_ms": 27.03,
+  "max_ms": 240.06,
+  "cv": 0.37,
+  "rel_spread": 1.623
+}
