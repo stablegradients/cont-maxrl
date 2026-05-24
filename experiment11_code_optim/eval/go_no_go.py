@@ -32,6 +32,14 @@ from pathlib import Path
 
 import pandas as pd
 
+# Belt-and-suspenders: even with enforce_eager + V0 engine, our vLLM+triton
+# combo on Grace trips torch._dynamo trying to import a missing `triton_key`
+# entry point. Tell dynamo to fall back to eager on any compile failure
+# (the error message itself prints this suggestion). Must be set before
+# importing torch/vllm.
+import torch._dynamo  # noqa: E402
+torch._dynamo.config.suppress_errors = True
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()

@@ -2,8 +2,8 @@
 #SBATCH --job-name=pie_probe_q3_1.7b
 #SBATCH --account=bgmo-dtai-gh
 #SBATCH --partition=ghx4
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=288
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=72
 #SBATCH --mem=0
 #SBATCH --time=02:00:00
 #SBATCH --nodes=1
@@ -56,6 +56,6 @@ $PYTHON -m experiment11_code_optim.eval.go_no_go \
     --top_p 1.0 \
     --max_tokens 4096 \
     --max_model_len 6656 \
-    --tensor_parallel_size 4 \
+    --tensor_parallel_size 1 \
     --output_json "${REPO_ROOT}/experiment11_code_optim/docs/probe_pie_instruct_O0_log2.json"
 echo "=== done ==="
