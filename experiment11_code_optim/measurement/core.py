@@ -38,9 +38,16 @@ import sys
 import tempfile
 import time
 
-# Spec §1: absolute path to g++ 14.2.0
+# Spec §1: absolute path to g++ 14.2.0.
+# COMPILE_FLAGS is -O0 (not -O3): the 2026-05-23 spread analysis showed -O3
+# normalises real algorithmic differences between accepted PIE solutions down
+# to <5% retired-instruction spread, leaving no learning signal. -O0 preserves
+# the spread (max/min up to 245,005× across the tgt pool) so the log2-speedup
+# reward has something to differentiate. Programs run ~10-50× slower at -O0,
+# which is why per_test_timeout_s defaults below were raised from 6→30.
+# Override via the PIE_COMPILE_FLAGS env-var split on commas if needed.
 GPP_PATH = "/opt/cray/pe/gcc-native/14/bin/g++"
-COMPILE_FLAGS = ["-O3", "-std=c++17"]
+COMPILE_FLAGS = ["-O0", "-std=c++17"]
 
 # Per-record compile scratch. Spec §1 names `/local` as the compile scratch, but
 # on DeltaAI `/local` itself is root-owned drwxr-xr-x; under SLURM the
@@ -582,7 +589,7 @@ def measure_from_disk(
     *,
     test_case_dir: str,
     problem_id: str,
-    per_test_timeout_s: float = 10.0,
+    per_test_timeout_s: float = 30.0,
     n_perf_samples: int = 3,
     skip_measurement: bool = False,
     pch_include_path: str | None = None,
@@ -664,7 +671,7 @@ def measure(
     code_str: str,
     test_cases: list[tuple[str, str]],
     *,
-    per_test_timeout_s: float = 10.0,
+    per_test_timeout_s: float = 30.0,
     n_perf_samples: int = 3,
     skip_measurement: bool = False,
     pch_include_path: str | None = None,
@@ -675,7 +682,9 @@ def measure(
         code_str: full C++ source.
         test_cases: list of (stdin_input, expected_stdout) pairs. Each pair is
             graded independently; the gate is satisfied only if EVERY pair passes.
-        per_test_timeout_s: per-test execution wall-clock cap (spec §4.2 default 10s).
+        per_test_timeout_s: per-test execution wall-clock cap. Default 30s
+            after the -O0 switch (-O0 makes programs 10-50× slower; the prior
+            10s default was a 100% timeout on long-running tgt programs).
         n_perf_samples: how many perf runs per test case for the median. Spec §4.2
             mandates median-of-3 (default); 1 is the M3 mitigation (free 3x on the
             perf phase, supported empirically by item 3 determinism showing rel_spread

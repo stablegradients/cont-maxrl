@@ -109,11 +109,20 @@ def score_and_save(
     problem_pass_counts: dict[int, int] = defaultdict(int)
     problem_total_counts: dict[int, int] = defaultdict(int)
     problem_scores_list: dict[int, list[float]] = defaultdict(list)
+    # PIE: track per-problem speedup ratios when the reward fn provides them.
+    # speedup is src_instr/cand_instr on gate-pass, 0 on gate-fail (see
+    # experiment11_code_optim/reward/pie_reward_fn.py). Used for
+    # best_speedup_at_k and frac_problems_{with_speedup,mode2} downstream.
+    problem_speedups_list: dict[int, list[float]] = defaultdict(list)
+    have_speedup = False
     for prob_idx, score_dict in zip(problem_indices, scores):
         problem_total_counts[prob_idx] += 1
         problem_scores_list[prob_idx].append(score_dict["score"])
         if score_dict["acc"] == 1.0:
             problem_pass_counts[prob_idx] += 1
+        if "speedup" in score_dict:
+            problem_speedups_list[prob_idx].append(float(score_dict["speedup"]))
+            have_speedup = True
 
     # Unique solution rate and output length per problem
     problem_unique_rates: dict[int, float] = {}
@@ -189,11 +198,58 @@ def score_and_save(
             ]
             avg_best_at_k[str(k)] = sum(values) / len(values) if values else None
 
+    # PIE: best_speedup@K and per-problem extras when score_dicts carry speedup.
+    # best_speedup@K uses the same unbiased E[max(K samples)] estimator as
+    # best_at_K, but applied to src/cand ratios instead of rewards. For gate-fail
+    # rollouts speedup is 0 (so they pull the estimator down correctly when K is
+    # large enough to include them).
+    avg_best_speedup_at_k: dict[str, float] | None = None
+    frac_problems_with_speedup: float | None = None
+    frac_problems_mode2: float | None = None
+    mean_speedup_given_pass: float | None = None
+    if have_speedup:
+        avg_best_speedup_at_k = {}
+        for k in k_values:
+            per_problem_vals: list[float] = []
+            for i in range(n_problems):
+                speedups_i = problem_speedups_list[i]
+                if not speedups_i:
+                    continue
+                if k <= len(speedups_i):
+                    per_problem_vals.append(_best_at_k_unbiased(speedups_i, k))
+            avg_best_speedup_at_k[str(k)] = (
+                sum(per_problem_vals) / len(per_problem_vals) if per_problem_vals else None
+            )
+
+        # A problem is "with speedup" iff at least one of its rollouts has
+        # reward > 0 (= speedup > 1). "Mode-2" iff at least one rollout has
+        # reward >= 0.3 (= speedup >= 1.23×, the empirical bimodality cutoff
+        # from docs/DATA_ANALYSIS_2026_05_22_23.md).
+        n_with_speedup = 0
+        n_mode2 = 0
+        for i in range(n_problems):
+            scores_i = problem_scores_list[i]
+            if any(s > 0 for s in scores_i):
+                n_with_speedup += 1
+            if any(s >= 0.3 for s in scores_i):
+                n_mode2 += 1
+        frac_problems_with_speedup = n_with_speedup / max(n_problems, 1)
+        frac_problems_mode2 = n_mode2 / max(n_problems, 1)
+
+        # mean_speedup over gate-passing rollouts (where speedup > 0).
+        # Includes gate-pass-no-speedup rollouts (speedup ~ 1.0) so this is the
+        # "average X×" the paper reports, not biased away from 1.
+        all_pass_speedups = [s for sl in problem_speedups_list.values() for s in sl if s > 0]
+        mean_speedup_given_pass = (
+            sum(all_pass_speedups) / len(all_pass_speedups) if all_pass_speedups else None
+        )
+
     metrics = {
         "epoch": epoch,
         "global_step": global_step,
         "pass_at_k": avg_pass_at_k,
         "best_at_k": avg_best_at_k,  # None when INSITU_EVAL_BEST_AT_K is unset
+        "best_speedup_at_k": avg_best_speedup_at_k,  # None when no speedup field
         "per_problem": per_problem_results,
         "summary": {
             "total_problems": n_problems,
@@ -205,6 +261,10 @@ def score_and_save(
             "mean_unique_solution_rate": sum(problem_unique_rates.values()) / max(len(problem_unique_rates), 1),
             "mean_output_length": sum(problem_mean_lengths.values()) / max(len(problem_mean_lengths), 1),
             "unique_code_rate_global": unique_code_rate_global,
+            # PIE extras (None when reward fn doesn't expose speedup)
+            "frac_problems_with_speedup": frac_problems_with_speedup,
+            "frac_problems_mode2": frac_problems_mode2,
+            "mean_speedup_given_pass": mean_speedup_given_pass,
         },
     }
 

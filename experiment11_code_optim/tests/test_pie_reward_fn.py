@@ -13,22 +13,22 @@ import pytest
 PIE_DATA_ROOT = Path("/work/nvme/bgmo/sramasubramanian/pie_data")
 TESTS_ROOT = PIE_DATA_ROOT / "tests"
 VAL_JSONL = PIE_DATA_ROOT / "raw" / "val.jsonl"
-REFERENCE_TABLE_ROOT = PIE_DATA_ROOT / "reference_table"
 
 _data_ready = TESTS_ROOT.is_dir() and (TESTS_ROOT / "MANIFEST.json").exists()
 _skip_no_data = pytest.mark.skipif(
     not _data_ready,
     reason="PIE unified test-case archive not built; see precompute/build_unified_test_cases.py",
 )
-_ref_ready = (REFERENCE_TABLE_ROOT / "MANIFEST.json").exists()
-_skip_no_ref = pytest.mark.skipif(
-    not _ref_ready,
-    reason="PIE reference table not built; see precompute/build_reference_table.py",
-)
 
 
-def _gt(problem_id: str, split: str = "train") -> str:
-    return json.dumps({"problem_id": problem_id, "split": split})
+def _gt(problem_id: str, split: str = "train", src_instr_count: int | None = None) -> str:
+    """Build a ground_truth JSON string. Pass src_instr_count to exercise the
+    log2(src/cand) reward; omit it to exercise the gate-pass-no-src-instr
+    fallback path (returns score=0 acc=1 speedup=0 with a stderr warning)."""
+    d: dict = {"problem_id": problem_id, "split": split}
+    if src_instr_count is not None:
+        d["src_instr_count"] = src_instr_count
+    return json.dumps(d)
 
 
 def _tgt_code_for(problem_id: str) -> str:
@@ -144,7 +144,11 @@ def test_compute_scores_batch_known_good_program_passes_via_dedup_path():
     assert len(r_four) == 4
     for r in r_four:
         assert r["acc"] == 1.0, f"unexpected fail: {r}"
-        assert 0.0 <= r["score"] <= 1.0
+        # New reward: max(0, log2(src/cand)). Without src_instr_count in the
+        # ground_truth, the fn returns score=0 acc=1 speedup=0 (warn-once);
+        # with one, score can be any non-negative float. Lower-bound only.
+        assert r["score"] >= 0.0, f"score must be non-negative; got {r['score']}"
+        assert "speedup" in r, f"score dict must carry speedup field; got {r}"
     assert all(r == r_four[0] for r in r_four)
     # Without dedup, 4 identical inputs would take ~4× a single grade. With
     # dedup, the batch collapses to one grading-task, so wall-clock should be
@@ -163,7 +167,7 @@ def test_compute_scores_batch_unparseable_rollouts_score_zero():
         [{"solution_str": "no code here", "ground_truth": _gt("p02587")}],
         test_case_dir=str(TESTS_ROOT),
     )
-    assert results == [{"score": 0.0, "acc": 0.0}]
+    assert results == [{"score": 0.0, "acc": 0.0, "speedup": 0.0}]
 
 
 @_skip_no_data
@@ -182,10 +186,86 @@ def test_compute_score_single_rollout_matches_batch():
 
 
 # ---------------------------------------------------------------------------
-# GATE C: end-to-end with the §14 step 6 reference table.
-# Permanent regression on the percentile-rank lookup wired through
-# compute_scores_batch + the on-disk reference table written by
-# precompute/build_reference_table.py.
+# log2(src/cand) reward computation: regression test on the new reward formula.
+# ---------------------------------------------------------------------------
+
+
+@_skip_no_data
+def test_compute_scores_batch_log2_speedup_reward_with_src_instr_count():
+    """Reward = max(0, log2(src/cand)) on gate-pass. Construct a ground_truth
+    with src_instr_count >> cand (the known-good code) and confirm we get a
+    positive reward + speedup > 1, and that the score == log2(speedup)."""
+    import math
+    from experiment11_code_optim.reward.pie_reward_fn import compute_scores_batch
+
+    pid = "p02587"
+    code = _tgt_code_for(pid)
+    # First grade to discover the actual cand_instr (whatever the backend
+    # produces today). Then re-grade with src_instr = 10× that value, so we
+    # expect reward = log2(10) ≈ 3.32.
+    r0 = compute_scores_batch(
+        [{"solution_str": f"```cpp\n{code}\n```",
+          "ground_truth": _gt(pid)}],
+        test_case_dir=str(TESTS_ROOT),
+    )[0]
+    assert r0["acc"] == 1.0, f"baseline grade must pass; got {r0}"
+
+    # Pick a src_instr_count that gives a clean expected speedup. We don't
+    # know exact cand_instr in advance, but a synthetic ratio works: set
+    # src = 10 * a known small number, and trust the reward fn to use it
+    # against whatever cand_instr comes back. Use a large dummy src so the
+    # log2 ratio is unambiguously positive.
+    dummy_src = 10_000_000_000  # 1e10; much larger than any candidate
+    r1 = compute_scores_batch(
+        [{"solution_str": f"```cpp\n{code}\n```",
+          "ground_truth": _gt(pid, src_instr_count=dummy_src)}],
+        test_case_dir=str(TESTS_ROOT),
+    )[0]
+    assert r1["acc"] == 1.0
+    assert r1["speedup"] > 1.0, (
+        f"speedup must be > 1 when src >> cand; got {r1}"
+    )
+    assert r1["score"] > 0.0, f"score must be positive when speedup > 1; got {r1}"
+    # The score MUST equal log2(speedup) within float tolerance.
+    expected = max(0.0, math.log2(r1["speedup"]))
+    assert abs(r1["score"] - expected) < 1e-6, (
+        f"score={r1['score']} != log2(speedup={r1['speedup']})={expected}"
+    )
+
+
+@_skip_no_data
+def test_compute_scores_batch_log2_speedup_clamps_to_zero_when_cand_slower():
+    """When cand is SLOWER than src (speedup < 1), score = max(0, log2(<1)) = 0,
+    but acc remains 1.0 and speedup carries the < 1 ratio for diagnostics."""
+    from experiment11_code_optim.reward.pie_reward_fn import compute_scores_batch
+
+    pid = "p02587"
+    code = _tgt_code_for(pid)
+    # src_instr deliberately tiny → speedup < 1 → score clamped to 0.
+    tiny_src = 1
+    r = compute_scores_batch(
+        [{"solution_str": f"```cpp\n{code}\n```",
+          "ground_truth": _gt(pid, src_instr_count=tiny_src)}],
+        test_case_dir=str(TESTS_ROOT),
+    )[0]
+    assert r["acc"] == 1.0, f"gate must still pass; got {r}"
+    assert r["speedup"] < 1.0, f"synthetic tiny src must yield speedup < 1; got {r}"
+    assert r["score"] == 0.0, f"score must clamp to 0 below speedup=1; got {r}"
+
+
+def test_compute_scores_batch_unparseable_returns_full_zero_dict():
+    """Unparseable rollout returns {"score": 0.0, "acc": 0.0, "speedup": 0.0}.
+    Verl's NaiveRewardManager pivots every key into batch.non_tensor_batch,
+    so the speedup field must always be present (otherwise the metrics hook
+    crashes with a missing key)."""
+    from experiment11_code_optim.reward.pie_reward_fn import compute_scores_batch
+    r = compute_scores_batch(
+        [{"solution_str": "no code here", "ground_truth": _gt("p02587")}],
+        test_case_dir=str(TESTS_ROOT),
+    )
+    assert r == [{"score": 0.0, "acc": 0.0, "speedup": 0.0}]
+
+
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -322,26 +402,9 @@ def test_global_timeout_caps_batch_and_passes_other_grades():
     assert results[1]["acc"] == 0.0, f"sleep grade must fail; got {results[1]}"
 
 
-@_skip_no_data
-@_skip_no_ref
-def test_compute_scores_batch_with_reference_table_gives_nonzero_percentile():
-    """GATE C: when reference_table_dir points at a real precomputed table,
-    a known-good val.jsonl tgt_code must round-trip to a non-zero score in
-    (0, 1] (percentile rank, not stub 0.5). This proves the whole pipeline
-    composes: precompute → reference JSON → percentile lookup → reward dict."""
-    from experiment11_code_optim.reward.pie_reward_fn import compute_scores_batch
-
-    pid = "p02587"
-    code = _tgt_code_for(pid)
-    results = compute_scores_batch(
-        [{"solution_str": f"```cpp\n{code}\n```", "ground_truth": _gt(pid, split="val")}],
-        test_case_dir=str(TESTS_ROOT),
-        reference_table_dir=str(REFERENCE_TABLE_ROOT),
-    )
-    r = results[0]
-    assert r["acc"] == 1.0, f"acc must be 1.0 on known-good code; got {r}"
-    assert 0.0 < r["score"] <= 1.0, (
-        f"score must be in (0, 1] when ref table is wired; got {r['score']}. "
-        f"score==0.5 exactly suggests the stub fallback fired (ref table "
-        f"missing or empty for {pid})."
-    )
+# NOTE: the legacy GATE C regression on the percentile-rank reference-table
+# lookup has been removed. The new reward fn anchors against per-record
+# src_instr_count (embedded in ground_truth by build_pie_parquet.py) and no
+# longer reads a reference table. See
+# test_compute_scores_batch_log2_speedup_reward_with_src_instr_count above
+# for the replacement regression that exercises the new formula end-to-end.

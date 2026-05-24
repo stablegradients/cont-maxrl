@@ -1,8 +1,22 @@
 """
-PIE reward function (spec §8.2) with code deduplication and batched gate runner.
+PIE reward function with code deduplication and batched gate runner.
+
+Reward = max(0, log2(src_instr_count / cand_instr_count)) on gate-pass, else 0.
+Per-rollout src_instr_count comes from ground_truth["src_instr_count"], pre-
+computed by experiment11_code_optim/precompute/build_src_instr_table.py and
+embedded by build_pie_parquet.py. No reference table, no percentile rank.
+
+Each rollout's score dict carries:
+  {"score": float,    # max(0, log2(src/cand))  — the RL reward
+   "acc":   float,    # 1.0 if all tests pass, else 0.0
+   "speedup": float}  # src_instr/cand_instr on gate-pass, else 0.0
+
+verl's NaiveRewardManager pivots every key in this dict into
+batch.non_tensor_batch[<key>], so the monkey-patched compute_data_metrics
+hook in experiment11_code_optim/guards/pie_metrics.py can read acc/speedup
+arrays per step to compute gate_pass_rate / speedup_rate / mean_speedup etc.
 
 Public interface:
-
   - `compute_score(solution_str, ground_truth, ...)`         single-rollout
   - `compute_scores_batch(reward_inputs, ...)`               batch with dedup
   - `extract_code(solution_str)`                             shared parser
@@ -12,7 +26,8 @@ two-level scheduler (compile-in-parallel + per-test-case run-in-parallel)
 calls `measurement.core._compile` and `_run_and_compare` directly. Results
 are scattered back to the original rollout indices. `measurement.core.
 measure_from_disk` and `gate_runner.sh` are used only by the offline
-reference-table precompute (latency-insensitive), not the RL hot path.
+build_src_instr_table.py / build_reference_table.py precompute (latency-
+insensitive), not the RL hot path.
 
 This module is the redirect target for `experiment4_llm.src.reward_function`
 when `PIE_MODE=1` (see PARITY_CONFIG.md §8.6 redirect mechanism). Therefore the
@@ -27,15 +42,16 @@ verifies the redirect end-to-end on a known-good C++ program.
 """
 from __future__ import annotations
 
-import bisect
 import hashlib
 import itertools
 import json
+import math
 import os
 import pickle
 import random
 import re
 import shutil
+import sys
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, wait as cf_wait
@@ -260,165 +276,53 @@ def extract_code(solution_str: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Reference table lookup (percentile reward). For now this is a stub that
-# returns 0.5 on all_pass; the real lookup lives at §14 step 6 when the
-# reference-table precompute is wired in.
-# ---------------------------------------------------------------------------
-
-# Reference-table RAM cache: {(split, problem_id) -> sorted list of elapsed_ns}.
-# Loaded once per process via preload_reference_table(); identical Lustre-
-# avoidance design as _TEST_CASE_CACHE above.
-_REF_TABLE_CACHE: dict[tuple[str, str], list[int]] = {}
-_REF_TABLE_CACHE_DIR: str | None = None
-
-
-def _check_reference_table_backend(reference_table_dir: str) -> None:
-    """Refuse to load a reference table built under a backend that doesn't
-    match the current measurement backend — the elapsed_ns_values would be
-    nanoseconds vs retired-instructions, mixing them gives garbage percentiles.
-
-    Strictly enforced when MANIFEST.json exists and carries a `backend` field
-    (schema_version >= 2). Older tables without `backend` are silently
-    tolerated for backward-compat with reference tables built before this
-    check was added — those were always walltime, and we only error if the
-    caller has explicitly opted into perf (preventing the dangerous mix).
-    """
-    manifest_path = os.path.join(reference_table_dir, "MANIFEST.json")
-    if not os.path.isfile(manifest_path):
-        return
-    try:
-        with open(manifest_path) as f:
-            manifest = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return
-    table_backend = manifest.get("backend")
-    if table_backend is None:
-        # Legacy table (schema_version 1) — assume walltime; refuse if caller
-        # is in perf mode.
-        if MEASUREMENT_BACKEND == "perf":
-            raise RuntimeError(
-                f"Reference table at {reference_table_dir} predates the "
-                f"backend field (schema_version 1) — assumed walltime. "
-                f"Current PIE_BACKEND=perf; rebuild the reference table under "
-                f"PIE_BACKEND=perf or unset PIE_BACKEND."
-            )
-        return
-    if table_backend != MEASUREMENT_BACKEND:
-        raise RuntimeError(
-            f"Reference-table backend mismatch: table was built under "
-            f"backend={table_backend!r} (units: "
-            f"{'instructions' if table_backend == 'perf' else 'nanoseconds'}) "
-            f"but the reward path is running under MEASUREMENT_BACKEND="
-            f"{MEASUREMENT_BACKEND!r}. Set PIE_BACKEND={table_backend} "
-            f"or rebuild the table with PIE_BACKEND={MEASUREMENT_BACKEND}."
-        )
-
-
-def preload_reference_table(reference_table_dir: str) -> int:
-    """Populate the in-memory cache {(split, pid): elapsed_ns_values} for
-    percentile-rank scoring. Idempotent.
-
-    Fast path: load `<reference_table_dir>.pkl` if it exists (one read).
-    Slow path: walk the dir tree (~1592 JSON files). Override the pickle
-    path via PIE_REFERENCE_TABLE_PICKLE env var.
-    """
-    global _REF_TABLE_CACHE_DIR
-    if _REF_TABLE_CACHE_DIR == reference_table_dir and _REF_TABLE_CACHE:
-        return len(_REF_TABLE_CACHE)
-
-    _check_reference_table_backend(reference_table_dir)
-
-    pickle_path = (
-        os.environ.get("PIE_REFERENCE_TABLE_PICKLE")
-        or (reference_table_dir.rstrip("/") + ".pkl")
-    )
-    if os.path.isfile(pickle_path):
-        with open(pickle_path, "rb") as f:
-            _REF_TABLE_CACHE.clear()
-            _REF_TABLE_CACHE.update(pickle.load(f))
-        _REF_TABLE_CACHE_DIR = reference_table_dir
-        return len(_REF_TABLE_CACHE)
-
-    # Fallback: walk the tree.
-    _REF_TABLE_CACHE.clear()
-    for split in ("train", "val", "test"):
-        sdir = os.path.join(reference_table_dir, split)
-        if not os.path.isdir(sdir):
-            continue
-        for fn in os.listdir(sdir):
-            if not fn.endswith(".json"):
-                continue
-            pid = fn[:-5]
-            try:
-                with open(os.path.join(sdir, fn)) as f:
-                    d = json.load(f)
-                _REF_TABLE_CACHE[(split, pid)] = d.get("elapsed_ns_values", [])
-            except (OSError, json.JSONDecodeError):
-                pass
-    _REF_TABLE_CACHE_DIR = reference_table_dir
-    return len(_REF_TABLE_CACHE)
-
-
-def _percentile_from_reference_table(
-    elapsed_ns: int,
-    problem_id: str,
-    split: str,
-    reference_table_dir: str | None,
-) -> float:
-    """Midrank percentile of `elapsed_ns` against the per-problem reference
-    distribution. Spec §8.2:
-        lo = bisect_left(refs, instr); hi = bisect_right(refs, instr)
-        score = 1.0 - (lo + hi) / 2.0 / n_refs
-
-    Loads the reference table from the in-process cache (populated by
-    `preload_reference_table` on first call, idempotent). Returns 0.5 stub
-    when reference_table_dir is None or the (split, pid) entry has no
-    references (e.g., problems excluded from the precompute).
-    """
-    if reference_table_dir is None:
-        return 0.5
-    if _REF_TABLE_CACHE_DIR != reference_table_dir or not _REF_TABLE_CACHE:
-        preload_reference_table(reference_table_dir)
-    refs = _REF_TABLE_CACHE.get((split, problem_id))
-    if not refs:
-        return 0.5
-    lo = bisect.bisect_left(refs, elapsed_ns)
-    hi = bisect.bisect_right(refs, elapsed_ns)
-    return max(0.0, min(1.0, 1.0 - (lo + hi) / 2.0 / len(refs)))
-
-
-# ---------------------------------------------------------------------------
 # Path resolution: kwargs (verl reward_kwargs path) → env (insitu_eval path).
 # ---------------------------------------------------------------------------
 
-def _resolve_paths(kwargs: dict[str, Any]) -> tuple[str, str | None]:
+def _resolve_paths(kwargs: dict[str, Any]) -> str:
     test_case_dir = (
         kwargs.get("test_case_dir")
         or os.environ.get("PIE_TEST_CASE_DIR")
     )
-    reference_table_dir = (
-        kwargs.get("reference_table_dir")
-        or os.environ.get("PIE_REFERENCE_TABLE_DIR")
-    )
     if not test_case_dir:
         raise RuntimeError(
             "PIE reward fn requires test_case_dir via reward_kwargs or "
-            "PIE_TEST_CASE_DIR env var (spec §8.6)"
+            "PIE_TEST_CASE_DIR env var"
         )
-    return test_case_dir, reference_table_dir
+    return test_case_dir
+
+
+_WARNED_MISSING_SRC_INSTR = False
+
+
+def _warn_missing_src_instr_once() -> None:
+    """Log once per process if ground_truth lacks src_instr_count. Indicates
+    a parquet mismatch (built without build_src_instr_table.py being run
+    first). Without src_instr_count the log2(src/cand) reward can't be
+    computed; gate-pass rollouts will return score=0, speedup=0."""
+    global _WARNED_MISSING_SRC_INSTR
+    if _WARNED_MISSING_SRC_INSTR:
+        return
+    _WARNED_MISSING_SRC_INSTR = True
+    print(
+        "[pie_reward_fn] WARN: ground_truth lacks 'src_instr_count'. "
+        "Rebuild parquets via build_src_instr_table.py + build_pie_parquet.py. "
+        "All gate-pass rollouts will report score=0 until fixed.",
+        file=sys.stderr, flush=True,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-_ZERO = {"score": 0.0, "acc": 0.0}
+_ZERO = {"score": 0.0, "acc": 0.0, "speedup": 0.0}
 
 
 def compute_score(
     solution_str: str,
     ground_truth: str,
-    timeout_per_test: int = 6,
+    timeout_per_test: int = 30,
     memory_limit_mb: int = 512,
     data_source: str | None = None,
     extra_info: Any = None,
@@ -450,7 +354,7 @@ def grade_dedup_batch(
     dedup_tasks: dict[str, dict],
     test_case_dir: str,
     *,
-    timeout_per_test: float = 6.0,
+    timeout_per_test: float = 30.0,
     num_workers: int | None = None,
     measurement_max_tests: int | None = None,
     pch_include_path: str | None = None,
@@ -655,56 +559,73 @@ def grade_dedup_batch(
 
 def compute_scores_batch(
     reward_inputs: list[dict],
-    timeout_per_test: int = 6,
+    timeout_per_test: int = 30,
     memory_limit_mb: int = 512,
     num_workers: int | None = None,
-    global_timeout: float = 60.0,  # wall-clock cap on the phase-3 test-run pool
-                                   # (see grade_dedup_batch). One pathological program
-                                   # cannot hold the batch past this; un-completed
-                                   # grades return score 0 with error="batch timeout".
+    global_timeout: float = 300.0,  # wall-clock cap on the phase-3 test-run pool.
+                                    # Bumped 60→300 after -O0 switch: -O0 programs
+                                    # are 10-50× slower, and at G=16 × 256 prompts
+                                    # the 60s cap was clipping ~30% of batches.
+                                    # One pathological program still cannot hold the
+                                    # batch past this; un-completed grades return
+                                    # score 0 with error="batch timeout".
     measurement_max_tests: int | None = None,
     **kwargs,
 ) -> list[dict]:
-    """Batch reward with code-dedup. Returns one dict per input in the original
-    order, each `{"score": float, "acc": float}`.
+    """Batch reward with code-dedup. Returns one dict per input in the
+    original order, each `{"score": float, "acc": float, "speedup": float}`.
 
-    Dedup key = `md5(code + "::" + problem_id)`. Per the speed_fix.md design
-    note: the key MUST include problem_id because two identical C++ programs
-    submitted for different problems must be graded against different test
-    cases. Two rollouts with identical code for the SAME problem_id collapse
-    to one compile/gate/measure cycle.
+    Reward: max(0, log2(src_instr / cand_instr)) on gate-pass, else 0.
+    src_instr comes from per-rollout ground_truth["src_instr_count"]
+    (different prompts that happen to dedup to the same candidate code can
+    have different src_instr — that's why the parsed src_instr list runs
+    parallel to completion_keys, NOT keyed on the dedup_tasks dict).
 
-    The heavy lifting lives in `grade_dedup_batch`; this fn is the rollout-
-    indexed wrapper that handles parse + dedup at the front and percentile-
-    rank scoring at the back.
+    Dedup key = `md5(code + "::" + problem_id)`. The key MUST include
+    problem_id because two identical C++ programs submitted for different
+    problems must be graded against different test cases. Two rollouts with
+    identical code for the SAME problem_id collapse to one compile/gate/
+    measure cycle.
+
+    Extra kwargs (e.g., `reference_table_dir` from legacy callers) are
+    absorbed into **kwargs and silently ignored.
     """
     if not reward_inputs:
         return []
 
-    test_case_dir, reference_table_dir = _resolve_paths(kwargs)
+    test_case_dir = _resolve_paths(kwargs)
 
-    # ---- Phase 1: extract + dedup ----
+    # ---- Phase 1: extract + dedup, capture per-rollout src_instr_count ----
     # completion_keys[i] = dedup key for rollout i (or None if unparseable)
+    # src_instrs[i]      = src_instr_count for rollout i (or None)
     completion_keys: list[str | None] = []
+    src_instrs: list[int | None] = []
     dedup_tasks: dict[str, dict] = {}  # key → {"code", "problem_id", "split"}
 
     for item in reward_inputs:
         code = extract_code(item["solution_str"])
         if not code:
             completion_keys.append(None)
+            src_instrs.append(None)
             continue
         try:
             gt = json.loads(item["ground_truth"])
         except (json.JSONDecodeError, TypeError, KeyError):
             completion_keys.append(None)
+            src_instrs.append(None)
             continue
         problem_id = gt.get("problem_id")
         if not problem_id:
             completion_keys.append(None)
+            src_instrs.append(None)
             continue
         split = gt.get("split", "train")
+        src_instr = gt.get("src_instr_count")
+        if src_instr is None:
+            _warn_missing_src_instr_once()
         key = hashlib.md5(f"{code}::{problem_id}".encode()).hexdigest()
         completion_keys.append(key)
+        src_instrs.append(src_instr if isinstance(src_instr, (int, float)) and src_instr > 0 else None)
         if key not in dedup_tasks:
             dedup_tasks[key] = {"code": code, "problem_id": problem_id, "split": split}
 
@@ -718,21 +639,27 @@ def compute_scores_batch(
         global_timeout=float(global_timeout) if global_timeout else None,
     )
 
-    # ---- Phase 3: scatter, compute score from elapsed_ns ----
+    # ---- Phase 3: scatter, compute log2-speedup reward per rollout ----
     out: list[dict] = []
     for i, key in enumerate(completion_keys):
         if key is None:
             out.append(dict(_ZERO))
             continue
         r = dedup_results[key]
-        if not r["all_pass"] or r["elapsed_ns"] is None:
+        if not r["all_pass"] or r["elapsed_ns"] is None or r["elapsed_ns"] <= 0:
             out.append(dict(_ZERO))
             continue
-        task = dedup_tasks[key]
-        score = _percentile_from_reference_table(
-            r["elapsed_ns"], task["problem_id"], task["split"], reference_table_dir
-        )
-        out.append({"score": float(score), "acc": 1.0})
+        cand_instr = r["elapsed_ns"]  # name kept across backends; under PIE_BACKEND=perf this is retired-instructions
+        src_instr = src_instrs[i]
+        if src_instr is None:
+            # Gate-passed but no src_instr_count in ground_truth — log already
+            # warned once. Record gate-pass for acc but emit 0 reward / 1.0
+            # speedup placeholder so the metrics don't claim spurious speedups.
+            out.append({"score": 0.0, "acc": 1.0, "speedup": 0.0})
+            continue
+        ratio = src_instr / cand_instr
+        reward = max(0.0, math.log2(ratio))
+        out.append({"score": float(reward), "acc": 1.0, "speedup": float(ratio)})
 
     return out
 

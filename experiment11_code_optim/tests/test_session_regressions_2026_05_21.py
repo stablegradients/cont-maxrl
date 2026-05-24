@@ -289,20 +289,11 @@ def test_test_case_pickle_fast_path_under_500ms():
     )
 
 
-@pytest.mark.skipif(not REF_TABLE_PICKLE.is_file(), reason="reference_table.pkl not built yet")
-def test_reference_table_pickle_fast_path_under_500ms():
-    """Bug M companion: reference_table.pkl must load fast."""
-    from experiment11_code_optim.reward import pie_reward_fn as pf
-    pf._REF_TABLE_CACHE.clear()
-    pf._REF_TABLE_CACHE_DIR = None
-    os.environ["PIE_REFERENCE_TABLE_PICKLE"] = str(REF_TABLE_PICKLE)
-    t0 = time.monotonic()
-    n = pf.preload_reference_table("/work/nvme/bgmo/sramasubramanian/pie_data/reference_table")
-    elapsed_ms = (time.monotonic() - t0) * 1000
-    assert n > 100, f"expected >100 ref entries, got {n}"
-    assert elapsed_ms < 500, (
-        f"preload_reference_table took {elapsed_ms:.0f} ms; pickle fast path regressed"
-    )
+# Removed `test_reference_table_pickle_fast_path_under_500ms`: the reference
+# table is no longer used by the reward fn. The replacement denominator is
+# the per-record `src_instr_count` embedded in ground_truth; load latency for
+# that field is paid at parquet-read time, not at reward-grade time, so a
+# preload-speed regression test no longer applies.
 
 
 # ===========================================================================

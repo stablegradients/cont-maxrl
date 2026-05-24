@@ -40,6 +40,16 @@ if os.environ.get("PIE_MODE") == "1":
 from experiment11_code_optim.guards.actor_carveout import install_actor_carveout_hook  # noqa: E402
 install_actor_carveout_hook()
 
+# PIE-specific per-step metrics (gate_pass_rate, mean_speedup, max_speedup,
+# fraction_dead_groups, fraction_mode2, speedup_rate). Monkey-patches
+# verl.trainer.ppo.metric_utils.compute_data_metrics — must be installed
+# before `from experiment4_llm.src.train import main` so the patched fn is
+# already the bound symbol when verl resolves it. Hook is a no-op outside
+# PIE_MODE=1.
+if os.environ.get("PIE_MODE") == "1":
+    from experiment11_code_optim.guards.pie_metrics import install_pie_metrics_hook  # noqa: E402
+    install_pie_metrics_hook()
+
 from experiment4_llm.src.train import main  # noqa: E402 — must follow shim install
 
 if __name__ == "__main__":

@@ -902,10 +902,19 @@ class RayPPOTrainer:
         for k, v in best_at_k.items():
             if v is not None:
                 metric_dict[f"{prefix}/best_at_{k}"] = v
+        # PIE: best_speedup@K (only populated when the reward fn returns a
+        # speedup field; identical estimator to best_at_K but on src/cand
+        # ratios instead of log2 rewards).
+        best_speedup_at_k = metrics.get("best_speedup_at_k") or {}
+        for k, v in best_speedup_at_k.items():
+            if v is not None:
+                metric_dict[f"{prefix}/best_speedup_at_{k}"] = v
         summary = metrics.get("summary", {})
         for key in ["mean_score", "mean_pass_rate", "mean_unique_solution_rate", "mean_output_length",
-                     "n_problems_solved", "unique_code_rate_global"]:
-            if key in summary:
+                     "n_problems_solved", "unique_code_rate_global",
+                     # PIE summary extras
+                     "frac_problems_with_speedup", "frac_problems_mode2", "mean_speedup_given_pass"]:
+            if key in summary and summary[key] is not None:
                 metric_dict[f"{prefix}/{key}"] = summary[key]
 
         return metric_dict
