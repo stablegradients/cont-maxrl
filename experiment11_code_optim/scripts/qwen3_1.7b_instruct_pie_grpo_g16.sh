@@ -71,7 +71,10 @@ MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-1.7B}"
 OUTPUT_DIR="${STORAGE_ROOT}/results/qwen3_1.7b_instruct_pie_grpo_g16_s${SEED}"
 ACTOR_CKPT_DIR="${OUTPUT_DIR}/actor_ckpts"
 mkdir -p "${OUTPUT_DIR}" "${ACTOR_CKPT_DIR}"
-export PIE_ACTOR_CARVEOUT_DIR="${ACTOR_CKPT_DIR}"
+# PIE_ACTOR_CARVEOUT_DIR disabled — with save_freq=10 we want pure rolling-1
+# (carve-out would create ~80 hard-linked ckpts ≈ 1.5TB/arm at -O0). Re-enable
+# only if per-step archive is wanted; tweak guards/actor_carveout.py to filter.
+# export PIE_ACTOR_CARVEOUT_DIR="${ACTOR_CKPT_DIR}"
 
 # Conda CUDA (not system CUDA)
 export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
@@ -223,7 +226,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   trainer.default_local_dir="${OUTPUT_DIR}" \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
-  trainer.save_freq=${PIE_STEPS_PER_EPOCH} \
+  trainer.save_freq=10 \
   "+actor_rollout_ref.actor.checkpoint.contents=['model','optimizer','extra','hf_model']" \
   trainer.test_freq=-1 \
   trainer.resume_mode=auto \
