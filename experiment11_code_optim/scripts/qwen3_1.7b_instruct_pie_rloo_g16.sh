@@ -53,12 +53,12 @@ export PIE_TEST_CASE_DIR
 #   PIE_STEPS_PER_EPOCH = ceil(N_train / 256)
 #   PIE_TOTAL_STEPS     = 3 * PIE_STEPS_PER_EPOCH
 #   PIE_EVAL_STEPS      = every 100 steps, plus the final step
-# These defaults assume N_train ≈ 73,893 (the value from the prior -O3
-# reference-table-filtered parquet); the -O0 drop may differ.
+# These defaults are derived from the 2026-05-24 rebuild: N_train = 69,464
+# after the -O0 drop (8,385 no_instr + 118 overlong); ceil(N/256)=272.
 # ============================================================
-PIE_STEPS_PER_EPOCH="${PIE_STEPS_PER_EPOCH:-289}"
-PIE_TOTAL_STEPS="${PIE_TOTAL_STEPS:-867}"
-PIE_EVAL_STEPS="${PIE_EVAL_STEPS:-[100,200,300,400,500,600,700,800,867]}"
+PIE_STEPS_PER_EPOCH="${PIE_STEPS_PER_EPOCH:-272}"
+PIE_TOTAL_STEPS="${PIE_TOTAL_STEPS:-816}"
+PIE_EVAL_STEPS="${PIE_EVAL_STEPS:-[100,200,300,400,500,600,700,800,816]}"
 
 # ============================================================
 # Model init: Qwen3-1.7B-Instruct directly. No SFT cold-start.
