@@ -35,7 +35,16 @@ _INSTALLED = False
 
 def install_pie_metrics_hook() -> None:
     """Idempotent. Wraps `verl.trainer.ppo.metric_utils.compute_data_metrics`
-    so PIE-specific metrics are emitted alongside the verl-built-in ones."""
+    so PIE-specific metrics are emitted alongside the verl-built-in ones.
+
+    Patches TWO targets: the module attribute (`metric_utils.compute_data_metrics`)
+    AND the already-bound reference in `ray_trainer` (which did
+    `from … import compute_data_metrics` and so holds its own local binding).
+    Without the second patch, the monkey-patch on the module attribute has
+    no effect on the function ray_trainer actually calls — confirmed via
+    pie-efficiency commit afce125 which had only the module patch and emitted
+    zero PIE metrics in the W&B step log.
+    """
     global _INSTALLED
     if _INSTALLED:
         return
@@ -43,11 +52,20 @@ def install_pie_metrics_hook() -> None:
     from verl.trainer.ppo import metric_utils
 
     original = metric_utils.compute_data_metrics
+    first_call = {"done": False}
 
     def wrapped(batch, use_critic: bool = True) -> dict[str, Any]:
         metrics = original(batch, use_critic=use_critic)
         try:
-            metrics.update(_compute_pie_metrics(batch))
+            extras = _compute_pie_metrics(batch)
+            metrics.update(extras)
+            if not first_call["done"]:
+                first_call["done"] = True
+                print(
+                    f"[pie_metrics] wrapped() first call: added "
+                    f"{len(extras)} PIE metrics → {sorted(extras)}",
+                    flush=True,
+                )
         except Exception as e:  # never crash the trainer on metric computation
             import traceback
             print(f"[pie_metrics] WARN: PIE metrics failed: {e}", flush=True)
@@ -55,8 +73,22 @@ def install_pie_metrics_hook() -> None:
         return metrics
 
     metric_utils.compute_data_metrics = wrapped
+
+    # ray_trainer.py does `from verl.trainer.ppo.metric_utils import compute_data_metrics`
+    # at module load, creating a separate local binding. Patch that too.
+    try:
+        from verl.trainer.ppo import ray_trainer
+        ray_trainer.compute_data_metrics = wrapped
+        rt_patched = True
+    except ImportError:
+        rt_patched = False
+
     _INSTALLED = True
-    print("[pie_metrics] compute_data_metrics hook installed", flush=True)
+    print(
+        f"[pie_metrics] compute_data_metrics hook installed "
+        f"(metric_utils ✓, ray_trainer {'✓' if rt_patched else 'pending'})",
+        flush=True,
+    )
 
 
 def _compute_pie_metrics(batch) -> dict[str, float]:
