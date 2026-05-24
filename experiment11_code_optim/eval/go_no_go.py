@@ -106,6 +106,15 @@ def main() -> int:
     # ---- Generate ----
     from vllm import LLM, SamplingParams
     print(f"[go_no_go] Loading SFT actor from {args.sft_ckpt}...")
+    # enforce_eager=False matches the working eval_checkpoints.generate_completions
+    # path used by post-evaluation. Setting enforce_eager=True with Qwen3-1.7B
+    # + tensor_parallel_size>1 + VLLM_USE_V1=0 trips a torch._dynamo path that
+    # tries to import `triton_key` from triton.compiler.compiler — which doesn't
+    # exist in the bundled triton version. Symptom on 2026-05-24 probe run 2334194:
+    #   BackendCompilerFailed: backend='inductor' raised:
+    #   ImportError: cannot import name 'triton_key'
+    # Switching to enforce_eager=False (V0 cudagraph capture, no inductor) avoids
+    # the triton entry point entirely.
     llm = LLM(
         model=args.sft_ckpt,
         tokenizer=args.sft_ckpt,
@@ -114,7 +123,8 @@ def main() -> int:
         gpu_memory_utilization=0.9,
         max_model_len=args.max_model_len,
         max_num_seqs=args.max_num_seqs,
-        enforce_eager=True,
+        enforce_eager=False,
+        dtype="bfloat16",
     )
     sp_kwargs = dict(
         n=args.n_completions,
