@@ -119,7 +119,62 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
         "prompt_length/min": torch.min(prompt_length).detach().item(),
         "prompt_length/clip_ratio": torch.mean(torch.eq(prompt_length, max_prompt_length).float()).detach().item(),
     }
+
+    # PIE-specific metrics: emitted when the reward fn returns extra fields
+    # ("acc", "speedup") that NaiveRewardManager pivots into non_tensor_batch.
+    # No-op for non-PIE setups. Vendor-edited in place because Ray workers
+    # don't inherit driver-level monkey-patches (the prior
+    # guards/pie_metrics.py approach didn't propagate to the workers that
+    # actually call compute_data_metrics).
+    metrics.update(_compute_pie_metrics(batch, sequence_score))
     return metrics
+
+
+def _compute_pie_metrics(batch, sequence_score) -> Dict[str, float]:
+    """PIE-specific metrics computed from per-rollout acc/speedup arrays
+    (placed in non_tensor_batch by NaiveRewardManager). Returns {} when the
+    fields are absent. See experiment11_code_optim/reward/pie_reward_fn.py
+    for the score dict that produces these inputs."""
+    ntb = batch.non_tensor_batch
+    accs = ntb.get("acc")
+    speedups = ntb.get("speedup")
+    if accs is None or speedups is None:
+        return {}
+
+    accs_arr = np.asarray(accs, dtype=float)
+    speedups_arr = np.asarray(speedups, dtype=float)
+    rewards_arr = sequence_score.detach().cpu().numpy().astype(float)
+
+    n = len(accs_arr)
+    if n == 0:
+        return {}
+
+    out: Dict[str, float] = {
+        "critic/score/gate_pass_rate": float(accs_arr.mean()),
+        "critic/score/speedup_rate": float((rewards_arr > 0).mean()),
+        "critic/score/fraction_mode2": float((rewards_arr >= 0.3).mean()),
+        "critic/score/max_speedup": float(speedups_arr.max()),
+    }
+    gate_mask = accs_arr >= 1.0
+    out["critic/score/mean_speedup"] = (
+        float(speedups_arr[gate_mask].mean()) if gate_mask.any() else 0.0
+    )
+
+    # fraction_dead_groups: a uid-group is "dead" iff every rollout in it
+    # has reward 0 — the gradient-starvation signal for group-relative
+    # estimators (GRPO / RLOO / maxrl_*).
+    uids = ntb.get("uid")
+    if uids is not None and len(uids) == n:
+        from collections import defaultdict
+        groups: Dict[Any, list] = defaultdict(list)
+        for u, r in zip(uids, rewards_arr):
+            groups[u].append(r)
+        n_groups = len(groups)
+        if n_groups > 0:
+            dead = sum(1 for v in groups.values() if all(x == 0 for x in v))
+            out["critic/score/fraction_dead_groups"] = dead / n_groups
+            out["critic/score/n_groups"] = float(n_groups)
+    return out
 
 
 def compute_timing_metrics(batch: DataProto, timing_raw: Dict[str, float]) -> Dict[str, Any]:

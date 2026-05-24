@@ -103,7 +103,12 @@ export VERL_REWARD_WORKERS=64
 # Route insitu_eval's hardcoded reward import to PIE's reward fn.
 export PIE_MODE=1
 # Skip the actor old_log_prob recompute via vendored verl patches.
-export PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1
+# PIE_SKIP_OLD_LOG_PROB_RECOMPUTE disabled — let verl recompute old_log_prob
+# using the actor model itself, so pg_clipfrac = exactly 0 (no bf16 drift
+# between vLLM and FSDP). Also unlocks real entropy logging via the
+# entropy = compute_log_prob(... calculate_entropy=True) side-effect path.
+# Cost: ~30 s/step extra; over 816 steps adds ~7h per arm.
+# export PIE_SKIP_OLD_LOG_PROB_RECOMPUTE=1
 
 # Insitu eval metrics: pass@K AND best@K AND best_speedup@K at K∈{1,4,16,64,256}.
 # 256 lets us hit best_speedup@256 (the spec's headline metric).
@@ -187,8 +192,8 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   actor_rollout_ref.actor.ppo_epochs=1 \
   actor_rollout_ref.actor.use_kl_loss=False \
   actor_rollout_ref.actor.kl_loss_coef=0.0 \
-  actor_rollout_ref.actor.clip_ratio=0.2 \
-  actor_rollout_ref.actor.clip_ratio_high=0.2 \
+  actor_rollout_ref.actor.clip_ratio=100 \
+  actor_rollout_ref.actor.clip_ratio_high=100 \
   actor_rollout_ref.actor.grad_clip=0.3 \
   actor_rollout_ref.actor.use_torch_compile=False \
   actor_rollout_ref.actor.optim.lr=1e-6 \
