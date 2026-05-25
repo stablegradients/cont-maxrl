@@ -197,7 +197,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   actor_rollout_ref.actor.grad_clip=0.3 \
   actor_rollout_ref.actor.use_torch_compile=False \
   actor_rollout_ref.actor.optim.lr=1e-6 \
-  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.ref.use_torch_compile=False \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.n=16 \
@@ -211,7 +211,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   actor_rollout_ref.rollout.max_num_seqs=1024 \
   actor_rollout_ref.rollout.enforce_eager=True \
   actor_rollout_ref.rollout.free_cache_engine=True \
-  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.rollout.enable_chunked_prefill=False \
   actor_rollout_ref.rollout.val_kwargs.n=16 \
   actor_rollout_ref.rollout.val_kwargs.do_sample=True \
