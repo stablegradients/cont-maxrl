@@ -194,7 +194,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   actor_rollout_ref.actor.kl_loss_coef=0.0 \
   actor_rollout_ref.actor.clip_ratio=100 \
   actor_rollout_ref.actor.clip_ratio_high=100 \
-  actor_rollout_ref.actor.grad_clip=0.3 \
+  actor_rollout_ref.actor.grad_clip=2.0 \
   actor_rollout_ref.actor.use_torch_compile=False \
   actor_rollout_ref.actor.optim.lr=1e-6 \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
