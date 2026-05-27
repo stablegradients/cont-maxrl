@@ -165,15 +165,23 @@ def main() -> int:
     print(f"  mean_speedup_given_pass    = {summary.get('mean_speedup_given_pass')}")
     print(f"  n_problems_solved          = {summary.get('n_problems_solved')}/{summary.get('total_problems')}")
 
-    # ---- optional W&B push under separate runs for cross-arm comparison ----
+    # ---- W&B push: same group as the corresponding training run + same
+    # metric prefix that _insitu_eval uses (ray_trainer.py:893, label defaults
+    # to "livecodebench_v5") so the reeval point overlays the training curve.
     if not args.no_wandb:
         try:
             import wandb
+            arm_to_group = {
+                "maxrl_unnorm": "qwen3-1.7b-instruct_pie_maxrl_unnorm_G16",
+                "grpo":          "qwen3-1.7b-instruct_pie_grpo_G16",
+                "rloo":          "qwen3-1.7b-instruct_pie_rloo_G16",
+            }
+            group = arm_to_group[args.arm]
             run = wandb.init(
                 project="cont-maxrl-pie",
-                name=f"reeval_step{args.step}_{args.arm}",
-                group="pie_step100_reeval",
-                tags=["reeval", "post-bugfix", args.arm, f"step{args.step}"],
+                name=f"{group}_s0_reeval_step{args.step}",
+                group=group,
+                tags=["reeval", args.arm, f"step{args.step}"],
                 config={
                     "arm": args.arm,
                     "step": args.step,
@@ -183,20 +191,21 @@ def main() -> int:
                 },
                 reinit=True,
             )
-            log = {f"reeval/pie_val_200/pass_at_{k}": pk.get(str(k))
+            prefix = "insitu_eval/livecodebench_v5"
+            log = {f"{prefix}/pass_at_{k}": pk.get(str(k))
                    for k in [1, 4, 16, 64, 256] if pk.get(str(k)) is not None}
-            log.update({f"reeval/pie_val_200/best_speedup_at_{k}": bsk.get(str(k))
+            log.update({f"{prefix}/best_speedup_at_{k}": bsk.get(str(k))
                         for k in [1, 4, 16, 64, 256] if bsk.get(str(k)) is not None})
             for key in ("mean_pass_rate", "mean_score", "n_problems_solved",
                         "frac_problems_with_speedup", "frac_problems_mode2",
                         "mean_speedup_given_pass"):
                 v = summary.get(key)
                 if v is not None:
-                    log[f"reeval/pie_val_200/{key}"] = v
-            log["reeval/global_step"] = args.step
-            wandb.log(log)
+                    log[f"{prefix}/{key}"] = v
+            log["training/global_step"] = args.step
+            wandb.log(log, step=args.step)
             run.finish()
-            print(f"[wandb] logged {len(log)} metrics to run reeval_step{args.step}_{args.arm}", flush=True)
+            print(f"[wandb] logged {len(log)} metrics to {group}_s0_reeval_step{args.step}", flush=True)
         except Exception as e:
             print(f"[wandb] failed: {e}", flush=True)
 
