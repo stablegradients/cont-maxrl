@@ -104,11 +104,18 @@ def score_and_save(
             })
             problem_indices.append(i)
 
-    # Batch scoring: syntax filter, dedup, one subprocess per unique completion
+    # Batch scoring: syntax filter, dedup, one subprocess per unique completion.
+    # global_timeout=0 → None inside compute_scores_batch — disables the
+    # phase-3 wall-clock cap. Insitu eval grades 195 * 256 ≈ 50k rollouts at
+    # -O0, which takes ~45 min wall time and would silently zero out under
+    # the default 300s cap. The PIE_INSITU_EVAL_GLOBAL_TIMEOUT env var lets
+    # SLURM scripts override (e.g., set to 3600 if you want a safety cap).
+    insitu_global_timeout_s = int(os.environ.get("PIE_INSITU_EVAL_GLOBAL_TIMEOUT", "0"))
     scores = compute_scores_batch(
         reward_inputs,
         timeout_per_test=timeout_per_test,
         num_workers=n_workers,
+        global_timeout=insitu_global_timeout_s,
     )
 
     # Aggregate per problem
@@ -281,10 +288,14 @@ def score_and_save(
         json.dump(metrics, f, indent=2)
     print(f"  In-situ eval metrics saved to {path}")
 
-    # Print summary
-    print(f"  pass@1={avg_pass_at_k.get('1', 'N/A'):.4f}  "
-          f"pass@10={avg_pass_at_k.get('10', 'N/A'):.4f}  "
-          f"pass@100={avg_pass_at_k.get('100', 'N/A'):.4f}  "
-          f"pass@200={avg_pass_at_k.get('200', 'N/A'):.4f}")
+    # Print summary — iterate over whatever K values were actually requested
+    # so we don't blow up when (e.g.) K=[1,4,16,64,256] doesn't include 10/100/200.
+    summary_parts = []
+    for k in k_values:
+        v = avg_pass_at_k.get(str(k))
+        if v is None:
+            continue
+        summary_parts.append(f"pass@{k}={v:.4f}")
+    print("  " + "  ".join(summary_parts))
 
     return metrics
