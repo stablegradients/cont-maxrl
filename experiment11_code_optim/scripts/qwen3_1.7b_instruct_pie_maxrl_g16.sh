@@ -243,7 +243,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   insitu_eval.steps_per_epoch=${PIE_STEPS_PER_EPOCH} \
   "insitu_eval.eval_steps=${PIE_EVAL_STEPS}" \
   insitu_eval.output_dir="${OUTPUT_DIR}/insitu_eval" \
-  insitu_eval.label="pie_val_200" \
+  insitu_eval.label="pie_val" \
   ray_init.num_cpus=280
 
 TRAIN_EXIT=$?

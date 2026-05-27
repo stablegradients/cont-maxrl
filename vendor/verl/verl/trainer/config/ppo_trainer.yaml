@@ -251,6 +251,7 @@ insitu_eval:
   steps_per_epoch: 180         # training steps per epoch (for epoch number calculation)
   eval_steps: []               # list of training steps at which to run eval (e.g., [0, 900, 1800, 2000])
   output_dir: null             # where to save metrics_epochN.json. null = default_local_dir/eval_livecodebench
+  label: "livecodebench_v5"    # W&B metric prefix tag (insitu_eval/<label>/pass_at_k)
 
 ray_init:
   num_cpus: null # `None` means using all CPUs, which might cause hang if limited in systems like SLURM. Please set to a number allowed then.
