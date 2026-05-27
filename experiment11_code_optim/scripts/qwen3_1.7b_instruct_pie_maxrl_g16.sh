@@ -52,13 +52,13 @@ export PIE_TEST_CASE_DIR
 # build_pie_parquet.py the actual N_train will be known; recompute:
 #   PIE_STEPS_PER_EPOCH = ceil(N_train / 256)
 #   PIE_TOTAL_STEPS     = 3 * PIE_STEPS_PER_EPOCH
-#   PIE_EVAL_STEPS      = every 100 steps, plus the final step
+#   PIE_EVAL_STEPS      = every 100 steps
 # These defaults are derived from the 2026-05-24 rebuild: N_train = 69,464
 # after the -O0 drop (8,385 no_instr + 118 overlong); ceil(N/256)=272.
 # ============================================================
 PIE_STEPS_PER_EPOCH="${PIE_STEPS_PER_EPOCH:-272}"
 PIE_TOTAL_STEPS="${PIE_TOTAL_STEPS:-816}"
-PIE_EVAL_STEPS="${PIE_EVAL_STEPS:-[100,200,300,400,500,600,700,800,816]}"
+PIE_EVAL_STEPS="${PIE_EVAL_STEPS:-[100,200,300,400,500,600,700,800]}"
 
 # ============================================================
 # Model init: Qwen3-1.7B-Instruct directly. No SFT cold-start.
@@ -243,6 +243,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   insitu_eval.steps_per_epoch=${PIE_STEPS_PER_EPOCH} \
   "insitu_eval.eval_steps=${PIE_EVAL_STEPS}" \
   insitu_eval.output_dir="${OUTPUT_DIR}/insitu_eval" \
+  insitu_eval.label="pie_val_200" \
   ray_init.num_cpus=280
 
 TRAIN_EXIT=$?

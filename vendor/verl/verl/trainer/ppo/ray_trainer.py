@@ -767,7 +767,7 @@ class RayPPOTrainer:
             "output_dir", os.path.join(self.config.trainer.default_local_dir, "eval_livecodebench"))
         epoch = round(self.global_steps / steps_per_epoch)
         n_workers = int(os.environ.get("VERL_REWARD_WORKERS", 128))
-        label = eval_name or "livecodebench_v5"
+        label = eval_name or eval_config.get("label", "livecodebench_v5")
 
         print(f"\n{'='*60}")
         print(f"In-situ eval [{label}]: epoch {epoch}, step {self.global_steps}")
