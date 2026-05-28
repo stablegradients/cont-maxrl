@@ -36,6 +36,10 @@ def main() -> int:
     ap.add_argument("--max_tokens", type=int, default=4096)
     ap.add_argument("--max_model_len", type=int, default=6656)
     ap.add_argument("--no_wandb", action="store_true")
+    ap.add_argument("--wandb_group", default=None,
+                    help="Override W&B group. Default: training-run group by arm.")
+    ap.add_argument("--output_subdir", default=None,
+                    help="Subdir under docs/reeval/ (default: arm)")
     args = ap.parse_args()
 
     ckpt = Path(args.ckpt)
@@ -142,7 +146,7 @@ def main() -> int:
         ground_truths=ground_truths,
         epoch=args.step // 272,
         global_step=args.step,
-        output_dir=str(out_dir / args.arm),
+        output_dir=str(out_dir / (args.output_subdir or args.arm)),
         n_target=args.n_completions,
         k_values=[1, 4, 16, 64, 256],
         timeout_per_test=30,
@@ -176,7 +180,7 @@ def main() -> int:
                 "grpo":          "qwen3-1.7b-instruct_pie_grpo_G16",
                 "rloo":          "qwen3-1.7b-instruct_pie_rloo_G16",
             }
-            group = arm_to_group[args.arm]
+            group = args.wandb_group or arm_to_group[args.arm]
             run = wandb.init(
                 project="cont-maxrl-pie",
                 name=f"{group}_s0_reeval_step{args.step}",
