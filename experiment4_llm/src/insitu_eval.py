@@ -16,7 +16,16 @@ import os
 from collections import defaultdict
 
 from experiment4_llm.src.evaluate import pass_at_k
-from experiment4_llm.src.reward_function import compute_scores_batch, extract_code
+
+# Route the scorer based on PIE_MODE. PIE submissions are C++ programs graded
+# by perf instruction counts; experiment4_llm's scorer assumes Python and
+# silently fails (every candidate scores 0). The reeval script handles this
+# via a sys.modules shim, but during training that hook isn't installed —
+# so the import has to be conditional here.
+if os.environ.get("PIE_MODE") == "1":
+    from experiment11_code_optim.reward.pie_reward_fn import compute_scores_batch, extract_code
+else:
+    from experiment4_llm.src.reward_function import compute_scores_batch, extract_code
 
 
 def _best_at_k_unbiased(scores: list[float], k: int) -> float:
