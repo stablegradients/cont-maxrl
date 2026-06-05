@@ -59,6 +59,25 @@ REMAINING to productionize (all now well-defined):
 
 Configs: `run_se_fork.py`, `run_se_ckpt.py` (both backed up in repo `configs/gem5-skylake-config/`).
 
+## ★ CRACKED (2026-06-05): amortization works, near-bit-exact
+Working harness = `run_se_forkloop.py` + the gem5 **read(0) hook** (3rd patch in native_dynamic.patch:
+syscall_emul.hh readFunc, `exitSimLoopNow`+retry on first read(fd=0), gated by GEM5_PREINPUT_FORK).
+Three pieces cracked it:
+1. **read(0) hook** finds the exact pre-input tick (paused p02802 at tick 1.006e9 = its startup).
+2. **fork-at-tick, NOT retry-pause** — the retry-read is broken (re-executing a paused read returns wrong
+   data: NOFORK gave '0 0'/2.78e9 vs correct '1 0'/7.19e9). Forking at a tick just before the read so the
+   child does a FRESH read works. (So the hook is used to LEARN the read tick; forking uses fork-at-tick.)
+3. **fd-offset reset** — forked children share the fd0 host offset; child0's read advances it. Reset via
+   os.lseek on the /proc/self/fd entry pointing at the fixed stdin, before each fork.
+RESULT on p02802 (input-dependent, 7x tick spread), 5 mixed inputs, startup simulated ONCE:
+  tc0(heavy) Δ=-0.013%, tc2(light) Δ=+0.060%, tc0 again Δ=-0.013%, tc3(light) Δ=+0.045%, tc1(heavy) Δ=-0.025%.
+Each child reads ITS OWN input (heavy->7.2e9, light->1.0e9), reproduced to <0.06% = NEAR-BIT-EXACT (forking
+just before the read, warm caches, is far better than the +0.71% from mid-startup forking). Configs in repo
+`configs/gem5-skylake-config/{run_se_forkloop.py,run_se_amortize.py,run_se_fork.py,run_se_ckpt.py}`.
+REMAINING: parallel scale harness (256-way across candidates; fork_tick per binary from scale-data
+min_tc_tick - margin, no probe needed) to measure the real per-step. Projection (99.2% startup): ~2-4 min
+for all-100-tc x 1024 -> meets the <5-6 min target.
+
 ## Practical recommendation (now)
 - **Ship gem5.fast (done, 1.25×, exact) + K=5 subsampling → ~3 min/step.** That's already a usable in-loop
   reward and unblocks Step 5 (RL integration).

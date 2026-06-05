@@ -27,10 +27,26 @@ index 49fbd6dd7b..661efdcc5e 100644
      }
  
 diff --git a/src/sim/syscall_emul.hh b/src/sim/syscall_emul.hh
-index 05a29f9feb..ae2685b941 100644
+index 05a29f9feb..b7a4664eb7 100644
 --- a/src/sim/syscall_emul.hh
 +++ b/src/sim/syscall_emul.hh
-@@ -1698,14 +1698,24 @@ mmapFunc(SyscallDesc *desc, ThreadContext *tc,
+@@ -82,6 +82,7 @@
+ #include <unistd.h>
+ 
+ #include <cerrno>
++#include <cstdlib>
+ #include <memory>
+ #include <string>
+ 
+@@ -103,6 +104,7 @@
+ #include "sim/guest_abi.hh"
+ #include "sim/process.hh"
+ #include "sim/proxy_ptr.hh"
++#include "sim/sim_exit.hh"
+ #include "sim/syscall_debug_macros.hh"
+ #include "sim/syscall_desc.hh"
+ #include "sim/syscall_emul_buf.hh"
+@@ -1698,14 +1700,24 @@ mmapFunc(SyscallDesc *desc, ThreadContext *tc,
          if (p->interpImage.contains(tc->pcState().instAddr())) {
              std::shared_ptr<FDEntry> fdep = (*p->fds)[tgt_fd];
              auto ffdp = std::dynamic_pointer_cast<FileFDEntry>(fdep);
@@ -63,6 +79,27 @@ index 05a29f9feb..ae2685b941 100644
              }
          }
      }
+@@ -2391,6 +2403,20 @@ readFunc(SyscallDesc *desc, ThreadContext *tc,
+ {
+     auto p = tc->getProcessPtr();
+ 
++    // #41 startup-amortization hook: pause the sim at the FIRST stdin read so the
++    // driver can fork a COW child per test case from the post-startup state.
++    // Gated by GEM5_PREINPUT_FORK (unset -> zero effect on normal runs). The flag
++    // is static, so a forked child inherits it (=true, COW) and re-executes the
++    // read normally; only the parent pauses, exactly once, before consuming input.
++    {
++        static bool preinput_fork_done = false;
++        if (tgt_fd == 0 && !preinput_fork_done && std::getenv("GEM5_PREINPUT_FORK")) {
++            preinput_fork_done = true;
++            exitSimLoopNow("preinput_read");
++            return SyscallReturn::retry();
++        }
++    }
++
+     auto hbfdp = std::dynamic_pointer_cast<HBFDEntry>((*p->fds)[tgt_fd]);
+     if (!hbfdp)
+         return -EBADF;
 diff --git a/src/sim/vma.cc b/src/sim/vma.cc
 index 6f6306c6b8..d34fa3bcca 100644
 --- a/src/sim/vma.cc
