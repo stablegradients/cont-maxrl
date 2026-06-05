@@ -32,6 +32,28 @@ before the program reads stdin, then point each child at a different test-case f
 - validate exactness on an **input-DEPENDENT** program (p02552 is startup-only, so it can't show the per-tc
   amortization; pick a program whose tc ticks vary).
 
+## UPDATE: fork-from-live VALIDATED (works, <2%)
+`run_se_fork.py` (`GEM5_FORK_TICK=n` → run to n, `m5.fork()`, child continues to exit). On p02552:
+- **full (no fork) = 1,029,044,588**; **fork@5e8 → child = 1,036,351,030 (+0.71%)**, child output **'1' (correct)**,
+  clean exit, 9s wall. UNLIKE checkpoint-restore (which corrupted the run / no output), **fork works** — the
+  COW child runs to completion correctly. The +0.71% is the `drain()` cache-flush at the fork point (same as
+  checkpoint's memWriteback) — **within the 2% gate**.
+- `m5.fork()` = drain → `os.fork()` → child gets new outdir; returns child-pid (parent) / 0 (child); requires
+  `m5.disableAllListeners()` first. No serialize, no disk, warm memory (COW).
+
+REMAINING to productionize (all now well-defined):
+1. **Pre-input fork trigger** — fork right after startup, before the program reads stdin (so children can be
+   fed different inputs). Robust trigger = exit-on-first-`read(0)` syscall (small gem5 hook) or the per-binary
+   startup tick (deterministic). Forking LATE (small post-fork region) should also SHRINK the +0.71% (the cold
+   region is just the tiny algorithm, not 5e8 of startup).
+2. **Per-child input** — fixed input path with swapped CONTENT per child (gem5 reads fd0 lazily from the host
+   file at read time, validated), forking children SEQUENTIALLY (parent waits via os.waitpid, re-forks from the
+   same pre-input state). No FD-repointing needed.
+3. **Speedup-exactness validation** on INPUT-DEPENDENT programs — confirm the +0.71% drain perturbation stays
+   <2% on the algorithm region and (partially) cancels in src/tgt ratios.
+
+Configs: `run_se_fork.py`, `run_se_ckpt.py` (both backed up in repo `configs/gem5-skylake-config/`).
+
 ## Practical recommendation (now)
 - **Ship gem5.fast (done, 1.25×, exact) + K=5 subsampling → ~3 min/step.** That's already a usable in-loop
   reward and unblocks Step 5 (RL integration).
