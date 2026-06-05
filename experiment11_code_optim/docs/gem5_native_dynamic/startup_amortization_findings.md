@@ -41,6 +41,11 @@ before the program reads stdin, then point each child at a different test-case f
 - `m5.fork()` = drain → `os.fork()` → child gets new outdir; returns child-pid (parent) / 0 (child); requires
   `m5.disableAllListeners()` first. No serialize, no disk, warm memory (COW).
 
+PERTURBATION CHARACTERIZED (p02552, fork at various ticks): a roughly **fixed +0.3–0.8%** (the drain
+cache-flush re-warm, ~independent of fork point / post-fork region size), output always correct. Implications:
+absolute agg → ~+0.5% (within 2%, scale K_src was 1.0026); **speedup = src/tgt → the ~+0.5% largely CANCELS**
+(both sides perturbed equally). => fork-from-live is EXACT-ENOUGH for the reward.
+
 REMAINING to productionize (all now well-defined):
 1. **Pre-input fork trigger** — fork right after startup, before the program reads stdin (so children can be
    fed different inputs). Robust trigger = exit-on-first-`read(0)` syscall (small gem5 hook) or the per-binary
