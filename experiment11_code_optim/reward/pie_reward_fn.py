@@ -1,15 +1,21 @@
 """
 PIE reward function with code deduplication and batched gate runner.
 
-Reward = max(0, log2(src_instr_count / cand_instr_count)) on gate-pass, else 0.
-Per-rollout src_instr_count comes from ground_truth["src_instr_count"], pre-
-computed by experiment11_code_optim/precompute/build_src_instr_table.py and
-embedded by build_pie_parquet.py. No reference table, no percentile rank.
+Timing source (PIE_TIMING_SOURCE): "gem5" (DEFAULT) times gate-passing
+programs with the validated x86 gem5 pipeline (measurement/gem5_backend.py),
+speedup = src_gem5_ticks / cand_gem5_ticks against the precomputed reference
+table (PIE_GEM5_REF_TABLE). "perf" is the legacy retired-instruction timing
+(shown ~uncorrelated with gem5 speedup, r=0.07) kept for ablation only; there
+reward = max(0, log2(src_instr_count / cand_instr_count)) on gate-pass, with
+src_instr_count from ground_truth["src_instr_count"] (pre-computed by
+experiment11_code_optim/precompute/build_src_instr_table.py and embedded by
+build_pie_parquet.py).
 
 Each rollout's score dict carries:
-  {"score": float,    # max(0, log2(src/cand))  — the RL reward
+  {"score": float,    # the RL reward (mode- and timing-source-dependent)
    "acc":   float,    # 1.0 if all tests pass, else 0.0
-   "speedup": float}  # src_instr/cand_instr on gate-pass, else 0.0
+   "speedup": float}  # src_time/cand_time on gate-pass (gem5 ticks or perf
+                      # instructions per PIE_TIMING_SOURCE), else 0.0
 
 verl's NaiveRewardManager pivots every key in this dict into
 batch.non_tensor_batch[<key>], so the monkey-patched compute_data_metrics
@@ -29,11 +35,15 @@ measure_from_disk` and `gate_runner.sh` are used only by the offline
 build_src_instr_table.py / build_reference_table.py precompute (latency-
 insensitive), not the RL hot path.
 
-This module is the redirect target for `experiment4_llm.src.reward_function`
-when `PIE_MODE=1` (see PARITY_CONFIG.md §8.6 redirect mechanism). Therefore the
-public surface (`compute_score`, `compute_scores_batch`, `extract_code`) MUST
-mirror the existing DeepCoder reward_function so that `insitu_eval.py`'s
-hardcoded imports work transparently under the sys.modules shim.
+NOTE (2026-06-13): this is the LEGACY reward (perf / reference-table era). The
+LIVE pie-gem5 runs use `reward/gem5_reward.py` instead — `PIE_REWARD_IMPL=gem5`
+routes train.py's shim and insitu_eval/post_hoc_eval there. This module is the
+DEFAULT redirect target for `experiment4_llm.src.reward_function` when
+`PIE_MODE=1` and `PIE_REWARD_IMPL != gem5` (legacy reeval + the #46 overfit
+ablation, which pins `PIE_TIMING_SOURCE=perf`). The public surface
+(`compute_score`, `compute_scores_batch`, `extract_code`) MUST still mirror the
+DeepCoder reward_function so `insitu_eval.py`'s hardcoded imports work under the
+shim (see PARITY_CONFIG.md §8.6).
 
 The shim itself is installed in `experiment11_code_optim/train.py` when
 `PIE_MODE=1` (closed F6). A subprocess smoke test in
@@ -156,7 +166,6 @@ def _ensure_thread_pinned() -> None:
         _THREAD_PINNED.add(tid)
 
 from experiment11_code_optim.measurement.core import (
-    measure, measure_from_disk,  # kept for re-export compatibility
     _compile, _run_and_compare, MEASUREMENT_BACKEND, _scratch_dir,
 )
 
@@ -318,6 +327,98 @@ def _warn_missing_src_instr_once() -> None:
 
 _ZERO = {"score": 0.0, "acc": 0.0, "speedup": 0.0}
 
+# Reward formula selector (env-gated; default = original PIE log2-speedup so
+# existing runs are unaffected). "pass_plus_logspeedup": r = 1[gate-pass] +
+# ln(1 + speedup) — rewards correctness itself, so even flat problems (speedup~1)
+# get pass/fail reward variance and a non-degenerate gradient.
+# gem5-era modes (spd = src_gem5_ticks / cand_gem5_ticks, natural log):
+#   "spd":               r = 1[pass] * spd
+#   "pass_plus_logspd":  r = 1[pass] * (1 + ln(spd))
+#   "gated_logspd":      r = 1[pass & spd>1] * ln(spd)
+#   "tgt_relative":      r = 1[pass] * tgt_gem5_ticks / cand_gem5_ticks
+_REWARD_MODE = os.environ.get("PIE_REWARD_MODE", "log2_speedup") or "log2_speedup"
+_KNOWN_REWARD_MODES = {
+    "log2_speedup", "pass_plus_logspeedup", "gated_logspeedup",
+    "spd", "pass_plus_logspd", "gated_logspd", "tgt_relative",
+}
+if _REWARD_MODE not in _KNOWN_REWARD_MODES:
+    raise RuntimeError(
+        f"PIE_REWARD_MODE={_REWARD_MODE!r} is not one of {sorted(_KNOWN_REWARD_MODES)}"
+    )
+
+# Under pass_plus_logspd a measured slow rollout scores 1+ln(spd) < 0, so a
+# gem5 TIMEOUT must not score better (0) than honest slowness — that would
+# reward producing code slow enough to time out. Timeout/budget-class
+# failures of gate-passers get this floor instead (default 1+ln(0.01), i.e.
+# "at least 100x slower than src"). Non-timeout infra failures still score 0.
+_GEM5_TIMEOUT_FLOOR = float(os.environ.get(
+    "PIE_GEM5_TIMEOUT_REWARD_FLOOR", str(1.0 + math.log(0.01))))
+
+# Per-tc sim tick budget = factor x (src_gem5_ticks / k) from the ref table.
+# Rollouts slower than ~factor x src stop simulating immediately (cause
+# budget_exceeded -> censored to floor/0) instead of burning wall-clock to
+# the 900s forkloop timeout. <=0 disables. Default 3.0.
+_GEM5_TC_BUDGET_FACTOR = float(os.environ.get("PIE_GEM5_TC_BUDGET_FACTOR", "3.0"))
+
+# ---------------------------------------------------------------------------
+# Timing source selector. "gem5" (DEFAULT): the correctness gate still runs on
+# the fast native path, but the timing that defines speedup comes from the
+# validated x86 gem5 pipeline (measurement/gem5_backend.py) — the same metric
+# as the PIE dataset's agg_runtime. The perf retired-instruction timing was
+# shown ~uncorrelated with gem5 speedup (r=0.07, 2026-06); it stays available
+# behind PIE_TIMING_SOURCE=perf for back-compat/ablation only.
+#
+# Under gem5: speedup = src_gem5_ticks / cand_gem5_ticks, where src (and tgt
+# for the "tgt_relative" mode) come from a precomputed reference table
+# (PIE_GEM5_REF_TABLE, default data_pie/gem5_ref_table.json) measured with the
+# SAME harness and the SAME deterministic K-test-case subset (_subsample_cases
+# seed) — so the ratio compares identical inputs end to end.
+# ---------------------------------------------------------------------------
+
+_TIMING_SOURCE = (os.environ.get("PIE_TIMING_SOURCE", "gem5") or "gem5").lower()
+if _TIMING_SOURCE not in ("gem5", "perf"):
+    raise RuntimeError(
+        f"PIE_TIMING_SOURCE must be 'gem5' or 'perf', got {_TIMING_SOURCE!r}"
+    )
+
+_GEM5_REF_TABLE_PATH = (
+    os.environ.get("PIE_GEM5_REF_TABLE")
+    or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "data_pie", "gem5_ref_table.json")
+)
+_GEM5_REFS: dict[str, dict] | None = None
+_WARNED_GEM5_REF: set[str] = set()
+
+
+def _gem5_ref(problem_id: str) -> dict | None:
+    """Lazy-load the gem5 reference table; one warn per missing problem.
+
+    An unreadable/empty TABLE raises: silently training a whole run with
+    all-zero rewards is strictly worse than crashing at the first batch.
+    """
+    global _GEM5_REFS
+    if _GEM5_REFS is None:
+        try:
+            with open(_GEM5_REF_TABLE_PATH) as f:
+                _GEM5_REFS = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            raise RuntimeError(
+                f"PIE_TIMING_SOURCE=gem5 but the gem5 ref table is unreadable "
+                f"at {_GEM5_REF_TABLE_PATH} ({e}). Build it with "
+                f"precompute/build_gem5_ref_table.py or set PIE_GEM5_REF_TABLE."
+            ) from e
+        if not _GEM5_REFS:
+            raise RuntimeError(
+                f"gem5 ref table at {_GEM5_REF_TABLE_PATH} is empty; every "
+                f"reward would silently be 0. Build it first."
+            )
+    ref = _GEM5_REFS.get(problem_id)
+    if ref is None and problem_id not in _WARNED_GEM5_REF:
+        _WARNED_GEM5_REF.add(problem_id)
+        print(f"[pie_reward_fn] WARN: no gem5 ref entry for {problem_id}; "
+              f"its gate-pass rollouts get score=0.", file=sys.stderr, flush=True)
+    return ref
+
 
 def compute_score(
     solution_str: str,
@@ -337,17 +438,48 @@ def compute_score(
     )[0]
 
 
+# ---------------------------------------------------------------------------
+# Test-case subsampling. Two modes (PIE_TC_SAMPLE_MODE):
+#   "fixed" (default): seed = hash(problem_id) — the SAME subset every call,
+#       matching reference tables built offline (spec §13 GO-WITH-MITIGATION).
+#   "random": a fresh nonce is drawn at the START of every compute_scores_batch
+#       call and XOR'd into the seed, so each training step grades/times a
+#       DIFFERENT random subset (prevents overfitting to fixed test cases).
+#       Within one call the gate and the gem5 phase still share the subset.
+#       Under gem5 timing this requires the ref table to carry per-tc tick
+#       arrays for ALL cases (src_per_tc_all / tgt_per_tc_all) so the spd
+#       ratio is computed on the same inputs the candidate ran.
+# The nonce is a module global: reward calls are serialized per worker
+# process (one batch per step), so there is no concurrent-call hazard.
+# ---------------------------------------------------------------------------
+
+_TC_SAMPLE_MODE = (os.environ.get("PIE_TC_SAMPLE_MODE", "fixed") or "fixed").lower()
+if _TC_SAMPLE_MODE not in ("fixed", "random"):
+    raise RuntimeError(
+        f"PIE_TC_SAMPLE_MODE must be 'fixed' or 'random', got {_TC_SAMPLE_MODE!r}"
+    )
+_TC_SAMPLE_NONCE: int = 0
+
+
+def _subsample_indices(n_cases: int, k: int, problem_id: str) -> list[int]:
+    """Indices of the k-subset for this problem (sorted). See mode docs above.
+    random.sample's selection depends only on population LENGTH and the seed,
+    so this picks the identical positions the legacy case-tuple sampling did."""
+    if n_cases <= k:
+        return list(range(n_cases))
+    seed = int(hashlib.md5(problem_id.encode()).hexdigest()[:8], 16)
+    if _TC_SAMPLE_MODE == "random":
+        seed ^= _TC_SAMPLE_NONCE
+    return sorted(random.Random(seed).sample(range(n_cases), k))
+
+
 def _subsample_cases(
     cases: list[tuple[str, str]], k: int, problem_id: str
 ) -> list[tuple[str, str]]:
-    """Deterministically subsample to at most k test cases for a problem.
-    Seed = hash(problem_id) so the precompute reference table and RL rollouts
-    grade against IDENTICAL subsets — spec §13 GO-WITH-MITIGATION requires this.
-    """
+    """Subsample to at most k test cases for a problem (see _subsample_indices)."""
     if len(cases) <= k:
         return cases
-    seed = int(hashlib.md5(problem_id.encode()).hexdigest()[:8], 16)
-    return random.Random(seed).sample(cases, k)
+    return [cases[i] for i in _subsample_indices(len(cases), k, problem_id)]
 
 
 def grade_dedup_batch(
@@ -575,11 +707,19 @@ def compute_scores_batch(
     """Batch reward with code-dedup. Returns one dict per input in the
     original order, each `{"score": float, "acc": float, "speedup": float}`.
 
-    Reward: max(0, log2(src_instr / cand_instr)) on gate-pass, else 0.
-    src_instr comes from per-rollout ground_truth["src_instr_count"]
-    (different prompts that happen to dedup to the same candidate code can
-    have different src_instr — that's why the parsed src_instr list runs
-    parallel to completion_keys, NOT keyed on the dedup_tasks dict).
+    Reward depends on the timing source (env `PIE_TIMING_SOURCE`, default
+    `gem5`) and `PIE_REWARD_MODE` (default `log2_speedup`):
+      - gem5 (default): speedup = src_gem5_ticks / cand_gem5_ticks via the
+        precomputed gem5 reference table (PIE_GEM5_REF_TABLE); reward = the
+        PIE_REWARD_MODE transform of that speedup.
+      - perf (LEGACY, used by the #46 overfit scripts which pin
+        PIE_TIMING_SOURCE=perf): speedup = src_instr / cand_instr with
+        src_instr from per-rollout ground_truth["src_instr_count"], reward
+        = max(0, log2 speedup) on gate-pass.
+    Either way score is 0 unless the rollout passes the correctness gate.
+    NOTE: the production pie-gem5 RL runs use reward/gem5_reward.py, not this.
+    (The per-rollout src list runs parallel to completion_keys — different
+    prompts that dedup to the same candidate code can carry different src refs.)
 
     Dedup key = `md5(code + "::" + problem_id)`. The key MUST include
     problem_id because two identical C++ programs submitted for different
@@ -592,6 +732,12 @@ def compute_scores_batch(
     """
     if not reward_inputs:
         return []
+
+    # random mode: one fresh nonce per batch -> a new test-case subset each
+    # training step, shared by the gate and the gem5 timing phase
+    global _TC_SAMPLE_NONCE
+    if _TC_SAMPLE_MODE == "random":
+        _TC_SAMPLE_NONCE = int.from_bytes(os.urandom(8), "little")
 
     test_case_dir = _resolve_paths(kwargs)
 
@@ -621,7 +767,9 @@ def compute_scores_batch(
             continue
         split = gt.get("split", "train")
         src_instr = gt.get("src_instr_count")
-        if src_instr is None:
+        if src_instr is None and _TIMING_SOURCE == "perf":
+            # only the perf formula needs src_instr_count; gem5 uses the
+            # ref table instead
             _warn_missing_src_instr_once()
         key = hashlib.md5(f"{code}::{problem_id}".encode()).hexdigest()
         completion_keys.append(key)
@@ -629,7 +777,7 @@ def compute_scores_batch(
         if key not in dedup_tasks:
             dedup_tasks[key] = {"code": code, "problem_id": problem_id, "split": split}
 
-    # ---- Phase 2: grade (two-level scheduler) ----
+    # ---- Phase 2: grade (two-level scheduler; correctness gate) ----
     dedup_results = grade_dedup_batch(
         dedup_tasks,
         test_case_dir=test_case_dir,
@@ -639,26 +787,157 @@ def compute_scores_batch(
         global_timeout=float(global_timeout) if global_timeout else None,
     )
 
-    # ---- Phase 3: scatter, compute log2-speedup reward per rollout ----
+    # ---- Phase 2.5 (gem5 timing source): time unique gate-passers ----
+    # The native gate above established correctness; gem5 only measures time.
+    # Inputs are the SAME deterministic K-subset the gate and the precomputed
+    # src/tgt references used (_subsample_cases is seeded by problem_id).
+    gem5_ticks: dict[str, dict] = {}
+    g5_subset: dict[str, tuple[list[int], int]] = {}  # key -> (tc indices timed, n_cases_total)
+    if _TIMING_SOURCE == "gem5":
+        from experiment11_code_optim.measurement.gem5_backend import gem5_time_batch
+        if measurement_max_tests is None:
+            env_cap = os.environ.get("PIE_MEASUREMENT_MAX_TESTS")
+            k_cap = int(env_cap) if env_cap else None
+        else:
+            k_cap = measurement_max_tests
+        g5_tasks: dict[str, dict] = {}
+        for key, task in dedup_tasks.items():
+            if not dedup_results[key]["all_pass"]:
+                continue
+            all_cases = _get_test_cases(test_case_dir, task["problem_id"])
+            idxs = _subsample_indices(
+                len(all_cases), k_cap if k_cap is not None else len(all_cases),
+                task["problem_id"])
+            g5_tasks[key] = {"code": task["code"],
+                             "inputs": [all_cases[i][0] for i in idxs]}
+            g5_subset[key] = (idxs, len(all_cases))
+            if _GEM5_TC_BUDGET_FACTOR > 0:
+                _ref = _gem5_ref(task["problem_id"])
+                per_tc = (_ref or {}).get("src_per_tc_all")
+                if per_tc and len(per_tc) == len(all_cases):
+                    # budget = factor x mean src tick over the CHOSEN subset
+                    mean_src = sum(per_tc[i] for i in idxs) / len(idxs)
+                    g5_tasks[key]["max_tc_ticks"] = int(_GEM5_TC_BUDGET_FACTOR * mean_src)
+                elif _ref and _ref.get("src_gem5_ticks") and _ref.get("k"):
+                    g5_tasks[key]["max_tc_ticks"] = int(
+                        _GEM5_TC_BUDGET_FACTOR * _ref["src_gem5_ticks"] / _ref["k"])
+        gem5_ticks = gem5_time_batch(g5_tasks)
+        # Per-batch visibility: silent gem5 censoring is the historical bug
+        # class; one summary line per call makes a drifting failure rate
+        # impossible to miss in the trainer log.
+        if g5_tasks:
+            n_ok = sum(1 for r in gem5_ticks.values() if r.get("ticks"))
+            errs: dict[str, int] = {}
+            for r in gem5_ticks.values():
+                if not r.get("ticks"):
+                    e = (r.get("error") or "unknown").split(":")[0]
+                    errs[e] = errs.get(e, 0) + 1
+            print(f"[pie_reward_fn] gem5 timing: {n_ok}/{len(g5_tasks)} ok"
+                  + (f", failures: {errs}" if errs else ""),
+                  file=sys.stderr, flush=True)
+
+    # ---- Phase 3: scatter, compute reward per rollout ----
     out: list[dict] = []
     for i, key in enumerate(completion_keys):
         if key is None:
             out.append(dict(_ZERO))
             continue
         r = dedup_results[key]
-        if not r["all_pass"] or r["elapsed_ns"] is None or r["elapsed_ns"] <= 0:
+        if not r["all_pass"]:
+            out.append(dict(_ZERO))
+            continue
+
+        if _TIMING_SOURCE == "gem5":
+            g5 = gem5_ticks.get(key)
+            pid = dedup_tasks[key]["problem_id"]
+            ref = _gem5_ref(pid)
+            if (g5 is None or g5.get("ticks") is None or g5["ticks"] <= 0
+                    or ref is None or not ref.get("src_gem5_ticks")):
+                # gate passed but timing or reference unavailable -> no
+                # speedup claim; acc stays 1.0 so pass-rate metrics are honest.
+                # Timeout-class failures under pass_plus_logspd take the
+                # floor, not 0 — otherwise timing out beats being measured
+                # slow (reward inversion).
+                err = (g5 or {}).get("error") or ""
+                score = (_GEM5_TIMEOUT_FLOOR
+                         if _REWARD_MODE == "pass_plus_logspd"
+                         and ("timeout" in err or "budget exceeded" in err)
+                         else 0.0)
+                out.append({"score": float(score), "acc": 1.0, "speedup": 0.0})
+                continue
+            # spd is only valid if src ref and candidate cover the SAME test
+            # cases. Preferred: per-tc arrays for ALL cases (src_per_tc_all)
+            # -> src time summed over exactly the indices the candidate ran
+            # (required for PIE_TC_SAMPLE_MODE=random). Legacy fallback:
+            # whole-subset totals, valid only when the runtime subset matches
+            # the table's fixed k/n.
+            idxs, n_total = g5_subset.get(key, (None, None))
+            src_per_tc = ref.get("src_per_tc_all")
+            tgt_per_tc = ref.get("tgt_per_tc_all")
+            src_ticks = tgt_ticks = None
+            if src_per_tc and n_total is not None and len(src_per_tc) == n_total:
+                src_ticks = sum(src_per_tc[i] for i in idxs)
+                if tgt_per_tc and len(tgt_per_tc) == n_total:
+                    tgt_ticks = sum(tgt_per_tc[i] for i in idxs)
+            elif (_TC_SAMPLE_MODE == "fixed"
+                  and (ref.get("k") is None or ref.get("k") == len(idxs or []))
+                  and (ref.get("n_cases_total") is None
+                       or ref.get("n_cases_total") == n_total)):
+                src_ticks = ref["src_gem5_ticks"]
+                tgt_ticks = ref.get("tgt_gem5_ticks")
+            if not src_ticks:
+                if pid not in _WARNED_GEM5_REF:
+                    _WARNED_GEM5_REF.add(pid)
+                    print(f"[pie_reward_fn] WARN: gem5 ref subset mismatch for "
+                          f"{pid} (mode={_TC_SAMPLE_MODE}, ref k={ref.get('k')}/"
+                          f"n={ref.get('n_cases_total')}, per_tc_all="
+                          f"{bool(src_per_tc)}, runtime k={len(idxs or [])}/"
+                          f"n={n_total}); rebuild the ref table with "
+                          f"build_gem5_ref_table.py. score=0.",
+                          file=sys.stderr, flush=True)
+                out.append({"score": 0.0, "acc": 1.0, "speedup": 0.0})
+                continue
+            cand_ticks = g5["ticks"]
+            spd = src_ticks / cand_ticks
+            if _REWARD_MODE == "spd":
+                reward = spd
+            elif _REWARD_MODE == "pass_plus_logspd":
+                reward = 1.0 + math.log(spd)
+            elif _REWARD_MODE == "gated_logspd":
+                reward = math.log(spd) if spd > 1.0 else 0.0
+            elif _REWARD_MODE == "tgt_relative":
+                if not tgt_ticks:
+                    out.append({"score": 0.0, "acc": 1.0, "speedup": float(spd)})
+                    continue
+                reward = tgt_ticks / cand_ticks
+            elif _REWARD_MODE == "pass_plus_logspeedup":
+                reward = 1.0 + math.log(1.0 + spd)
+            elif _REWARD_MODE == "gated_logspeedup":
+                reward = math.log(spd) if spd > 1.0 else 0.0
+            else:  # "log2_speedup" default
+                reward = max(0.0, math.log2(spd))
+            out.append({"score": float(reward), "acc": 1.0, "speedup": float(spd)})
+            continue
+
+        # ---- perf timing source (PIE_TIMING_SOURCE=perf; legacy) ----
+        if r["elapsed_ns"] is None or r["elapsed_ns"] <= 0:
             out.append(dict(_ZERO))
             continue
         cand_instr = r["elapsed_ns"]  # name kept across backends; under PIE_BACKEND=perf this is retired-instructions
         src_instr = src_instrs[i]
         if src_instr is None:
             # Gate-passed but no src_instr_count in ground_truth — log already
-            # warned once. Record gate-pass for acc but emit 0 reward / 1.0
+            # warned once. Record gate-pass for acc but emit 0 reward / 0.0
             # speedup placeholder so the metrics don't claim spurious speedups.
             out.append({"score": 0.0, "acc": 1.0, "speedup": 0.0})
             continue
         ratio = src_instr / cand_instr
-        reward = max(0.0, math.log2(ratio))
+        if _REWARD_MODE == "pass_plus_logspeedup":
+            reward = 1.0 + math.log(1.0 + ratio)  # r = 1[pass] + ln(1+speedup)
+        elif _REWARD_MODE == "gated_logspeedup":
+            reward = math.log(ratio) if ratio > 1.0 else 0.0  # r = 1[pass & speedup>1]·ln(speedup)
+        else:
+            reward = max(0.0, math.log2(ratio))
         out.append({"score": float(reward), "acc": 1.0, "speedup": float(ratio)})
 
     return out

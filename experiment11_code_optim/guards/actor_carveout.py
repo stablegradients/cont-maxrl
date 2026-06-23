@@ -83,11 +83,15 @@ def _hardlink_tree(
 
 
 def _skip_optimizer_shards(filename: str) -> bool:
-    """Skip verl's optim_world_size_*_rank_*.pt files during carve-out.
-    Saves ~14GB / 1.7B-param model / save. The verl rolling ckpt keeps
-    the optimizer for resume integrity; only the long-lived snapshots
-    drop it."""
-    return filename.startswith("optim_world_size_") and filename.endswith(".pt")
+    """Skip verl's FSDP shard .pt files during carve-out, keeping only the
+    huggingface/ subdir (+ tokenizer/config) — which is exactly what post-hoc
+    vLLM eval loads. The FSDP optim_/model_/extra_state shards are redundant
+    with the rolling full-state ckpt kept for resume, and dominate size
+    (~8GB model + ~14GB optim per 1.7B save), so dropping them cuts each
+    long-lived snapshot from ~16GB to ~3.4GB (huggingface safetensors)."""
+    return filename.startswith(
+        ("optim_world_size_", "model_world_size_", "extra_state_world_size_")
+    ) and filename.endswith(".pt")
 
 
 def install_actor_carveout_hook() -> bool:
@@ -102,32 +106,42 @@ def install_actor_carveout_hook() -> bool:
         return False
 
     try:
-        from verl.utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
+        from verl.trainer.ppo.ray_trainer import RayPPOTrainer
     except ImportError as e:
         print(
-            f"[carveout] WARN: could not import FSDPCheckpointManager ({e}); "
+            f"[carveout] WARN: could not import RayPPOTrainer ({e}); "
             f"hook NOT installed",
             file=sys.stderr,
         )
         return False
 
     os.makedirs(carveout_dir, exist_ok=True)
-    original_save = FSDPCheckpointManager.save_checkpoint
+    # Hook the DRIVER-side trainer save. The previous version wrapped
+    # FSDPCheckpointManager.save_checkpoint, which executes inside a Ray WORKER
+    # process where this monkeypatch never lands — which is why actor_ckpts/
+    # stayed EMPTY in every prior run. RayPPOTrainer._save_checkpoint runs in
+    # the driver (where train.py installs this hook); after it returns,
+    # default_local_dir/global_step_<N>/actor is on the shared FS to mirror.
+    original_save = RayPPOTrainer._save_checkpoint
+    # Mirror only every PIE_CARVEOUT_EVERY steps (default 1 = every save). With
+    # save_freq=50 + carve_every=100 on a 2570-step run -> ~26 snapshots/arm.
+    carve_every = int(os.environ.get("PIE_CARVEOUT_EVERY", "1"))
 
-    def save_with_carveout(self, local_path, hdfs_path=None, global_step=0,
-                           max_ckpt_to_keep=None):
-        original_save(
-            self,
-            local_path,
-            hdfs_path=hdfs_path,
-            global_step=global_step,
-            max_ckpt_to_keep=max_ckpt_to_keep,
-        )
-        # Only rank 0 mirrors — the saved files are on a shared filesystem
-        # so rank 0 sees every rank's shard.
-        if getattr(self, "rank", 0) != 0:
+    def save_checkpoint_with_carveout(self):
+        original_save(self)
+        try:
+            global_step = int(getattr(self, "global_steps", 0))
+        except (TypeError, ValueError):
+            global_step = 0
+        # Step-interval filter: only carve actor-only snapshots every N steps.
+        if carve_every > 1 and (global_step % carve_every) != 0:
             return
-        if local_path is None:
+        local_path = os.path.join(
+            self.config.trainer.default_local_dir,
+            f"global_step_{global_step}", "actor")
+        if not os.path.isdir(local_path):
+            print(f"[carveout] WARN: actor dir missing, skip step={global_step}: "
+                  f"{local_path}", file=sys.stderr)
             return
         target = os.path.join(carveout_dir, f"step_{global_step}")
         try:
@@ -167,10 +181,11 @@ def install_actor_carveout_hook() -> bool:
                 file=sys.stderr,
             )
 
-    FSDPCheckpointManager.save_checkpoint = save_with_carveout
+    RayPPOTrainer._save_checkpoint = save_checkpoint_with_carveout
     _INSTALLED = True
     print(
-        f"[carveout] installed: per-save mirror to {carveout_dir}/step_<N>/",
+        f"[carveout] installed: driver-side mirror of global_step_*/actor -> "
+        f"{carveout_dir}/step_<N>/ (every {carve_every} steps)",
         file=sys.stderr,
     )
     return True

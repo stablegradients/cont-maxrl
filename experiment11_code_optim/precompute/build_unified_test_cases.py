@@ -1,5 +1,5 @@
 """
-Build the unified PIE test-case tree under /work/nvme/bgmo/.../pie_data/tests/.
+DEPRECATED (2026-06-10): built a low-coverage archive (~4 public tests/problem fallback) NOT faithful to the PIE paper (~100 tests/problem incl AlphaCode-generated). Use /work/nvme/bgtv/sramasubramanian/pie_merged_tests/merged_test_cases. Original: Build the unified PIE test-case tree under /work/nvme/bgmo/.../pie_data/tests/.
 
 For every problem_id appearing in any of the staged PIE JSONLs (train, train_hq_only,
 val, test), copy the richest available test-case set into a single uniform layout:

@@ -6,7 +6,9 @@ this script:
 
   1. Merges FSDP shards → HF format via verl's model_merger (skips if already done).
   2. Generates n_completions samples per val problem with vLLM.
-  3. Grades each completion via PIE's `compute_scores_batch` (percentile-rank).
+  3. Grades each completion via `compute_scores_batch` — gem5 speedup reward when
+     PIE_REWARD_IMPL=gem5 (the live runs), else the legacy perf/ref-table reward.
+     MUST match how the checkpoint was trained (see score_completions).
   4. Computes pass@K and best@K at K ∈ {1, 4, 16, 64, 256}.
   5. Writes `metrics_step_<N>.json` + an `eval_done.json` sentinel so re-runs are
      idempotent — a checkpoint with `eval_done.json` is skipped.
@@ -147,8 +149,17 @@ def score_completions(completions: list[list[str]], ground_truths: list[str],
                       test_case_dir: str, reference_table_dir: str | None,
                       timeout_per_test: int = 6) -> list[list[dict]]:
     """For each problem i and each of its n_completions completions, return the
-    score dict. Uses PIE's compute_scores_batch (dedup + two-level scheduler)."""
-    from experiment11_code_optim.reward.pie_reward_fn import compute_scores_batch
+    score dict. The scorer must MATCH how the checkpoint was trained, else best@K
+    is computed under a different reward than the run optimized:
+      - PIE_REWARD_IMPL=gem5 -> reward/gem5_reward.py (live gem5 speedup); the
+        val parquet's ground_truth must carry usable_case_ids + gem5_src_per_tc_ticks
+        (i.e. pass --val_parquet pie_gem5_val_*.parquet). reference_table_dir is unused.
+      - else (default) -> legacy pie_reward_fn (perf/ref-table percentile reward)."""
+    gem5 = os.environ.get("PIE_REWARD_IMPL") == "gem5"
+    if gem5:
+        from experiment11_code_optim.reward.gem5_reward import compute_scores_batch
+    else:
+        from experiment11_code_optim.reward.pie_reward_fn import compute_scores_batch
 
     # Flatten: pair each completion with its ground truth, score in one big batch.
     flat_inputs = []
@@ -158,12 +169,16 @@ def score_completions(completions: list[list[str]], ground_truths: list[str],
             flat_inputs.append({"solution_str": c, "ground_truth": ground_truths[i]})
             flat_owner.append((i, j))
 
-    results = compute_scores_batch(
-        flat_inputs,
-        test_case_dir=test_case_dir,
-        reference_table_dir=reference_table_dir,
-        timeout_per_test=timeout_per_test,
-    )
+    if gem5:
+        # gem5_reward reads PIE_GEM5_* from env; native gate timeout is PIE_NAT_TIMEOUT
+        results = compute_scores_batch(flat_inputs, test_case_dir=test_case_dir)
+    else:
+        results = compute_scores_batch(
+            flat_inputs,
+            test_case_dir=test_case_dir,
+            reference_table_dir=reference_table_dir,
+            timeout_per_test=timeout_per_test,
+        )
 
     # Scatter back into per-problem lists.
     per_problem: list[list[dict]] = [[None] * len(comps) for comps in completions]
@@ -287,7 +302,7 @@ def main() -> int:
                     help="Where to write metrics_step_<N>.json (default: carveout_dir/post_hoc_eval/).")
     ap.add_argument("--test_case_dir",
                     default=os.environ.get("PIE_TEST_CASE_DIR",
-                                           "/work/nvme/bgmo/sramasubramanian/pie_data/tests"))
+                                           "/work/nvme/bgtv/sramasubramanian/pie_merged_tests/merged_test_cases"))
     ap.add_argument("--reference_table_dir",
                     default=os.environ.get("PIE_REFERENCE_TABLE_DIR",
                                            "/work/nvme/bgmo/sramasubramanian/pie_data/reference_table"))

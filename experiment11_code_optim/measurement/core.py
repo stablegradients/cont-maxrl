@@ -38,14 +38,13 @@ import sys
 import tempfile
 import time
 
-# Spec §1: absolute path to g++ 14.2.0.
-# COMPILE_FLAGS is -O0 (not -O3): the 2026-05-23 spread analysis showed -O3
-# normalises real algorithmic differences between accepted PIE solutions down
-# to <5% retired-instruction spread, leaving no learning signal. -O0 preserves
-# the spread (max/min up to 245,005× across the tgt pool) so the log2-speedup
-# reward has something to differentiate. Programs run ~10-50× slower at -O0,
-# which is why per_test_timeout_s defaults below were raised from 6→30.
-# Override via the PIE_COMPILE_FLAGS env-var split on commas if needed.
+# g++ 14.2.0. These flags compile programs for the native CORRECTNESS gate
+# (output comparison), NOT for timing — the live pie-gem5 reward measures speed
+# with gem5, not with these binaries. -O0 is retained because it compiles fast
+# (the gate is compile-bound) and the pass/fail verdict is optimization-level-
+# invariant for correct programs. The legacy perf-instruction-count reward also
+# used -O0 to preserve cross-solution spread (2026-05-23 analysis: -O3 collapsed
+# it to <5%); that reward is archived but the flags are unchanged.
 GPP_PATH = "/opt/cray/pe/gcc-native/14/bin/g++"
 COMPILE_FLAGS = ["-O0", "-std=c++17"]
 
@@ -446,7 +445,7 @@ def _run_and_compare_perf(
             return False, instr_count
 
         actual = stdout_bytes.decode(errors="replace")
-        return _normalize(actual) == _normalize(expected), instr_count
+        return _outputs_match(actual, expected), instr_count
     finally:
         if fd >= 0:
             try:
@@ -532,12 +531,33 @@ def _run_and_compare(
     elapsed_ns = time.monotonic_ns() - t0
     if proc.returncode != 0:
         return False, elapsed_ns
-    return _normalize(proc.stdout) == _normalize(expected), elapsed_ns
+    return _outputs_match(proc.stdout, expected), elapsed_ns
 
 
-def _normalize(s: str) -> str:
-    """Spec §4.2: per-line + end trailing-whitespace normalization."""
-    return "\n".join(line.rstrip() for line in s.rstrip("\n").split("\n"))
+def _outputs_match(output: str, expected: str) -> bool:
+    """PIE's official output comparator, mirrored verbatim from the paper
+    repo (LearningOpt/pie, gem5/benchmarking.py::get_accuracy): line-wise
+    exact match with an ABSOLUTE 1e-3 float-tolerance fallback per line;
+    a program passes iff every expected line matches. Two fidelity quirks
+    kept on purpose: (a) extra OUTPUT lines beyond the expected count are
+    ignored (their zip()), (b) the float fallback fires only when the whole
+    line parses as one float. Without the tolerance, float-output problems
+    (e.g. p02882: '75.9637565321' vs '75.963756532074') fail every case on
+    formatting alone — the paper's human-reference %Correct=100% requires it."""
+    exp_lines = expected.strip().splitlines()
+    out_lines = output.strip().splitlines()
+    if not exp_lines:
+        return not out_lines
+    n_correct = 0
+    for gen, gt in zip(out_lines, exp_lines):
+        ok = gen == gt
+        if not ok:
+            try:
+                ok = abs(float(gen) - float(gt)) < 1e-3
+            except (ValueError, OverflowError):
+                pass
+        n_correct += int(ok)
+    return n_correct == len(exp_lines)
 
 
 def _perf_count_instructions(exe_path: str, input_str: str) -> int | None:
@@ -559,9 +579,6 @@ def _perf_count_instructions(exe_path: str, input_str: str) -> int | None:
     if not match:
         return None
     return int(match.group(1).replace(",", ""))
-
-
-_GATE_RUNNER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gate_runner.sh")
 
 
 def _list_test_indices(test_case_dir: str, problem_id: str) -> list[int]:
@@ -594,19 +611,14 @@ def measure_from_disk(
     skip_measurement: bool = False,
     pch_include_path: str | None = None,
 ) -> dict:
-    """Compile + gate + (optional) perf, with the gate phase invoked via the
-    shell-level batched gate_runner.sh.
+    """Compile + gate + (optional) timing, reading test cases from disk.
 
-    Difference from `measure()`:
-    - The gate phase issues ONE Python `subprocess.run` (to the shell script)
-      instead of N (one per test case). The shell still spawns the binary
-      per test, but the Python ThreadPoolExecutor + GIL + subprocess.Popen
-      overhead is paid once per program rather than N times. This is the
-      gate-phase analogue of the dedup optimisation in compute_scores_batch.
-    - Test cases are discovered from the filesystem at
-      `<test_case_dir>/<problem_id>/input.<i>.txt` + `output.<i>.txt`. The
-      perf phase still needs the input bytes in memory (`subprocess.run`
-      takes `input=`), so we read them lazily only if the gate passes.
+    Difference from `measure()`: test cases are discovered from the filesystem
+    at `<test_case_dir>/<problem_id>/input.<i>.txt` + `output.<i>.txt` rather
+    than passed in memory. The gate runs the in-Python `_run_and_compare` loop
+    (the old shell-level gate_runner.sh batching path was abandoned and is
+    archived; under the walltime regime the gate IS the measurement, so we
+    want per-call Python timing anyway).
 
     Returns the same dict shape as `measure()`. Same args otherwise.
     """
@@ -636,12 +648,8 @@ def measure_from_disk(
             return result
         result["compiled"] = True
 
-        # Walltime path through gate_runner.sh — the shell still times nothing,
-        # so we re-run in Python with timing for the perf-equivalent phase. To
-        # keep this function simple under the walltime regime, just fall back
-        # to in-Python gate+timing here. The shell batching saved Python
-        # subprocess overhead, but in the walltime regime the gate IS the
-        # measurement, so we want per-call timing anyway.
+        # In-Python gate + timing (one subprocess per case). Under the walltime
+        # regime the gate IS the measurement, so per-call timing is what we want.
         pdir = os.path.join(test_case_dir, problem_id)
         n_pass = 0
         total_elapsed_ns = 0

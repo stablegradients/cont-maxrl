@@ -26,3 +26,8 @@ experiment4_llm/scripts/runs/
 
 # Claude Code
 .claude/
+
+# Secrets (WANDB_API_KEY, HF_TOKEN — never commit)
+.env
+*.env
+.env.*

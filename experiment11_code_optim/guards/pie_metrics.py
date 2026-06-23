@@ -124,6 +124,9 @@ def _compute_pie_metrics(batch) -> dict[str, float]:
         metrics["critic/score/mean_speedup"] = float(speedups_arr[gate_pass_mask].mean())
     else:
         metrics["critic/score/mean_speedup"] = 0.0
+    # NOTE: max_reward_at_{1,4,16} and gem5_untimed_rate live in the vendored
+    # verl metric_utils._compute_pie_metrics — the TaskRunner process uses that
+    # code path directly; this driver-side hook is effectively dormant there.
 
     # fraction_dead_groups: a prompt-group is "dead" iff every rollout in the
     # group has reward 0 (gradient starvation under group-relative estimators).
