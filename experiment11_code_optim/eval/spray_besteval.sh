@@ -20,8 +20,9 @@ PARTS=(ghx4 ghx4-interactive)
 
 COMBOS=(); for p in "${PARTS[@]}"; do for a in "${ACCTS[@]}"; do COMBOS+=("${a}|${p}"); done; done
 
+MODEL_TAG="${PIE_MODEL_TAG:-qwen3_1.7b}"   # 4B eval sets PIE_MODEL_TAG=qwen3_4b_instruct_2507
 latest_step() {
-  local d="${STORAGE}/results/qwen3_1.7b_pie_gem5_fb_${1}_g16_bs64_s0/actor_ckpts" best=0 n
+  local d="${STORAGE}/results/${MODEL_TAG}_pie_gem5_fb_${1}_g16_bs64_s0/actor_ckpts" best=0 n
   for s in "$d"/step_*; do [ -f "$s/.carveout_complete" ] || continue; n="${s##*step_}"; [ "$n" -gt "$best" ] && best="$n"; done
   echo "$best"
 }

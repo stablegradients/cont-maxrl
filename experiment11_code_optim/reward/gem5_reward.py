@@ -682,10 +682,117 @@ def _job_from_ground_truth(i: int, solution_str: str, ground_truth) -> dict:
     return job
 
 
+# --------------------------------------------------------------- distributed reward
+# The reward normally runs as ONE Ray task on ONE node (verl's @ray.remote(num_cpus=1)
+# compute_reward_async), so on a multi-node run the other nodes' cores + RAM sit idle.
+# With PIE_GEM5_REWARD_DISTRIBUTED=1, compute_scores_batch shards the batch across the
+# live Ray nodes (one child task per node, NodeAffinity-pinned), grades each shard with
+# the SAME local path, and gathers IN ORDER. The whole gem5 stack + test cases live on
+# the shared FS, so any node can grade any rollout. Default OFF (single-node behavior).
+# Shards are GROUP-ALIGNED (split at multiples of G) so each prompt's G rollouts stay on
+# one node -> within-group dedup preserved and (for case_select=sample) the per-group
+# case choice stays self-consistent. Falls back to local on any error.
+
+
+def _gkey(item: dict):
+    """The (problem_id|src_id) group key from a reward_input's ground_truth, or None."""
+    try:
+        gt = item.get("ground_truth")
+        gt = json.loads(gt) if isinstance(gt, (str, bytes)) else dict(gt)
+        return f"{gt.get('problem_id')}|{gt.get('src_id')}"
+    except Exception:
+        return None
+
+
+def _group_aligned_shards(reward_inputs: list, n_shards: int) -> list[list]:
+    """Split into <= n_shards contiguous chunks that NEVER split a prompt's group,
+    using the ACTUAL group_key from ground_truth (robust to any group size G, and to
+    the rollouts being group-contiguous as verl lays them out). Order-preserving.
+    Falls back to a fixed-G split if group keys can't be parsed."""
+    if n_shards <= 1 or len(reward_inputs) <= 1:
+        return [reward_inputs]
+    keys = [_gkey(it) for it in reward_inputs]
+    if any(k is None for k in keys):     # malformed -> safe fixed-size fallback
+        return _split_group_aligned(reward_inputs, n_shards, _env_i("PIE_GEM5_GROUP_SIZE", "16"))
+    bounds = [0]                          # start index of each contiguous group
+    for i in range(1, len(keys)):
+        if keys[i] != keys[i - 1]:
+            bounds.append(i)
+    bounds.append(len(reward_inputs))
+    n_groups = len(bounds) - 1
+    per = max(1, (n_groups + n_shards - 1) // n_shards)
+    shards = []
+    for g0 in range(0, n_groups, per):
+        s = bounds[g0]; e = bounds[min(g0 + per, n_groups)]
+        shards.append(reward_inputs[s:e])
+    return shards
+
+
+def _split_group_aligned(items: list, n_shards: int, group_size: int) -> list[list]:
+    """Fixed-G fallback splitter: contiguous chunks whose boundaries land on multiples
+    of group_size. Order-preserving. (Primary path is _group_aligned_shards.)"""
+    if n_shards <= 1 or len(items) <= group_size:
+        return [items]
+    n_groups = (len(items) + group_size - 1) // group_size
+    groups_per_shard = (n_groups + n_shards - 1) // n_shards
+    chunk = max(1, groups_per_shard) * group_size
+    return [items[i:i + chunk] for i in range(0, len(items), chunk)]
+
+
+def _grade_shard_fn(shard, kwargs):  # runs (possibly) on a remote node
+    return compute_scores_batch(shard, _local_only=True, **kwargs)
+
+
+def _distribute_scores_batch(reward_inputs: list[dict], kwargs: dict):
+    """Fan the batch out across live Ray nodes; return index-aligned results, or
+    None to signal 'fall back to local'."""
+    try:
+        import ray
+        from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+        if not ray.is_initialized():
+            return None
+        nodes = [n for n in ray.nodes() if n.get("Alive") and n.get("Resources", {}).get("GPU")]
+        if len(nodes) < 2:
+            return None
+        shards = _group_aligned_shards(reward_inputs, len(nodes))
+        # Resolve the reward config on THIS (head) node and pass it explicitly to
+        # every shard, so a worker node with a different/missing PIE_GEM5_* env still
+        # grades with identical settings. workers/step stay None -> each node resolves
+        # its own worker count from its env (128/node is what we want).
+        cfg = _cfg_from_kwargs(kwargs)
+        child_kwargs = dict(kwargs)
+        child_kwargs.update({k: getattr(cfg, k) for k in _CFG_KEYS
+                             if getattr(cfg, k, None) is not None})
+        remote_fn = ray.remote(num_cpus=1)(_grade_shard_fn)
+        futs = []
+        for shard, node in zip(shards, nodes):
+            if not shard:
+                continue
+            strat = NodeAffinitySchedulingStrategy(node_id=node["NodeID"], soft=True)
+            futs.append(remote_fn.options(scheduling_strategy=strat).remote(shard, child_kwargs))
+        out: list = []
+        for f in futs:                       # gather in shard order -> index-aligned
+            out.extend(ray.get(f))
+        if len(out) != len(reward_inputs):    # shape sanity; never return a mismatched batch
+            print(f"[dist-reward] shard count {len(out)} != {len(reward_inputs)}; local fallback",
+                  file=sys.stderr)
+            return None
+        return out
+    except Exception as e:
+        print(f"[dist-reward] fell back to local: {type(e).__name__}: {e}", file=sys.stderr)
+        return None
+
+
 def compute_scores_batch(reward_inputs: list[dict], **kwargs) -> list[dict]:
     """verl batch entry. reward_inputs: [{solution_str, ground_truth}, ...].
     Returns [{score, acc, speedup, reason}, ...] (extra keys are pivoted into
     non_tensor_batch by verl's reward manager)."""
+    if (not kwargs.pop("_local_only", False)
+            and os.environ.get("PIE_GEM5_REWARD_DISTRIBUTED") == "1"
+            and len(reward_inputs) > _env_i("PIE_GEM5_GROUP_SIZE", "16")):
+        dist = _distribute_scores_batch(reward_inputs, dict(kwargs))
+        if dist is not None:
+            return dist
     cfg = _cfg_from_kwargs(kwargs)
     jobs = [_job_from_ground_truth(i, it.get("solution_str", ""), it.get("ground_truth"))
             for i, it in enumerate(reward_inputs)]

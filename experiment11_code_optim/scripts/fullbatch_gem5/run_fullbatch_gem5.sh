@@ -45,13 +45,21 @@ STORAGE_ROOT="/work/nvme/bgtv/sramasubramanian/cont-maxrl"
 PYTHON="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl/bin/python"
 SELF="${REPO_ROOT}/experiment11_code_optim/scripts/fullbatch_gem5/run_fullbatch_gem5.sh"
 
-RUN_TAG="qwen3_1.7b_pie_gem5_fb_${ADV}_g16_bs64_s${SEED}"
+# Model is selected via env so this ONE launcher serves both 1.7B and 4B. MODEL_TAG
+# MUST be resolved BEFORE RUN_TAG (RUN_TAG derives OUTPUT_DIR / lock / carveout /
+# PIE_RUN_ID). With the old hardcoded '1.7b' tag a 4B run would resume INTO and
+# overwrite the existing 1.7B run. Defaults reproduce the original 1.7B tag, so a
+# 1.7B resume (no PIE_MODEL_* set) is bit-for-bit unaffected.
+MODEL_PATH="${PIE_MODEL_PATH:-Qwen/Qwen3-1.7B}"
+MODEL_TAG="${PIE_MODEL_TAG:-qwen3_1.7b}"
+
+RUN_TAG="${MODEL_TAG}_pie_gem5_fb_${ADV}_g16_bs64_s${SEED}"
 OUTPUT_DIR="${STORAGE_ROOT}/results/${RUN_TAG}"
 ACTOR_CKPT_DIR="${OUTPUT_DIR}/actor_ckpts"
 LOCKROOT="${STORAGE_ROOT}/locks"
 LOCKDIR="${LOCKROOT}/${RUN_TAG}.lock"
-JOBNAME="${SLURM_JOB_NAME:-pie_fb_${ADV}_s${SEED}}"
-PIE_TOTAL_STEPS=2570              # hard step cap == "done" threshold (==10.0 epochs)
+JOBNAME="${SLURM_JOB_NAME:-pie_fb_${MODEL_TAG}_${ADV}_s${SEED}}"
+PIE_TOTAL_STEPS="${PIE_TOTAL_STEPS:-2570}"   # hard step cap == "done" threshold (1.7B: ==10.0 epochs)
 mkdir -p "${OUTPUT_DIR}" "${ACTOR_CKPT_DIR}" "${LOCKROOT}" "${REPO_ROOT}/slurm_logs"
 
 # ---------------------------------------------------------------------------
@@ -115,17 +123,35 @@ PIE_TRAIN_PARQUET="${PIE_TRAIN_PARQUET:-${PIE_PARQUET_ROOT}/pie_gem5_train.parqu
 PIE_VAL_PARQUET="${PIE_VAL_PARQUET:-${PIE_PARQUET_ROOT}/pie_gem5_val_200.parquet}"
 export PIE_TEST_CASE_DIR="${PIE_TEST_CASE_DIR:-/work/nvme/bgtv/sramasubramanian/pie_merged_tests/merged_test_cases}"
 [ -f "${PIE_TRAIN_PARQUET}" ] || { echo "FATAL: missing ${PIE_TRAIN_PARQUET}"; exit 2; }
-MODEL_PATH="${PIE_MODEL_PATH:-Qwen/Qwen3-1.7B}"
-MODEL_TAG="${PIE_MODEL_TAG:-qwen3_1.7b}"
+# MODEL_PATH / MODEL_TAG resolved near the top (before RUN_TAG); do not redefine.
 
 # Keep-all actor (hf_model) snapshots every 100 steps; rolling full-state every
 # save_freq for cheap resume. carveout dir survives the rolling-1 deletion.
 export PIE_ACTOR_CARVEOUT_DIR="${ACTOR_CKPT_DIR}"
-export PIE_CARVEOUT_EVERY=100
+export PIE_CARVEOUT_EVERY="${PIE_CARVEOUT_EVERY:-100}"   # permanent hf snapshot cadence (4B run uses 250)
 # Rolling full-state cadence (1 kept, for resume). At ~7min/step a crash/walltime
 # cut loses <= SAVE_FREQ steps; 20 -> <=~2.3h lost, save I/O ~12s is negligible.
 # MUST divide PIE_CARVEOUT_EVERY (100) so carve-out lands on a save step.
 SAVE_FREQ="${PIE_SAVE_FREQ:-20}"
+KEEP_CKPT="${PIE_KEEP_CKPT:-1}"   # rolling full-state ckpts kept; 2 => a prior ckpt always survives a torn save (resume safety)
+# carve-out must land on a save step, else the permanent snapshot is never taken.
+if [ $(( PIE_CARVEOUT_EVERY % SAVE_FREQ )) -ne 0 ]; then
+  echo "FATAL: PIE_CARVEOUT_EVERY (${PIE_CARVEOUT_EVERY}) must be a multiple of SAVE_FREQ (${SAVE_FREQ})"; exit 2
+fi
+# Rollout/actor shapes (env-overridable; defaults = the 1.7B run). The 4B run sets
+# longer responses (16384), a matching max_model_len, and micro_batch=1 for memory
+# headroom on the 4x-longer responses. max_model_len MUST be >= max_prompt(2560)+max_resp.
+MAX_RESP="${PIE_MAX_RESP:-4096}"
+MAX_MODEL_LEN="${PIE_MAX_MODEL_LEN:-6656}"
+MICRO_BS="${PIE_MICRO_BS:-2}"
+GPU_MEM_UTIL="${PIE_GPU_MEM_UTIL:-0.5}"
+# remove_padding=True processes ACTUAL tokens (not the 18944 pad) -> ~2.5x faster
+# actor + far less GPU mem; essential at 16k (stress: rmpad=False spills over HBM).
+# Default False = the 1.7B run's behavior (backward-compat); the 4B run sets True.
+REMOVE_PADDING="${PIE_REMOVE_PADDING:-False}"
+if [ "${MAX_MODEL_LEN}" -lt $(( 2560 + MAX_RESP )) ]; then
+  echo "FATAL: PIE_MAX_MODEL_LEN (${MAX_MODEL_LEN}) < max_prompt(2560)+max_resp(${MAX_RESP})"; exit 2
+fi
 
 export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 export PATH="${CUDA_HOME}/bin:${PATH}"
@@ -147,12 +173,13 @@ export PIE_MODE=1
 export PIE_REWARD_IMPL=gem5
 export PIE_GEM5_REWARD_KIND=ratio      # r = src_ticks / rollout_ticks (same case)
 export PIE_GEM5_REWARD_K=1             # ONE gem5-timed case per prompt/step
-export PIE_GEM5_CASE_SELECT=sample     # RANDOM usable case (not "biggest")
-export PIE_GEM5_REWARD_SAMPLE=group    # same case for all 16 rollouts of a prompt
+export PIE_GEM5_CASE_SELECT="${PIE_GEM5_CASE_SELECT:-sample}"   # 'sample'=random usable case (1.7B); 4B run uses 'biggest' (heaviest, matches eval)
+export PIE_GEM5_REWARD_SAMPLE=group    # same case for all 16 rollouts of a prompt (irrelevant under case_select=biggest, which is deterministic)
 export PIE_GEM5_REWARD_SEED=${SEED}
 export PIE_GEM5_BUDGET_MULT=3.0        # zero any rollout beyond 3x src ticks
-export PIE_GEM5_REWARD_WORKERS="${PIE_GEM5_REWARD_WORKERS:-256}"   # parallel gem5 across the 288-core node
-export PIE_NAT_TIMEOUT="${PIE_NAT_TIMEOUT:-10}"    # native CORRECTNESS gate per case (s); not the speed judge
+export PIE_GEM5_REWARD_WORKERS="${PIE_GEM5_REWARD_WORKERS:-256}"   # parallel native+gem5 across the 288-core node
+export PIE_NAT_TIMEOUT="${PIE_NAT_TIMEOUT:-10}"    # per-CASE native correctness timeout (s); not the speed judge. measured slowest src case ~0.32s
+export PIE_GEM5_REWARD_NATIVE_BUDGET="${PIE_GEM5_REWARD_NATIVE_BUDGET:-120}"   # per-ROLLOUT cumulative native budget (s); measured slowest src total ~3.5s
 export PIE_GEM5_REWARD_DEADLINE="${PIE_GEM5_REWARD_DEADLINE:-3000}"  # hard backstop per reward batch (s)
 export TMPDIR="/tmp/${USER}_fbg5_${SLURM_JOB_ID:-$$}"
 export PIE_COMPILE_SCRATCH="${TMPDIR}/scratch"; mkdir -p "${PIE_COMPILE_SCRATCH}"
@@ -171,9 +198,10 @@ export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 N_GPUS=${SLURM_GPUS_ON_NODE:-$(nvidia-smi -L 2>/dev/null | wc -l || echo 4)}
 STEPS_DONE="$(cat "${OUTPUT_DIR}/latest_checkpointed_iteration.txt" 2>/dev/null || echo 0)"
 echo "=== FULL-BATCH gem5 RL | ${MODEL_TAG} | ${ADV} | G=16 B=64 | lr=1e-6 | seed=${SEED} ==="
-echo "    reward=ratio K=1 case_select=sample budget=3x workers=${PIE_GEM5_REWARD_WORKERS} nat_timeout=${PIE_NAT_TIMEOUT}s"
+echo "    reward=ratio K=1 case_select=${PIE_GEM5_CASE_SELECT} budget=3x workers=${PIE_GEM5_REWARD_WORKERS} nat_to=${PIE_NAT_TIMEOUT}s nat_budget=${PIE_GEM5_REWARD_NATIVE_BUDGET}s"
+echo "    model=${MODEL_PATH} max_resp=${MAX_RESP} max_model_len=${MAX_MODEL_LEN} micro_bs=${MICRO_BS} gpu_util=${GPU_MEM_UTIL}"
 echo "    OUTPUT_DIR=${OUTPUT_DIR}"
-echo "    steps_done=${STEPS_DONE}/${PIE_TOTAL_STEPS}  save_freq=${SAVE_FREQ} carveout_every=100  segments_left=${SEGMENTS_LEFT}  GPUs=${N_GPUS}"
+echo "    steps_done=${STEPS_DONE}/${PIE_TOTAL_STEPS}  save_freq=${SAVE_FREQ} keep_ckpt=${KEEP_CKPT} carveout_every=${PIE_CARVEOUT_EVERY}  segments_left=${SEGMENTS_LEFT}  GPUs=${N_GPUS}"
 
 # ---------------------------------------------------------------------------
 # UPFRONT resume child (winner only): survives a walltime kill. Submitted only
@@ -204,7 +232,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   data.val_files="${PIE_VAL_PARQUET}" \
   data.train_batch_size=64 \
   data.max_prompt_length=2560 \
-  data.max_response_length=4096 \
+  data.max_response_length=${MAX_RESP} \
   data.shuffle=True \
   data.filter_overlong_prompts=True \
   data.enable_thinking=False \
@@ -212,10 +240,11 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   actor_rollout_ref.model.trust_remote_code=True \
+  actor_rollout_ref.model.use_remove_padding=${REMOVE_PADDING} \
   actor_rollout_ref.actor.strategy=fsdp \
   actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
   actor_rollout_ref.actor.ppo_mini_batch_size=64 \
-  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=${MICRO_BS} \
   actor_rollout_ref.actor.ppo_epochs=1 \
   actor_rollout_ref.actor.use_kl_loss=False \
   actor_rollout_ref.actor.kl_loss_coef=0.0 \
@@ -224,21 +253,21 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   actor_rollout_ref.actor.grad_clip=2.0 \
   actor_rollout_ref.actor.use_torch_compile=False \
   actor_rollout_ref.actor.optim.lr=1e-6 \
-  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${MICRO_BS} \
   actor_rollout_ref.ref.use_torch_compile=False \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.n=16 \
   actor_rollout_ref.rollout.temperature=1.0 \
   actor_rollout_ref.rollout.top_p=1.0 \
-  actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+  actor_rollout_ref.rollout.gpu_memory_utilization=${GPU_MEM_UTIL} \
   actor_rollout_ref.rollout.dtype=bfloat16 \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-  actor_rollout_ref.rollout.max_model_len=6656 \
+  actor_rollout_ref.rollout.max_model_len=${MAX_MODEL_LEN} \
   actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
-  actor_rollout_ref.rollout.max_num_seqs=1024 \
+  actor_rollout_ref.rollout.max_num_seqs=256 \
   actor_rollout_ref.rollout.enforce_eager=True \
   actor_rollout_ref.rollout.free_cache_engine=True \
-  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${MICRO_BS} \
   actor_rollout_ref.rollout.enable_chunked_prefill=False \
   actor_rollout_ref.rollout.val_kwargs.n=1 \
   actor_rollout_ref.rollout.val_kwargs.do_sample=True \
@@ -261,7 +290,7 @@ $PYTHON "${REPO_ROOT}/experiment11_code_optim/train.py" \
   "+actor_rollout_ref.actor.checkpoint.contents=['model','optimizer','extra','hf_model']" \
   trainer.test_freq=-1 \
   trainer.resume_mode=auto \
-  trainer.max_actor_ckpt_to_keep=1 \
+  trainer.max_actor_ckpt_to_keep=${KEEP_CKPT} \
   trainer.val_before_train=False \
   "insitu_eval.eval_steps=[]" \
   insitu_eval.data_file="${PIE_VAL_PARQUET}" \

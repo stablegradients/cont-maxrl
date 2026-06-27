@@ -12,6 +12,7 @@ set -euo pipefail
 WHICH="${1:?usage: spray_fullbatch.sh <grpo|gos|rloo|all> [SEED] [SEGMENTS]}"
 SEED="${2:-0}"
 SEG="${3:-8}"
+MTAG="${PIE_MODEL_TAG:-qwen3_1.7b}"   # jobname/lock tag; PIE_MODEL_* propagate to the launcher via sbatch
 REPO_ROOT="/projects/bgmo/sramasubramanian/cont-maxrl"
 SELF="${REPO_ROOT}/experiment11_code_optim/scripts/fullbatch_gem5/run_fullbatch_gem5.sh"
 ACCTS=(bgtu bgtv bgyb bgyc bgyd bgts bgmo)
@@ -27,7 +28,7 @@ if [ -f "${REPO_ROOT}/.env" ]; then set -a; source "${REPO_ROOT}/.env"; set +a; 
 : "${WANDB_API_KEY:?WANDB_API_KEY must be set (source .env) before spraying}"
 
 for adv in "${ADVS[@]}"; do
-  JOBNAME="pie_fb_${adv}_s${SEED}"
+  JOBNAME="pie_fb_${MTAG}_${adv}_s${SEED}"
   echo "=== spraying ${adv} (seed=${SEED}, segments=${SEG}) as ${JOBNAME} across ${#ACCTS[@]} accounts ==="
   for a in "${ACCTS[@]}"; do
     JID=$(sbatch --parsable --account="${a}-dtai-gh" --job-name="${JOBNAME}" \

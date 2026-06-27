@@ -130,6 +130,26 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
     return metrics
 
 
+def _best_reward_at_k(scores: list, k: int) -> float:
+    """Unbiased E[max of k samples drawn WITHOUT replacement] from n rewards.
+    For sorted-ascending s_(1..n): P(s_(i) is max of a k-subset)=C(i-1,k-1)/C(n,k).
+    k=1 -> mean, k>=n -> max. (G=16 here, so all comb() are tiny ints.)"""
+    import math
+    n = len(scores)
+    if n == 0:
+        return 0.0
+    if k >= n:
+        return float(max(scores))
+    s = sorted(scores)
+    denom = math.comb(n, k)
+    num = 1  # C(k-1, k-1) at i=k
+    total = 0.0
+    for i in range(k, n + 1):
+        total += s[i - 1] * (num / denom)
+        num = num * i // (i - k + 1)
+    return float(total)
+
+
 def _compute_pie_metrics(batch, sequence_score) -> Dict[str, float]:
     """PIE-specific metrics computed from per-rollout acc/speedup arrays
     (placed in non_tensor_batch by NaiveRewardManager). Returns {} when the
@@ -154,11 +174,24 @@ def _compute_pie_metrics(batch, sequence_score) -> Dict[str, float]:
         "critic/score/speedup_rate": float((rewards_arr > 0).mean()),
         "critic/score/fraction_mode2": float((rewards_arr >= 0.3).mean()),
         "critic/score/max_speedup": float(speedups_arr.max()),
+        # Reward-kind-agnostic discovery metrics computed on the MEASURED speedup
+        # (speedup==0 for non-gate-pass). Under reward_kind=ratio the score IS the
+        # speedup, so speedup_rate/fraction_mode2 above (thresholds on score) are
+        # ~== gate_pass_rate and uninformative; these threshold on speedup itself.
+        "critic/score/frac_faster": float((speedups_arr > 1.0).mean()),
+        "critic/score/frac_speedup_ge_1_23": float((speedups_arr >= 1.23).mean()),
     }
     gate_mask = accs_arr >= 1.0
     out["critic/score/mean_speedup"] = (
         float(speedups_arr[gate_mask].mean()) if gate_mask.any() else 0.0
     )
+    # gem5 timing-failure visibility: gate-passed but speedup==0 means the
+    # gem5 timing or ref lookup failed (a measured spd is always > 0). A
+    # drifting rate here flags silent reward censoring (timeouts etc.).
+    if gate_mask.any():
+        out["critic/score/gem5_untimed_rate"] = float(
+            ((speedups_arr == 0.0) & gate_mask).sum() / gate_mask.sum()
+        )
 
     # fraction_dead_groups: a uid-group is "dead" iff every rollout in it
     # has reward 0 — the gradient-starvation signal for group-relative
@@ -174,6 +207,13 @@ def _compute_pie_metrics(batch, sequence_score) -> Dict[str, float]:
             dead = sum(1 for v in groups.values() if all(x == 0 for x in v))
             out["critic/score/fraction_dead_groups"] = dead / n_groups
             out["critic/score/n_groups"] = float(n_groups)
+
+            # max_reward@k: per-PROMPT-GROUP unbiased best-of-k on the train
+            # reward (log2-speedup), then averaged across prompts. k=1 == mean
+            # reward; k=G == the group's best rollout. (NOT a batch-level max.)
+            for k in (1, 4, 16):
+                per_group = [_best_reward_at_k(v, k) for v in groups.values()]
+                out[f"critic/score/max_reward_at_{k}"] = float(np.mean(per_group))
     return out
 
 

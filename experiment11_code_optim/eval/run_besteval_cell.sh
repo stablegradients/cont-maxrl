@@ -28,16 +28,21 @@ export PYTHONNOUSERSITE=1 PYTHONPATH="${REPO}:${PYTHONPATH:-}"
 
 STORAGE=/work/nvme/bgtv/sramasubramanian/cont-maxrl
 EVAL_ROOT="${STORAGE}/besteval"
+# Model-aware (default = 1.7B, back-compat). The 4B-Instruct-2507 P3 eval sets
+# PIE_MODEL_TAG / PIE_BASE_MODEL_HF / BESTEVAL_TEST_PARQUET so the eval model +
+# PROMPT match training (the prompt is read FROM the parquet, so the test parquet
+# MUST be the same variant — P3 — as training).
+MODEL_TAG="${PIE_MODEL_TAG:-qwen3_1.7b}"
+BASE_MODEL_HF="${PIE_BASE_MODEL_HF:-/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface/hub/models--Qwen--Qwen3-1.7B/snapshots/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e}"
 if [ "${ARM}" = "base" ]; then
-  # untrained Qwen3-1.7B Instruct (the RL init) — local HF cache, no internet on nodes
-  HF_DIR="/projects/bgmo/sramasubramanian/cont-maxrl/.cache/huggingface/hub/models--Qwen--Qwen3-1.7B/snapshots/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
-  OUT_DIR="${EVAL_ROOT}/base_step0"
+  HF_DIR="${BASE_MODEL_HF}"                       # untrained init (the RL base) — local HF cache
+  OUT_DIR="${EVAL_ROOT}/${MODEL_TAG}_base_step0"
 else
-  HF_DIR="${STORAGE}/results/qwen3_1.7b_pie_gem5_fb_${ARM}_g16_bs64_s0/actor_ckpts/step_${STEP}/huggingface"
-  OUT_DIR="${EVAL_ROOT}/${ARM}_step${STEP}"
+  HF_DIR="${STORAGE}/results/${MODEL_TAG}_pie_gem5_fb_${ARM}_g16_bs64_s0/actor_ckpts/step_${STEP}/huggingface"
+  OUT_DIR="${EVAL_ROOT}/${MODEL_TAG}_${ARM}_step${STEP}"
 fi
 [ -f "${HF_DIR}/config.json" ] || { echo "FATAL: no model ${HF_DIR}"; exit 2; }
-VAL=/work/nvme/bgtv/sramasubramanian/pie_gem5_parquet/pie_gem5_test.parquet
+VAL="${BESTEVAL_TEST_PARQUET:-/work/nvme/bgtv/sramasubramanian/pie_gem5_parquet/pie_gem5_test.parquet}"
 
 export CUDA_HOME="/work/nvme/bgmo/sramasubramanian/miniforge3/envs/cont-maxrl"
 export PATH="${CUDA_HOME}/bin:${PATH}"; export LD_LIBRARY_PATH="${CUDA_HOME}/lib:${LD_LIBRARY_PATH:-}"
@@ -52,6 +57,7 @@ export PIE_GEM5_CASE_SELECT="${PIE_GEM5_CASE_SELECT:-biggest}"
 export PIE_GEM5_REWARD_SAMPLE=group PIE_GEM5_BUDGET_MULT=3.0
 export PIE_GEM5_REWARD_WORKERS="${PIE_GEM5_REWARD_WORKERS:-64}"
 export PIE_NAT_TIMEOUT="${PIE_NAT_TIMEOUT:-10}" PIE_GEM5_REWARD_DEADLINE=6000
+export PIE_GEM5_REWARD_NATIVE_BUDGET="${PIE_GEM5_REWARD_NATIVE_BUDGET:-120}"   # gate cutoff; 4B eval sets 30 to match training's admission set
 export BESTEVAL_DUMP_GENS="${BESTEVAL_DUMP_GENS:-5}"   # save top-5 rollouts by speedup + prompt per problem
 export PIE_TEST_CASE_DIR=/work/nvme/bgtv/sramasubramanian/pie_merged_tests/merged_test_cases
 export TMPDIR="/tmp/${USER}_besteval_${SLURM_JOB_ID:-$$}"; export PIE_COMPILE_SCRATCH="${TMPDIR}/scratch"

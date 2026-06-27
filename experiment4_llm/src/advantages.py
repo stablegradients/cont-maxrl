@@ -29,9 +29,10 @@ def grpo_advantage(rewards: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     return (rewards - mean) / (std + eps)
 
 
-def maxrl_unnormalized_advantage(rewards: torch.Tensor) -> torch.Tensor:
+def gos_advantage(rewards: torch.Tensor) -> torch.Tensor:
     """
-    Continuous MaxRL gap-over-survivors advantage (unnormalized).
+    GOS (gap-over-survivors) advantage — formerly `maxrl_unnormalized_advantage`
+    / adv_estimator `maxrl_unnorm`; renamed 2026-06-13, math unchanged.
 
     Algorithm:
       1. Sort rewards to get order statistics r_(1) <= ... <= r_(G)
@@ -69,8 +70,11 @@ def maxrl_unnormalized_advantage(rewards: torch.Tensor) -> torch.Tensor:
     # Step 4: Cumulative weight = cumsum(gaps / survivors)
     w_sorted = torch.cumsum(gaps / survivors, dim=0)
 
-    # Scale by G so the 1/G in the policy gradient loss doesn't shrink the gradient
-    w_sorted = w_sorted * G
+    # NOTE: no *G scaling (removed 2026-06-26). The earlier *G was inert under
+    # AdamW — Adam's second-moment normalization absorbs any uniform gradient
+    # scaling, so *G did not change the effective LR — and it is absent from
+    # reference maxrl (compute_maxrl_outcome_advantage = (r-mean)/mean). Dropping
+    # it puts gos/rloo/grpo on a common scale so grad_clip acts uniformly.
 
     # Step 5: Mean-center
     w_centered = w_sorted - w_sorted.mean()
@@ -80,22 +84,6 @@ def maxrl_unnormalized_advantage(rewards: torch.Tensor) -> torch.Tensor:
     advantages[sort_indices] = w_centered
 
     return advantages
-
-
-def maxrl_normalized_advantage(
-    rewards: torch.Tensor, eps: float = 1e-8
-) -> torch.Tensor:
-    """
-    Continuous MaxRL gap-over-survivors, mean-centered, then std-normalized.
-
-    Identical to unnormalized, but divided by std after centering.
-    Dampens signal on prompts with high reward variance.
-    """
-    centered = maxrl_unnormalized_advantage(rewards)
-    std = centered.std(unbiased=False)
-    if std < eps:
-        return torch.zeros_like(centered)
-    return centered / (std + eps)
 
 
 def reinforce_baseline_advantage(rewards: torch.Tensor) -> torch.Tensor:
@@ -114,16 +102,15 @@ def rloo_advantage(rewards: torch.Tensor) -> torch.Tensor:
     A_i = r_i - (1/(G-1)) * sum_{j != i} r_j
         = G/(G-1) * (r_i - mean(r))
 
-    Scale by G so the 1/G in the policy gradient loss doesn't shrink the
-    gradient (same correction as maxrl_unnormalized_advantage line 73).
-
-    For G=1, returns zeros (no leave-one-out possible).
+    For G=1, returns zeros (no leave-one-out possible). The earlier *G scaling
+    was removed 2026-06-26 (inert under AdamW; absent from reference maxrl) so
+    this is now the standard leave-one-out advantage.
     """
     G = rewards.numel()
     if G <= 1:
         return torch.zeros_like(rewards)
     mean = rewards.mean()
-    return (G / (G - 1)) * (rewards - mean) * G
+    return (G / (G - 1)) * (rewards - mean)
 
 
 def binary_maxrl_advantage(rewards: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
@@ -135,12 +122,11 @@ def binary_maxrl_advantage(rewards: torch.Tensor, eps: float = 1e-6) -> torch.Te
       success (r_i=1): (1 - C/G) / (C/G) = (G-C)/C
       failure (r_i=0): -(C/G) / (C/G)    = -1
 
-    This is algebraically identical to GOS (maxrl_unnormalized_advantage)
-    on binary rewards. This identity is the binary-recovery proposition
-    in the paper.
+    This is algebraically identical to GOS (gos_advantage) on binary
+    rewards. This identity is the binary-recovery proposition in the paper.
 
     Included as a baseline (Tajwar et al.), not as our method. GOS
-    (maxrl_unnormalized_advantage) is the paper's contribution.
+    (gos_advantage) is the paper's contribution.
     """
     G = rewards.numel()
     if G <= 1:
@@ -149,53 +135,6 @@ def binary_maxrl_advantage(rewards: torch.Tensor, eps: float = 1e-6) -> torch.Te
     if mean < eps:
         return torch.zeros_like(rewards)
     return (rewards - mean) / mean
-
-
-def dg_advantage_per_token(
-    rewards: torch.Tensor,           # [G] per-rollout scalar reward
-    old_log_probs: torch.Tensor,     # [G, T] per-token log π_old
-    response_mask: torch.Tensor,     # [G, T]
-    eta: float = 1.0,
-    surprisal_clip: float = 20.0,
-) -> torch.Tensor:
-    """
-    Delightful Policy Gradient per-token advantage (Osband 2026, arXiv:2603.14608).
-
-    U_tau  = r_tau - mean(r_group)                       # REINFORCE baseline, [G]
-    ell_t  = clip(-log pi_old(a_t), 0, surprisal_clip)   # surprisal, [G, T]
-    w_t    = sigmoid(U_tau * ell_t / eta)                # delight gate, [G, T]
-    coef_t = w_t * U_tau                                 # effective coef, [G, T]
-
-    Args:
-        rewards: [G] scalar reward per rollout
-        old_log_probs: [G, T] log pi_old(a_t) at each response token
-        response_mask: [G, T] 1 for response tokens, 0 for pads
-        eta: gate temperature (paper uses 1.0)
-        surprisal_clip: max |log pi| before clipping, in nats
-
-    Returns:
-        advantages: [G, T], already masked (pads are 0)
-    """
-    G, T = old_log_probs.shape
-    if G <= 1:
-        return torch.zeros(G, T, dtype=rewards.dtype, device=rewards.device)
-
-    # Per-rollout advantage: mean-centered, no std. [G]
-    U = rewards - rewards.mean()
-
-    # Surprisal from OLD log-probs, clipped. [G, T]
-    # -log pi in [0, +inf); clip at 20 nats => pi >= ~2e-9.
-    ell = (-old_log_probs).clamp(min=0.0, max=surprisal_clip)
-    ell = ell * response_mask  # zero out pad positions
-
-    # Delight and gate, per-token. [G, T]
-    U_bcast = U.unsqueeze(-1)          # [G, 1]
-    chi = U_bcast * ell                 # [G, T]
-    w = torch.sigmoid(chi / eta)        # [G, T], in (0, 1)
-
-    coef = w * U_bcast                  # [G, T]
-
-    return coef * response_mask
 
 
 # ---------------------------------------------------------------------------

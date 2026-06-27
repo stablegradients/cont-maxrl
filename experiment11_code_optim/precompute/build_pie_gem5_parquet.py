@@ -40,8 +40,12 @@ HF_DATASET = "stablegradients/pie-gem5-bysrc"
 # bgtv is canonical for the gem5 pipeline (bgmo /work hit its 1TB quota 2026-06-13)
 DEFAULT_OUTPUT_ROOT = Path("/work/nvme/bgtv/sramasubramanian/pie_gem5_parquet")
 
-# Must stay identical to build_pie_parquet.py / sft/cold_start_sft.py — the
-# "### Optimized Version:" anchor is what pie_reward_fn.extract_code parses.
+# 'minimal' (legacy): persona + minimal instruction + the anchor PREFILLED at the
+# end of the user turn (model writes code directly, no reasoning room). Used by the
+# 1.7B fullbatch run. 'p3' (step-by-step, pre-RL-recommended): elicits reasoning
+# first, then REQUESTS the "### Optimized Version:" anchor (not prefilled) so the
+# model writes a CoT before the program. Both anchor on "### Optimized Version:",
+# which is what pie_reward_fn.extract_code parses.
 PROMPT_TEMPLATE = (
     "You are a C++ optimization expert. Below is a working C++ program. "
     "Rewrite it to run faster while producing identical output for all valid "
@@ -52,8 +56,21 @@ PROMPT_TEMPLATE = (
     "### Optimized Version:\n"
 )
 
+P3_PROMPT_TEMPLATE = (
+    "You are a C++ optimization expert. Below is a working C++ program. Think step by step "
+    "about how to make it run faster — its time complexity, the main bottlenecks, the data "
+    "structures and I/O — and then write the optimized program. It must produce identical "
+    "output for every valid input.\n\n"
+    "### Slow Version:\n"
+    "```cpp\n{src_code}\n```\n\n"
+    "After your reasoning, give your final program under a line that reads exactly "
+    "`### Optimized Version:`, as a single ```cpp code block."
+)
 
-def _format_record(row, split: str) -> dict:
+PROMPT_TEMPLATES = {"minimal": PROMPT_TEMPLATE, "p3": P3_PROMPT_TEMPLATE}
+
+
+def _format_record(row, split: str, template: str = PROMPT_TEMPLATE) -> dict:
     usable = [int(c) for c in json.loads(row["usable_case_ids"])]
     ticks_all = json.loads(row["gem5_src_per_tc_ticks"])
     ticks = {str(c): int(ticks_all[str(c)]) for c in usable}
@@ -61,7 +78,7 @@ def _format_record(row, split: str) -> dict:
         "data_source": "pie",
         "prompt": [
             {"role": "user",
-             "content": PROMPT_TEMPLATE.format(src_code=row["src_code"])},
+             "content": template.format(src_code=row["src_code"])},
         ],
         "reward_model": {
             "ground_truth": json.dumps({
@@ -75,12 +92,13 @@ def _format_record(row, split: str) -> dict:
     }
 
 
-def build_split(ds, split: str, tokenizer, max_prompt_tokens: int):
+def build_split(ds, split: str, tokenizer, max_prompt_tokens: int,
+                template: str = PROMPT_TEMPLATE):
     kept, n_overlong, n_bad = [], 0, 0
     overlong_examples = []
     for row in ds:
         try:
-            rec = _format_record(row, split)
+            rec = _format_record(row, split, template)
         except (KeyError, TypeError, ValueError) as e:
             n_bad += 1
             print(f"  [warn] {split} row {row.get('problem_id')}/{row.get('src_id')}: "
@@ -115,8 +133,13 @@ def main() -> int:
                     help="Prompt-length filter tokenizer (bare Qwen3 repo name "
                          "IS the instruct model).")
     ap.add_argument("--max_prompt_tokens", type=int, default=6144)
+    ap.add_argument("--prompt", choices=list(PROMPT_TEMPLATES), default="minimal",
+                    help="prompt template: 'minimal' (legacy 1.7B run) or 'p3' "
+                         "(step-by-step, pre-RL-recommended for the 4B run)")
     args = ap.parse_args()
     output_root = Path(args.output_root)
+    template = PROMPT_TEMPLATES[args.prompt]
+    print(f"[prompt] using '{args.prompt}' template ({len(template)} chars)")
 
     print(f"[hf] loading {args.hf_dataset} ...")
     from datasets import load_dataset
@@ -134,7 +157,7 @@ def main() -> int:
         ("test", "test", "pie_gem5_test.parquet"),
     ]:
         records, stats = build_split(dsd[hf_split], split, tokenizer,
-                                     args.max_prompt_tokens)
+                                     args.max_prompt_tokens, template)
         out_path = output_root / out_name
         write_parquet(records, out_path)
         summary[split] = {**stats, "out_path": str(out_path)}
@@ -157,7 +180,7 @@ def main() -> int:
 
     with open(output_root / "MANIFEST_GEM5.json", "w") as f:
         json.dump({"schema_version": 1, "hf_dataset": args.hf_dataset,
-                   "tokenizer": args.tokenizer,
+                   "tokenizer": args.tokenizer, "prompt_variant": args.prompt,
                    "max_prompt_tokens": args.max_prompt_tokens,
                    "reward_engine": "experiment11_code_optim/reward/gem5_reward.py",
                    "splits": summary}, f, indent=2)

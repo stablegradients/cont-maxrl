@@ -10,9 +10,10 @@
 # reaper exits when all three are resolved (or after a deadline).
 #   Usage: reap_1hz.sh [SEED]
 SEED="${1:-0}"
+MTAG="${PIE_MODEL_TAG:-qwen3_1.7b}"   # must match the spray/launcher jobname + lock tag
 LOCKROOT="/work/nvme/bgtv/sramasubramanian/cont-maxrl/locks"
 ADVS=(grpo gos rloo)
-NAMES="pie_fb_grpo_s${SEED},pie_fb_gos_s${SEED},pie_fb_rloo_s${SEED}"
+NAMES="pie_fb_${MTAG}_grpo_s${SEED},pie_fb_${MTAG}_gos_s${SEED},pie_fb_${MTAG}_rloo_s${SEED}"
 deadline=$(( $(date +%s) + 12*3600 ))    # stop after 12h even if nodes never free
 declare -A DONE
 echo "$(date +%T) reaper start (seed=${SEED}); watching ${NAMES}"
@@ -21,8 +22,8 @@ while :; do
   mapfile -t ROWS < <(squeue -u "${USER}" -h -n "${NAMES}" -o "%i|%t|%E|%j" 2>/dev/null)
   for adv in "${ADVS[@]}"; do
     [ -n "${DONE[$adv]:-}" ] && continue
-    name="pie_fb_${adv}_s${SEED}"
-    owner="$(cat "${LOCKROOT}/qwen3_1.7b_pie_gem5_fb_${adv}_g16_bs64_s${SEED}.lock/owner" 2>/dev/null || true)"
+    name="pie_fb_${MTAG}_${adv}_s${SEED}"
+    owner="$(cat "${LOCKROOT}/${MTAG}_pie_gem5_fb_${adv}_g16_bs64_s${SEED}.lock/owner" 2>/dev/null || true)"
     mine=(); for r in "${ROWS[@]}"; do [ "${r##*|}" = "${name}" ] && mine+=("$r"); done
     if [ -z "${owner}" ]; then
       # no elected survivor yet. If <=1 of this name remains and none queued, done.

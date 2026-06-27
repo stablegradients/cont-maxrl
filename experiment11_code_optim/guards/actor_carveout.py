@@ -133,8 +133,16 @@ def install_actor_carveout_hook() -> bool:
             global_step = int(getattr(self, "global_steps", 0))
         except (TypeError, ValueError):
             global_step = 0
-        # Step-interval filter: only carve actor-only snapshots every N steps.
-        if carve_every > 1 and (global_step % carve_every) != 0:
+        # Step-interval filter: carve actor-only snapshots every N steps, AND
+        # ALWAYS carve the final step (== total_training_steps) so the most-
+        # trained checkpoint is preserved for the post-hoc best@K eval even when
+        # total_training_steps is not a multiple of carve_every (e.g. 2570 % 250).
+        try:
+            total_steps = int(self.config.trainer.total_training_steps)
+        except (AttributeError, TypeError, ValueError):
+            total_steps = -1
+        is_last = total_steps > 0 and global_step >= total_steps
+        if carve_every > 1 and (global_step % carve_every) != 0 and not is_last:
             return
         local_path = os.path.join(
             self.config.trainer.default_local_dir,

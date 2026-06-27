@@ -134,7 +134,7 @@ def generate_completions(model_path: str, prompts: list[str], n_completions: int
         trust_remote_code=True,
         tensor_parallel_size=tensor_parallel_size,
         gpu_memory_utilization=0.9,
-        max_model_len=max_tokens + 1024,
+        max_model_len=max_tokens + 2816,  # headroom for the up-to-2560-token PIE source-laden prompt (+256 slack)
         enforce_eager=True,
     )
     sp = SamplingParams(
