@@ -739,10 +739,6 @@ def _split_group_aligned(items: list, n_shards: int, group_size: int) -> list[li
     return [items[i:i + chunk] for i in range(0, len(items), chunk)]
 
 
-def _grade_shard_fn(shard, kwargs):  # runs (possibly) on a remote node
-    return compute_scores_batch(shard, _local_only=True, **kwargs)
-
-
 def _distribute_scores_batch(reward_inputs: list[dict], kwargs: dict):
     """Fan the batch out across live Ray nodes; return index-aligned results, or
     None to signal 'fall back to local'."""
@@ -763,7 +759,15 @@ def _distribute_scores_batch(reward_inputs: list[dict], kwargs: dict):
         child_kwargs = dict(kwargs)
         child_kwargs.update({k: getattr(cfg, k) for k in _CFG_KEYS
                              if getattr(cfg, k, None) is not None})
-        remote_fn = ray.remote(num_cpus=1)(_grade_shard_fn)
+        # The shard task MUST be a NESTED function so cloudpickle serializes it BY
+        # VALUE. verl exec's this reward file as module 'custom_module', which is not
+        # importable on remote Ray workers, so a module-level function fails with
+        # ModuleNotFoundError: custom_module. The body re-imports the reward by its
+        # REAL importable path (on PYTHONPATH on every node) and grades the shard.
+        def _shard_task(shard, kw):
+            from experiment11_code_optim.reward import gem5_reward as _g
+            return _g.compute_scores_batch(shard, _local_only=True, **kw)
+        remote_fn = ray.remote(num_cpus=1)(_shard_task)
         futs = []
         for shard, node in zip(shards, nodes):
             if not shard:
