@@ -765,18 +765,36 @@ def _distribute_scores_batch(reward_inputs: list[dict], kwargs: dict):
         # ModuleNotFoundError: custom_module. The body re-imports the reward by its
         # REAL importable path (on PYTHONPATH on every node) and grades the shard.
         def _shard_task(shard, kw):
+            import ray as _ray
             from experiment11_code_optim.reward import gem5_reward as _g
-            return _g.compute_scores_batch(shard, _local_only=True, **kw)
+            res = _g.compute_scores_batch(shard, _local_only=True, **kw)
+            return {"node": _ray.get_runtime_context().get_node_id(), "res": res}
         remote_fn = ray.remote(num_cpus=1)(_shard_task)
-        futs = []
+        futs, sizes, targets = [], [], []
         for shard, node in zip(shards, nodes):
             if not shard:
                 continue
             strat = NodeAffinitySchedulingStrategy(node_id=node["NodeID"], soft=True)
             futs.append(remote_fn.options(scheduling_strategy=strat).remote(shard, child_kwargs))
-        out: list = []
+            sizes.append(len(shard)); targets.append(node["NodeID"][:8])
+        # Observability: record TRUE per-shard completion time (ray.wait, in finish order)
+        # so a gem5 straggler shard is visible, plus actual-vs-target node placement so
+        # head-node packing under soft affinity is visible. Logged on the SUCCESS path so
+        # the production run shows the reward genuinely fanned out (silent success hid this).
+        t0 = time.time(); idx = {f: i for i, f in enumerate(futs)}; comp = {}; pending = list(futs)
+        while pending:
+            done, pending = ray.wait(pending, num_returns=1)
+            for d in done:
+                comp[idx[d]] = round(time.time() - t0, 1)
+        out: list = []; actual = []
         for f in futs:                       # gather in shard order -> index-aligned
-            out.extend(ray.get(f))
+            r = ray.get(f); out.extend(r["res"]); actual.append(r["node"][:8])
+        per_shard = [comp.get(i) for i in range(len(futs))]
+        n_on_target = sum(1 for a, t in zip(actual, targets) if a == t)
+        print(f"[dist-reward] {len(reward_inputs)} rollouts -> {len(futs)} shard(s) over "
+              f"{len(nodes)} node(s); sizes={sizes} done_s={per_shard} "
+              f"wall={max(per_shard) if per_shard else 0}s on_target={n_on_target}/{len(futs)} "
+              f"distinct_nodes={len(set(actual))}", file=sys.stderr, flush=True)
         if len(out) != len(reward_inputs):    # shape sanity; never return a mismatched batch
             print(f"[dist-reward] shard count {len(out)} != {len(reward_inputs)}; local fallback",
                   file=sys.stderr)
